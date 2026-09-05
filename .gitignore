@@ -1,0 +1,3 @@
+.codebuddy/
+__pycache__/
+*.pyc
