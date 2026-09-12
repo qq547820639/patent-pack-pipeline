@@ -61,8 +61,8 @@
 | **kimi-word** | docx 创建/编辑/修复 | Word 文档创建、原位编辑、批注修订、格式校验修复（表格模板填充法的首选工具） |
 | **kimi-pdf** | PDF 产物 | PDF 报告/论文创建与处理（公式、图表、引用、合并拆分） |
 | **kimi-excel** | xlsx/csv 产物 | 电子表格创建分析、公式驱动、图表、条件格式（BOM 成本表/考核指标表/预算表的首选） |
-| **scholar-sidekick-mcp**（外部 MCP：mlava/scholar-sidekick-mcp，2026-09-04 吸收） | 论文参考文献 | 标识符（DOI/PMID/arXiv 等）→CSL JSON、10000+ 引文样式（含 GB/T 7714 类）格式化、批量导出 BibTeX/RIS | 安装 `npx -y scholar-sidekick-mcp`；不可达时用文献底稿的手工著录格式 |
-| **viznoir**（外部 MCP：kimimgo/viznoir，2026-09-04 吸收，备用） | EVT 仿真可视化 | CFD/FEA/SPH 科学可视化（OpenFOAM/VTK/CGNS 渲染/切片/云图/动画） | 流场/结构仿真可视化需求出现时才启用 |
+| **scholar-sidekick-mcp**（外部 MCP：mlava/scholar-sidekick-mcp，2026-09-04 吸收） | 论文参考文献 | 标识符（DOI/PMID/arXiv 等）→CSL JSON、10000+ 引文样式（含 GB/T 7714 类）格式化、批量导出 BibTeX/RIS。安装 `npx -y scholar-sidekick-mcp`；不可达时用文献底稿的手工著录格式 |
+| **viznoir**（外部 MCP：kimimgo/viznoir，2026-09-04 吸收，备用） | EVT 仿真可视化 | CFD/FEA/SPH 科学可视化（OpenFOAM/VTK/CGNS 渲染/切片/云图/动画）；流场/结构仿真可视化需求出现时才启用 |
 
 ## 6. 外部技能库：scientific-agent-skills（K-Dense，163 技能，2026-09-04 评估）
 

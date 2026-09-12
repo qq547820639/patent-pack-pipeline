@@ -33,3 +33,12 @@ pandoc 中文路径与 locale｜图片像素扫描｜zip 同步核验｜脆文�
 ## 6. matplotlib 中文字体
 - 环境已配好中文字体；**禁止**改 rcParams 的 font.family/font.sans-serif/axes.unicode_minus。
 - 个别环境需逐文本 FontProperties 指定 Noto Sans CJK——先试默认，缺字形再局部指定。
+
+## 平台级执行新增陷阱（步行康复平台项目实测）
+
+1. **pytest 环境分裂**：不同 python 版本各自有/无 pytest 与科学计算库（实测 pytest 在 3.11 但 pandas 在 3.12）；安装后偶发丢失需重装；**各测试目录必须分开跑**——同名模块（如多个 `synthetic_cohort.py`）同会话收集会撞名失败（非代码缺陷）。
+2. **共享挂载文件系统竞态**：同名文件反复创建/删除会被外部 watcher 同步删除（实测报告文件写入 1 秒内消失）→ 一律 per-run 时间戳文件名 + 容错重写；批量产物连续 3 轮验证稳定后再交付。
+3. **合并单元格占位计数虚高**：python-docx 对合并单元格重复计数（实测【待团队补充】原始计数 370 次，去重后仅 8 组）→ 占位管理以"组"为单位，不以字符串出现次数。
+4. **老 .doc 官方模板**：先 `soffice --headless --convert-to docx` 转换再 python-docx 原位填充；转换后必须做 表格数/固定文本逐字/样式名/转 PDF 逐页目检 四项抽查（详见 references/grant-application.md §4）。
+5. **文献署名核实**：PMID/DOI 正确但作者署名可能误记（实测 Evidence Table 将 Hiengkaew 2012 误署名 Liaw，被论文产线核查发现）→ 著录信息引用前必须联网核实署名，著录与查新结论分离原则不变。
+6. **质量门脚本自身缺陷**：自动判定脚本的正则/传参错误会误报 FAIL（实测 Q3 取错列、Q6 pytest 多目标传参）→ 门脚本也要被验证，修复留痕。
