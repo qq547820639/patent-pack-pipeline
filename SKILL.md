@@ -1,7 +1,7 @@
 ---
 name: patent-pack-pipeline
 description: >
-  产品专利交付包全流程流水线：从工程素材到可提交代理机构的全套专利文书。覆盖技术特征提取、现有技术排查（含 FTO）、参数矛盾/缺失处置、专利地图布局、技术交底书撰写（发明/实用新型/外观设计）、代码绘制专利线条附图、CNIPA 申请文件组装、多轮独立审查、缺失机构的设计补全（运动学/结构/电气）、EVT 分析级工程验证（含公开数据集实证第三验证层）、法规适用性分析、冲突裁决与打包交付；查新方法纪律（两段式召回-分类号收口+保底规则，吸收自 handsomestWei/patent-disclosure-skill）与案件边界收敛 intake；含配套论文产线（专利+论文双产出，三层信息分离：公开数据集验证/合成样本验证/预测口径）、格式零差异申报文书重构（叙述表单+官方表格模板填充法+经费勾稽）、执行就绪包模式（测试 SOP/拿来即签模板/单页填报表/申报直交通道）与外部技能插件编排图谱（scholar/pubmed/materials_project/igo_open_data/sci-paper-cn/research-writer/research-paper-refiner/research-advisor/deep-probe/weighted-scoring/chart-gen 等的阶段化调用与回退）。当用户要求为产品申请专利、制作技术交底书/专利交付包/申报书、做专利挖掘布局、进行现有技术/FTO 排查、要求"设计补全缺失机构/执行 EVT 验证/法规评审"、专利论文同步产出、或把申报材料做到"填名即报"程度时使用。适用于消费/工业硬件产品（含外骨骼、背带、机电产品、训练机器人）与科技项目申报。不适用于纯软件方法专利的代理撰写、正式法律意见或向 CNIPA 的实际提交动作。
+  产品专利交付包全流程流水线：从工程素材到可提交代理机构的全套专利文书。覆盖技术特征提取、现有技术排查（含 FTO）、参数矛盾/缺失处置、专利地图布局、技术交底书撰写（发明/实用新型/外观设计）、代码绘制专利线条附图、CNIPA 申请文件组装、多轮独立审查、缺失机构的设计补全（运动学/结构/电气）、EVT 分析级工程验证（含公开数据集实证第三验证层）、法规适用性分析、冲突裁决与打包交付；查新方法纪律（两段式召回-分类号收口+保底规则，吸收自 handsomestWei/patent-disclosure-skill）与案件边界收敛 intake；含配套论文产线（专利+论文双产出，三层信息分离：公开数据集验证/合成样本验证/预测口径）、格式零差异申报文书重构（叙述表单+官方表格模板填充法+经费勾稽）、执行就绪包模式（测试 SOP/拿来即签模板/单页填报表/申报直交通道）、外部技能插件编排图谱（scholar/pubmed/materials_project/igo_open_data/sci-paper-cn/research-writer/research-paper-refiner/research-advisor/deep-probe/weighted-scoring/chart-gen 等的阶段化调用与回退）；平台级数字优先研发执行（约束转计算、自动质量门、D/R 证据分级、数字孪生与虚拟临床、鲁棒性与消融、线下验证就绪包）与科技项目申报交付模式（方向评分模型、多课题防换皮、官方模板格式零差异填充、填名即报执行就绪包）。当用户要求为产品申请专利、制作技术交底书/专利交付包/申报书、做专利挖掘布局、进行现有技术/FTO 排查、要求"设计补全缺失机构/执行 EVT 验证/法规评审"、专利论文同步产出、把申报材料做到"填名即报"程度、或接到"能数字化的全部数字化"的平台级研发执行指令（含虚拟临床/数字孪生/线下验证包）时使用。适用于消费/工业硬件产品（含外骨骼、背带、机电产品、训练机器人）与科技项目申报。不适用于纯软件方法专利的代理撰写、正式法律意见或向 CNIPA 的实际提交动作。
 ---
 
 # 专利交付包流水线（patent-pack-pipeline）
@@ -31,6 +31,8 @@ S0 素材评估与渲染 → S1 技术特征提取 → S2 现有技术排查（�
 - 设计补全方法与 EVT/法规评审规程：读 `references/design-completion.md` 与 `references/evt-and-regulatory.md`。
 - **配套论文产线**（专利+论文双产出：骨架稿/完整稿预测口径决策、论文结构、时序铁律）：读 `references/companion-papers.md`。
 - 工具与环境陷阱（pandoc locale、像素扫描、修订波后图片复扫、zip 同步时机、脆文件系统对策）：读 `references/tooling-pitfalls.md`，并优先使用 `scripts/` 下已验证脚本。
+- **平台级数字优先执行**（质量门/证据分级/决策比较/数字孪生/虚拟临床/鲁棒性消融/线下验证包）：读 `references/master-execution.md`。
+- **科技项目申报交付**（选题评分/防换皮/模板填充/经费勾稽/执行就绪包）：读 `references/grant-application.md`。
 - **外部技能与插件编排**（scholar/pubmed/materials_project/igo_open_data/sci-paper-cn/research-writer/research-paper-refiner/research-advisor/deep-probe/weighted-scoring/chart-gen/image_generation/musepool/kimi-word/kimi-pdf/kimi-excel）：读 `references/tool-orchestration.md`——各阶段调用谁、可用性探测与回退路径、渠道分层纪律。
 
 ## 关键操作纪律（低自由度，照做）
