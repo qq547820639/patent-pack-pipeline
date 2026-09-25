@@ -151,10 +151,16 @@ def main():
     ap.add_argument('--search-report', help='检索报告 .md：提供 R5 的已核验公开号集合')
     args = ap.parse_args()
 
+    if args.all and not os.path.isdir(args.targets[0]):
+        print(f'--all 需要目录，实得不是目录: {args.targets[0]}（未做任何判定）')
+        sys.exit(2)
     paths = gather_files(args)
-    if not paths or any(not os.path.isfile(p) for p in paths):
-        missing = [p for p in paths if not os.path.isfile(p)] or paths
-        print('输入不可用，未做任何判定:', ', '.join(missing))
+    bad = [p for p in paths if not os.path.isfile(p)]
+    if bad:
+        print('输入不可用，未做任何判定: ' + ', '.join(bad))
+        sys.exit(2)
+    if not paths:
+        print(f'未找到待检文件（--all 目录下无 .md？）: {args.targets[0]}（未做任何判定）')
         sys.exit(2)
 
     allowed = None

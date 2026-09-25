@@ -409,7 +409,40 @@ def test_check_iron_rules():
         # 输入不可用 → rc=2，不得静默判绿
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '不存在.md')])
         assert_(r.returncode == 2 and '未做任何判定' in r.stdout, '文件缺失未 fail-closed', r)
-    print(f'PASS check_iron_rules（R1–R5 各自成对必红必绿 + 三态 + rc=2；摘要 {n_ok}/{n_over} 字）')
+    # --all 整包模式（README/SKILL 都写了它，就必须有断言消费，否则是"文档宣称未实测"）
+    with tempfile.TemporaryDirectory() as d:
+        for sub in ('01_交底书', '02_申请文件'):
+            os.makedirs(os.path.join(d, sub))
+        open(os.path.join(d, '检索报告.md'), 'w', encoding='utf8').write(
+            '# 检索报告\nCN110404188A。\n')
+        good = _iron()
+        p1 = os.path.join(d, '01_交底书', '发明.md')
+        p2 = os.path.join(d, '02_申请文件', '实用新型.md')
+        open(p1, 'w', encoding='utf8').write(good)
+        open(p2, 'w', encoding='utf8').write(good)
+        r = run([PY, f'{S}/check_iron_rules.py', d, '--all',
+                 '--search-report', os.path.join(d, '检索报告.md')])
+        assert_(r.returncode == 0 and '合计违规 0' in r.stdout,
+                '--all 下合规整包未全绿', r)
+        assert_(p1 in r.stdout and p2 in r.stdout, '--all 未递归到子目录里的两份文书', r)
+
+        # 违规放在第二层子目录：只有真递归才会被抓到（只扫顶层的写法会漏）
+        open(p2, 'w', encoding='utf8').write(_iron(bg=IRON_OK_BG + '\n本方案填补空白。'))
+        r = run([PY, f'{S}/check_iron_rules.py', d, '--all',
+                 '--search-report', os.path.join(d, '检索报告.md')])
+        assert_(r.returncode == 1 and '实用新型.md' in r.stdout and 'R1' in r.stdout,
+                '--all 未抓到子目录内的违规', r)
+
+        # --all 误用（指到文件）与空目录：rc=2 且必须说出原因，不许只给空列表
+        r = run([PY, f'{S}/check_iron_rules.py', p1, '--all'])
+        assert_(r.returncode == 2 and '--all 需要目录' in r.stdout,
+                '--all 指向非目录时未说明原因', r)
+        with tempfile.TemporaryDirectory() as empty:
+            r = run([PY, f'{S}/check_iron_rules.py', empty, '--all'])
+            assert_(r.returncode == 2 and '未找到待检文件' in r.stdout,
+                    '--all 空目录未说明原因', r)
+    print(f'PASS check_iron_rules（R1–R5 各自成对必红必绿 + 三态 + rc=2 + --all 四档；'
+          f'摘要 {n_ok}/{n_over} 字）')
 
 
 def test_docs_scripts_contract():
