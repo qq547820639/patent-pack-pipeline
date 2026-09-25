@@ -107,18 +107,23 @@
 
 ## 6. 脚本与产物校验
 
-四个已验证脚本（自带 `tests/` 冒烟测试，兼作环境自检）：
+五个已验证脚本（自带 `tests/` 冒烟测试，兼作环境自检）：
 
 ```bash
 python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 生成交付包五段骨架
+python3 scripts/check_iron_rules.py <文书.md ...> [--search-report 检索报告.md]  # 铁律门禁 R1–R5
+python3 scripts/check_iron_rules.py <交付包目录> --all             # 递归检整个包下所有 .md
 python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白 / C3 docx 图数一致
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
 
-退出码：
+退出码（三个判据类脚本统一约定）：
+- `check_iron_rules.py`：0 合规 / 1 存在违规 / 2 输入不可用（未做任何判定）。判据 R1 绝对化措辞、R2 占位符格式、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告。
 - `check_figures.py`：0 合规 / 1 任一判据触发（C1、C2、C3 都计入，图数不一致不再只打印放行）。
 - `regen_docx.py`：0 全部成功 / 1 有文件转换失败 / 2 前置依赖（pandoc 或 python-docx）缺失——一个文件都没转，属环境问题，不是转换失败。
+
+铁律门禁只覆盖**可机械判定**的部分；「是否真的作新颖性声明」「数值有无出处」这类语义判断仍归独立审查轮，脚本不冒充结论。缺 `--search-report` 时 R5 报"未核"，既不折成违规也不折成合规。
 
 关键操作纪律：
 
@@ -190,7 +195,7 @@ patent-pack-pipeline/
 ├── SKILL.md          # AI 执行手册：触发词、铁律、流程总览、操作纪律
 ├── README.md         # 本文件
 ├── references/       # 分阶段详细规程与模板（见 §5）
-├── scripts/          # 4 个已验证脚本
+├── scripts/          # 5 个已验证脚本
 └── tests/            # 脚本冒烟测试
 ```
 

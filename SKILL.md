@@ -42,3 +42,4 @@ S0 素材评估与渲染 → S1 技术特征提取 → S2 现有技术排查（�
 3. **docx 转换**：一律 `LC_ALL=C.utf8 LANG=C.utf8 pandoc`（POSIX locale 丢中文路径图片）；批量转换与验证用 `scripts/regen_docx.py`（缺 pandoc 或 python-docx 时 rc=2 打印安装指引且不转换，勿误判为文件转换失败；rc=1 才是文件级失败）；转后必须 python-docx 验证+`unzip -l` 核对媒体数=附图数。
 4. **打包**：包结构固定为 `README.md + 01_交底书/ + 02_申请文件/ + 03_设计补全/ + 04_EVT验证/ + 05_法规与裁决/`（可用 `scripts/new_product_package.py` 生成骨架）；zip 重建后必须做"目录↔zip 全文件比对"（`scripts/rebuild_package.py` 自带）；脆文件系统环境下禁止长链 glob 拷贝，逐目录拷贝+哈希核验。
 5. **EVT 诚实边界**：分析/仿真验证可执行；物理实测严禁编造——输出测试规程+预测值+判据+"待物理实测"；投产总则逐字写入报告："任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据"。
+6. **铁律门禁实跑**：S5/S7 每轮审查**前后**各跑一次 `scripts/check_iron_rules.py <文书.md> --search-report <检索报告.md>`（整包复检用 `scripts/check_iron_rules.py <交付包目录> --all`；R1 绝对化措辞 / R2 占位符格式 / R3 权文内占位注释 / R4 摘要含标点字数 / R5 背景技术公开号须属于检索报告），rc=1 即带 file:line 退回修订，不接受"文档宣称已改"。脚本只覆盖可机械判定部分；语义层判断（是否真为新颖性声明、数值有无出处）仍由独立 reviewer 承担，不得用门禁绿冒充。缺检索报告时 R5 报"未核"，既不折成违规也不折成合规。

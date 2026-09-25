@@ -4,7 +4,7 @@
 同时兼作环境自检：打印各依赖是否就绪、缺失影响哪个环节。
 """
 import importlib.util
-import os, sys, tempfile, subprocess, zipfile, stat
+import os, re, sys, tempfile, subprocess, zipfile, stat
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -312,9 +312,160 @@ def test_check_figures_media_count():
     print('PASS check_figures C3（丢图必红 / 齐全必绿 / 无 figures 不误伤）')
 
 
+IRON_TMPL = """# 专利技术交底书
+
+## 2. 背景技术
+{bg}
+
+## 6. 权利要求建议稿
+1. 一种腰部助力装置，包括躯干框架与髋关节驱动单元。
+{claims}
+
+## 7. 摘要建议稿
+{abstract}
+
+## 8. 检索关键词与 IPC 分类建议
+A61F5/00
+"""
+IRON_OK_BG = '现有技术 CN110404188A 公开了一种髋关节助力结构，与本案的区别在于载荷传递路径。'
+IRON_OK_ABSTRACT = '本发明公开一种腰部助力外骨骼装置，涉及可穿戴设备技术领域，包括躯干框架与髋关节驱动单元。'
+
+
+def _iron(bg=IRON_OK_BG, claims='', abstract=IRON_OK_ABSTRACT):
+    return IRON_TMPL.format(bg=bg, claims=claims, abstract=abstract)
+
+
+def test_check_iron_rules():
+    """铁律门禁 R1–R5：每条判据各自成对（注入即红 / 合规必绿），外加三态与输入不可用档。"""
+    def gate(d, report=True, extra=None):
+        cmd = [PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md')]
+        if report:
+            cmd += ['--search-report', os.path.join(d, '检索报告.md')]
+        if extra:
+            cmd += extra
+        return run(cmd)
+
+    def write(d, **kw):
+        open(os.path.join(d, '交底书.md'), 'w', encoding='utf8').write(_iron(**kw))
+
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, '检索报告.md'), 'w', encoding='utf8').write(
+            '# 检索报告\n已核验条目：CN110404188A。\n')
+
+        # 基线：完全合规的稿件必须整条门禁放行（两条以上互斥判据同时红=永久红灯）
+        write(d)
+        r = gate(d)
+        assert_(r.returncode == 0 and '违规 0' in r.stdout, '合规稿件未全绿', r)
+
+        # R1 绝对化措辞
+        write(d, bg=IRON_OK_BG + '\n本方案为业界首创。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R1' in r.stdout, 'R1「首创」未触发', r)
+        write(d, bg=IRON_OK_BG + '\n控制模块在首次加载配置表时读取版本号。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R1 把正常语境里的「首次」误判违规', r)
+
+        # R2 占位符格式（含两处不得误伤的合规写法）
+        write(d, bg=IRON_OK_BG + '\n减振件硬度【待确认】。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R2' in r.stdout, 'R2 非法占位未触发', r)
+        write(d, bg=IRON_OK_BG + '\n减振件硬度【待设计方确认：硬度值｜来料批次｜实测通过】。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R2 误判规定的三字段占位写法', r)
+        write(d, bg=IRON_OK_BG + '\n整机质量 4.2kg（设计目标 v3，TBD）。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R2 把 hard-rules §1 允许的 TBD 状态标注判红', r)
+
+        # R3 权文内占位注释（真实形态是括号里带说明文字）
+        write(d, claims='2. 根据权利要求 1 所述装置，其特征是设减振件（待确认：型号）。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R3' in r.stdout, 'R3 权文内占位注释未触发', r)
+        write(d, claims='2. 根据权利要求 1 所述装置，其特征是设减振件。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R3 误判合规从权', r)
+
+        # R4 摘要字数（含标点口径）——两个读数出自同一次计算
+        over = '本发明公开一种腰部助力装置，' * 24
+        n_over = len(re.sub(r'\s', '', over))
+        assert_(n_over > 300, f'必红夹具仅 {n_over} 字，未过 300 限值，夹具失效')
+        write(d, abstract=over)
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R4' in r.stdout and str(n_over) in r.stdout, 'R4 超限未触发', r)
+        n_ok = len(re.sub(r'\s', '', IRON_OK_ABSTRACT))
+        assert_(n_ok <= 300, f'合规夹具 {n_ok} 字已超限')
+        write(d, abstract=IRON_OK_ABSTRACT)
+        r = gate(d)
+        assert_(r.returncode == 0, f'R4 把 {n_ok} 字合规摘要判红', r)
+
+        # R5 公开号须属于检索报告（集合差）
+        write(d, bg=IRON_OK_BG + ' 另见 CN999999999X。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R5' in r.stdout, 'R5 越界公开号未触发', r)
+        write(d, bg=IRON_OK_BG + ' 另见 CN999999999X。')
+        r = gate(d, report=False)
+        assert_(r.returncode == 0 and 'R5 未核' in r.stdout,
+                '缺检索报告时 R5 应报"未核"三态，不得折成违规也不得折成合规', r)
+
+        # 输入不可用 → rc=2，不得静默判绿
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '不存在.md')])
+        assert_(r.returncode == 2 and '未做任何判定' in r.stdout, '文件缺失未 fail-closed', r)
+    print(f'PASS check_iron_rules（R1–R5 各自成对必红必绿 + 三态 + rc=2；摘要 {n_ok}/{n_over} 字）')
+
+
+def test_docs_scripts_contract():
+    """文档↔脚本双向契约：文档不得虚指不存在的判据/脚本/参数，脚本新加的判据与参数也不许漏写文档。
+    单向检查会假绿——只核"文档引用都存在"时，脚本新增一条无人引用的判据照样绿。"""
+    doc_paths = [p for p in ([os.path.join(ROOT, f) for f in ('README.md', 'SKILL.md')]
+                            + [os.path.join(ROOT, 'references', f)
+                               for f in sorted(os.listdir(os.path.join(ROOT, 'references')))
+                               if f.endswith('.md')])
+                 if os.path.isfile(p)]
+    scripts = {f: open(os.path.join(S, f), encoding='utf8').read()
+               for f in sorted(os.listdir(S)) if f.endswith('.py')}
+    # 分母自证：任一侧为空 ⇒ 本检查是空转，必须判红而不是判绿
+    assert_(len(doc_paths) >= 5 and len(scripts) >= 4,
+             f'分母异常（文档 {len(doc_paths)} 篇 / 脚本 {len(scripts)} 个），本检查空转')
+
+    doctxt = '\n'.join(open(p, encoding='utf8').read() for p in doc_paths)
+
+    defined_rules, flags_by_script = set(), {}
+    for name, s in scripts.items():
+        defined_rules |= set(re.findall(r"Finding\(['\"]([RC]\d)", s))
+        defined_rules |= set(re.findall(r'^\s+([RC]\d)\s', s, re.M))
+        flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
+    doc_rules = set(re.findall(r'\b([RC][1-9])\b', doctxt))
+    assert_(doc_rules == defined_rules,
+            f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
+            f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
+
+    doc_scripts = set(re.findall(r'scripts/([A-Za-z0-9_\-]+\.py)', doctxt))
+    assert_(doc_scripts == set(scripts),
+            f'脚本名不对齐 虚指={sorted(doc_scripts - set(scripts))} '
+            f'未被文档提及={sorted(set(scripts) - doc_scripts)}')
+
+    all_flags = set().union(*flags_by_script.values())
+    declared_only = {n: fl for n, fl in flags_by_script.items() if fl}
+    assert_(declared_only, '脚本侧无 argparse 参数声明，参数契约检查空转')
+    # 方向一：与某脚本同行的 --flag 必须属于该脚本（限定作用域，避免误伤 soffice 等外部命令参数）
+    for ln_no, line in enumerate(doctxt.splitlines(), 1):
+        named = [n for n in scripts if f'scripts/{n}' in line]
+        if not named:
+            continue
+        allowed = set().union(*(flags_by_script[n] for n in named))
+        for flag in re.findall(r'(?<![\w-])(--[a-z][a-z\-]{2,})', line):
+            assert_(flag in allowed,
+                    f'文档第 {ln_no} 行给 {named} 挂了未声明的参数 {flag}')
+    # 方向二：脚本声明的每个参数都要至少在文档出现一次
+    for flag in sorted(all_flags):
+        assert_(flag in doctxt, f'脚本参数 {flag} 无任何文档出处')
+    print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
+          f'参数 {len(all_flags)} 项，双向对齐）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    print('\n全部 5 项冒烟测试 PASS'
+    test_check_iron_rules(); test_docs_scripts_contract()
+    print('\n全部 7 项冒烟测试 PASS'
           + (f'（另有 {len(missing)} 项环境依赖缺失，见上方环境自检）' if missing else ''))
