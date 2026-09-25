@@ -54,7 +54,10 @@ NEXT_SECTION = re.compile(r'^#{1,3}\s')
 ABSTRACT_LIMIT = 300
 TITLE_FIELD = re.compile(r'^\s*-\s*发明名称[:：]\s*(\S.*?)\s*$')      # R7（templates §0）
 TITLE_MAX = 25
-EVT_SCOPE = re.compile(r'04_EVT|投产判定|投产总则')                    # R8 适用域
+# R8 适用域：04_EVT 只在**路径**上认（正文里列出包结构不等于这份文书在 EVT 目录下），
+# 正文侧认节标题「投产判定」与「投产总则」两种真属于 EVT 文书的写法
+EVT_DIR = re.compile(r'04_EVT')
+EVT_SCOPE = re.compile(r'投产判定|投产总则')
 # 逐字规范串：以 templates §5 / evt-and-regulatory / README §4 三处一致写法为准（句号在引号内）
 PRODUCTION_CLAUSE = '任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据。'
 
@@ -177,7 +180,7 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
         notes.append('未找到「发明名称：」字段，R7 未核')
 
     # R8 EVT 投产总则逐字（铁律 5 / EVT 诚实边界）
-    if EVT_SCOPE.search(path) or EVT_SCOPE.search(text):
+    if EVT_DIR.search(path) or EVT_SCOPE.search(text):
         if PRODUCTION_CLAUSE not in text:
             findings.append(Finding(
                 'R8 投产总则', path, 1,

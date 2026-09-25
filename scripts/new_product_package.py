@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""生成新产品专利交付包骨架（目录结构 + README 模板）。
+"""生成新产品专利交付包骨架（五段子目录 + 包 README + 检索报告底稿）。
 用法: python3 new_product_package.py <产品代号> <输出父目录>
+底稿文件名带"检索"，因此 verify_search_report.py 传包目录即可自动挑到它。
 """
 import os, sys
 
@@ -25,12 +26,31 @@ README = """# {name} 专利交付包
 3. 投产门禁：任何设计内容在对应物理实测全部通过前不得投产。
 """
 
+# S2 的产出物在包里需要一个载体，否则"已核验条目"散落在代理会话里、
+# R5 的 --search-report 也没有规范路径可指。表头即 templates §10 的列名。
+SEARCH = """# {name} 检索报告
+
+## 1. 检索式与数据源
+- 数据源：【待填写】
+- 检索式：【待填写】
+- 检索日期：【待填写】
+
+## 2. 已核验条目
+| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |
+|---|---|---|---|---|---|---|
+
+## 3. 未检出声明
+本轮检索未检出与交底书 §2.2 每条缺陷逐条对应的在先方案；未检索到 ≠ 不存在。
+"""
+
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
     for d in ['01_交底书','02_申请文件','03_设计补全','04_EVT验证','05_法规与裁决']:
         os.makedirs(os.path.join(root, d), exist_ok=True)
     with open(os.path.join(root, 'README.md'), 'w', encoding='utf8') as f:
         f.write(README.format(name=name))
+    with open(os.path.join(root, f'检索_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(SEARCH.format(name=name))
     print('created', root)
 
 if __name__ == '__main__':

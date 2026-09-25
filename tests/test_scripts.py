@@ -138,7 +138,18 @@ def test_new_product_package():
         for sub in ['01_交底书', '02_申请文件', '03_设计补全', '04_EVT验证', '05_法规与裁决']:
             assert_(os.path.isdir(os.path.join(d, 'TESTX_专利交付包', sub)), f'缺目录 {sub}：{r.stdout}')
         assert_(os.path.exists(os.path.join(d, 'TESTX_专利交付包', 'README.md')), '缺 README.md')
-    print('PASS new_product_package（五段目录+README）')
+        # 底稿在场，且文件名带"检索"——verify_search_report 的目录模式靠它挑文件
+        stub = os.path.join(d, 'TESTX_专利交付包', '检索_TESTX.md')
+        assert_(os.path.isfile(stub), f'缺检索报告底稿（骨架期 V 门禁没有载体）: {r.stdout}', r)
+        # 骨架必须开箱即绿：底稿的列名与小节名要和 templates §10 完全一致，
+        # 否则 V 门禁要么挑不到文件，要么一上来就报"缺列"
+        rv = run([PY, f'{S}/verify_search_report.py', stub, '--offline'])
+        assert_(rv.returncode == 0 and '违规 0' in rv.stdout
+                and '已核验条目 0 条' in rv.stdout and '缺列' not in rv.stdout,
+                '骨架底稿未通过 V1–V3，或未如实报出"条目 0 条"', rv)
+        ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
+        assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
+    print('PASS new_product_package（五段目录+README+检索底稿，开箱即过 R/V 两门禁）')
 
 
 def test_rebuild_package():
@@ -606,39 +617,39 @@ def test_verify_search_report():
     try:
         # 必绿：三条合规条目全字段齐、在线源说"有"——且在线计数只算 DOI+arXiv 两条
         vsr.fetch_json = lambda url: ('ok', b'<entry>')
-        bad, notes, ck = vsr.check_report('r.md', rpt([P, A, D]))
+        bad, notes, ck, n_ent = vsr.check_report('r.md', rpt([P, A, D]))
         assert_(bad == [], f'合规检索报告被 V1/V2/V3 误判: {bad}', None)
         assert_(ck == 2, f'在线核成应只数 DOI+arXiv 两条（专利不得算在线），实得 {ck}', None)
 
         # V3 必红：源明确说查无此项
         vsr.fetch_json = lambda url: ('absent', None)
-        bad, _, ck = vsr.check_report('r.md', rpt([A, D]))
+        bad, _, ck, _ = vsr.check_report('r.md', rpt([A, D]))
         assert_(len(bad) == 2 and all('V3' in b for b in bad),
                 f'源说查无此项却未判 V3: {bad}', None)
         assert_(ck == 0, f'未核成却计数 {ck}', None)
 
         # V3 三态：源不可达 → 只报未核，不折成违规也不折成合规
         vsr.fetch_json = lambda url: ('unreachable', None)
-        bad, notes, ck = vsr.check_report('r.md', rpt([A, D]))
+        bad, notes, ck, n_ent = vsr.check_report('r.md', rpt([A, D]))
         assert_(bad == [], f'网络不可达被判成引用造假: {bad}', None)
         assert_(len(notes) == 2 and ck == 0,
                 f'不可达未走三态（notes={notes}, ck={ck}）', None)
 
         # arXiv 特有的坑：不存在的 id 也回 200，必须数 <entry> 而不是看状态码
         vsr.fetch_json = lambda url: ('ok', b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
-        bad, _, _ = vsr.check_report('r.md', rpt([A]))
+        bad, _, _, _ = vsr.check_report('r.md', rpt([A]))
         assert_(len(bad) == 1 and 'V3' in bad[0],
                 f'arXiv 空 feed 被当成存在: {bad}', None)
 
         # V1 必红：无可机检标识
         vsr.fetch_json = lambda url: ('ok', b'<entry>')
-        bad, _, _ = vsr.check_report('r.md', rpt(
+        bad, _, _, _ = vsr.check_report('r.md', rpt(
             ['| 4 | 网页 | 某博客文章 | 无标识 | 2020-01-01 | URL | 2026-09-25 |']))
         assert_(len(bad) == 1 and 'V1' in bad[0], f'无标识条目未判 V1: {bad}', None)
 
         # V2 必红：专利缺关键日期 + 缺核验出处
         vsr.fetch_json = lambda url: ('ok', b'<entry>')
-        bad, _, _ = vsr.check_report('r.md', rpt(
+        bad, _, _, _ = vsr.check_report('r.md', rpt(
             ['| 1 | 专利 | CN110404188A | 一种节点 |  |  | 2026-09-25 |']))
         assert_(len(bad) == 2 and all('V2' in b for b in bad),
                 f'缺字段未逐条判 V2: {bad}', None)
@@ -648,22 +659,22 @@ def test_verify_search_report():
         nohdr = ('| # | 类型 | 标识符 | 标题 | 关键日期 | 核验日期 |\n'
                  '|---|---|---|---|---|---|\n')
         P6 = '| 1 | 专利 | CN110404188A | 一种节点 | 公开日 2019-07-26 | 2026-09-25 |'
-        bad, _, _ = vsr.check_report('r.md', rpt([P6], hdr=nohdr))
+        bad, _, _, _ = vsr.check_report('r.md', rpt([P6], hdr=nohdr))
         assert_(len(bad) == 1 and '缺列' in bad[0] and 'source' in bad[0],
                 f'整列缺失被放大成逐条违规: {bad}', None)
         # 配套必绿：把缺的列补回去，同一行必须零违规
-        bad, _, _ = vsr.check_report('r.md', rpt([P]))
+        bad, _, _, _ = vsr.check_report('r.md', rpt([P]))
         assert_(bad == [], f'补回列后仍判违规（缺列判定过头）: {bad}', None)
 
         # 行列数与表头不符：宁可报格式错，也不按位取列把"出处"读成"核验日期"
-        bad, _, _ = vsr.check_report('r.md', rpt([P + ' 多余 |']))
+        bad, _, _, _ = vsr.check_report('r.md', rpt([P + ' 多余 |']))
         assert_(len(bad) == 1 and '列与表头' in bad[0],
                 f'多出一格的行未被报出（可能已被按位读错列）: {bad}', None)
 
         # 无小节与无表分别给成因（两者修法不同）
-        bad, _, _ = vsr.check_report('r.md', '# 检索报告\n正文里没有小节\n')
+        bad, _, _, _ = vsr.check_report('r.md', '# 检索报告\n正文里没有小节\n')
         assert_(len(bad) == 1 and '小节' in bad[0], f'无小节成因不对: {bad}', None)
-        bad, _, _ = vsr.check_report('r.md', '# 检索报告\n## 2. 已核验条目\n表还没填\n')
+        bad, _, _, _ = vsr.check_report('r.md', '# 检索报告\n## 2. 已核验条目\n表还没填\n')
         assert_(len(bad) == 1 and '没有表格' in bad[0], f'无表成因不对: {bad}', None)
     finally:
         vsr.fetch_json, vsr.verify_online = orig_fetch, orig_probe

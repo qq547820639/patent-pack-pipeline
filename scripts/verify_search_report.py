@@ -133,15 +133,15 @@ def parse_report(text):
 
 
 def check_report(path, text, online=True):
-    """返回 (违规列表, 未核列表, 在线已核条目数)。"""
+    """返回 (违规列表, 未核列表, 在线已核条目数, 表内条目总数)。"""
     bad, notes, checked = [], [], 0
     missing, parsed, ncols = parse_report(text)
     if missing == ['<无小节>']:
         bad.append(f'{path}: 未找到「已核验条目」小节 → V1/V2 无从判起（铁律 1 的引用白名单没有载体）')
-        return bad, notes, checked
+        return bad, notes, checked, 0
     if missing == ['<无表>']:
         bad.append(f'{path}: 「已核验条目」小节下没有表格 → V1/V2 无从判起')
-        return bad, notes, checked
+        return bad, notes, checked, 0
     if missing:
         bad.append(f'{path}: 「已核验条目」表缺列 {missing}（列名见 templates §C）→ V1/V2')
     no_col = set(missing)     # 整列缺失时不再逐行刷"未填"，否则一条缺陷被放大成 N 条
@@ -180,7 +180,7 @@ def check_report(path, text, online=True):
             notes.append(f'{path}: {ident} 在线源不可达，存在性未核（不折成违规也不折成合规）')
         else:
             checked += 1
-    return bad, notes, checked
+    return bad, notes, checked, len(parsed)
 
 
 def main():
@@ -207,18 +207,24 @@ def main():
         print('输入不可用，未做任何判定: 未找到任何检索报告 .md')
         sys.exit(2)
 
-    total, online_ok = 0, 0
+    total, online_ok, entries = 0, 0, 0
     for p in paths:
         text = open(p, encoding='utf8').read()
-        bad, notes, checked = check_report(p, text, online=not args.offline)
+        bad, notes, checked, n_ent = check_report(p, text, online=not args.offline)
+        if n_ent == 0:
+            # 零条目在包骨架底稿期合法，但"一条都没核"与"核完且全部合规"在退出码上
+            # 同形——必须把这个数摆出来，别让 rc=0 冒充"已经核过了"
+            print(f'  note {p}: 已核验条目 0 条（骨架底稿合法；交付前须填实并逐条核）')
         for n in notes:
             print(f'  note {n}')
         for b in bad:
             print(f'  {b}')
         total += len(bad)
         online_ok += checked
+        entries += n_ent
         print(f'{p}: 违规 {len(bad)}')
-    print(f'合计违规 {total}（规则 V1–V3，判据见脚本 docstring）；在线核成 {online_ok} 条')
+    print(f'合计违规 {total}（规则 V1–V3，判据见脚本 docstring）；'
+          f'条目 {entries} 条，在线核成 {online_ok} 条')
     if args.require_online and not args.offline and online_ok == 0:
         print('--require-online 且在线核对 0 条成 → 本次判定不成立（rc=2）')
         sys.exit(2)
