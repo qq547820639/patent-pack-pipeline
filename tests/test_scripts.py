@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 8
+TOTAL_TESTS = 9
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -532,13 +532,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCF]\d)", s))
-                 | set(re.findall(r'^\s+([RCF]\d)\s', s, re.M)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFV]\d)", s))
+                 | set(re.findall(r'^\s+([RCFV]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([V]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCF][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFV][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -566,7 +567,8 @@ def test_docs_scripts_contract():
     # 方向二：脚本声明的每个参数都要至少在文档出现一次
     for flag in sorted(all_flags):
         assert_(flag in doctxt, f'脚本参数 {flag} 无任何文档出处')
-    # 用法行自报的规则区间必须与脚本实际判据一致（README 的 R1–R5 长期谎报，无人核对）
+    # 任何提到本门禁并给出规则区间的文档行，区间都必须等于脚本源码现推的判据范围
+    # （README 用法行与 pipeline-stages 的"出 R1–R5 红点"都曾谎报且无人核对）
     rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)",
                                                scripts['check_iron_rules.py'])})
     span = f'R{rnums[0]}–R{rnums[-1]}'
@@ -574,14 +576,150 @@ def test_docs_scripts_contract():
     for ln_no, line in enumerate(doctxt.splitlines(), 1):
         if 'check_iron_rules' not in line:
             continue
-        m = re.search(r'门禁\s*(R\d+–R\d+)', line)
-        if m:
+        for claimed in re.findall(r'R\d+–R\d+', line):
             hit += 1
-            assert_(m.group(1) == span,
-                    f'文档第 {ln_no} 行自报 {m.group(1)}，脚本实际判据 {span}')
-    assert_(hit >= 1, '没有任何用法行自报规则区间，本检查空转')
+            assert_(claimed == span,
+                    f'文档第 {ln_no} 行自报 {claimed}，脚本实际判据 {span}')
+    assert_(hit >= 2, f'只核到 {hit} 处自报区间，覆盖面过窄（曾有两处各自漂移）')
     print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
           f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处）')
+
+
+def test_verify_search_report():
+    """检索报告门禁 V1–V3：默认不碰网络（fetch 被桩替），网络路径另有 live 档。"""
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('verify_search_report',
+                                       os.path.join(S, 'verify_search_report.py'))
+    vsr = ilu.module_from_spec(spec)
+    spec.loader.exec_module(vsr)
+
+    HDR = ('| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |\n'
+           '|---|---|---|---|---|---|---|\n')
+    P = '| 1 | 专利 | CN110404188A | 一种节点 | 公开日 2019-07-26 | CNIPA 著录页 | 2026-09-25 |'
+    A = '| 2 | 论文 | arXiv:1706.03762 | Attention | 2017-06-12 | arXiv 摘要页 | 2026-09-25 |'
+    D = '| 3 | 论文 | doi:10.1038/nature14539 | Deep learning | 2015-05-27 | Nature | 2026-09-25 |'
+
+    def rpt(rows, hdr=HDR):
+        return '# 检索报告\n## 2. 已核验条目\n' + hdr + ''.join(r + '\n' for r in rows)
+
+    orig_fetch, orig_probe = vsr.fetch_json, vsr.verify_online
+    try:
+        # 必绿：三条合规条目全字段齐、在线源说"有"——且在线计数只算 DOI+arXiv 两条
+        vsr.fetch_json = lambda url: ('ok', b'<entry>')
+        bad, notes, ck = vsr.check_report('r.md', rpt([P, A, D]))
+        assert_(bad == [], f'合规检索报告被 V1/V2/V3 误判: {bad}', None)
+        assert_(ck == 2, f'在线核成应只数 DOI+arXiv 两条（专利不得算在线），实得 {ck}', None)
+
+        # V3 必红：源明确说查无此项
+        vsr.fetch_json = lambda url: ('absent', None)
+        bad, _, ck = vsr.check_report('r.md', rpt([A, D]))
+        assert_(len(bad) == 2 and all('V3' in b for b in bad),
+                f'源说查无此项却未判 V3: {bad}', None)
+        assert_(ck == 0, f'未核成却计数 {ck}', None)
+
+        # V3 三态：源不可达 → 只报未核，不折成违规也不折成合规
+        vsr.fetch_json = lambda url: ('unreachable', None)
+        bad, notes, ck = vsr.check_report('r.md', rpt([A, D]))
+        assert_(bad == [], f'网络不可达被判成引用造假: {bad}', None)
+        assert_(len(notes) == 2 and ck == 0,
+                f'不可达未走三态（notes={notes}, ck={ck}）', None)
+
+        # arXiv 特有的坑：不存在的 id 也回 200，必须数 <entry> 而不是看状态码
+        vsr.fetch_json = lambda url: ('ok', b'<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
+        bad, _, _ = vsr.check_report('r.md', rpt([A]))
+        assert_(len(bad) == 1 and 'V3' in bad[0],
+                f'arXiv 空 feed 被当成存在: {bad}', None)
+
+        # V1 必红：无可机检标识
+        vsr.fetch_json = lambda url: ('ok', b'<entry>')
+        bad, _, _ = vsr.check_report('r.md', rpt(
+            ['| 4 | 网页 | 某博客文章 | 无标识 | 2020-01-01 | URL | 2026-09-25 |']))
+        assert_(len(bad) == 1 and 'V1' in bad[0], f'无标识条目未判 V1: {bad}', None)
+
+        # V2 必红：专利缺关键日期 + 缺核验出处
+        vsr.fetch_json = lambda url: ('ok', b'<entry>')
+        bad, _, _ = vsr.check_report('r.md', rpt(
+            ['| 1 | 专利 | CN110404188A | 一种节点 |  |  | 2026-09-25 |']))
+        assert_(len(bad) == 2 and all('V2' in b for b in bad),
+                f'缺字段未逐条判 V2: {bad}', None)
+
+        # 缺列只报一条：整列不存在时不得把一条缺陷放大成 N 条"未填"
+        # （列名与单元格要同时去掉那一列，否则测的是"行列数不符"而不是"缺列"）
+        nohdr = ('| # | 类型 | 标识符 | 标题 | 关键日期 | 核验日期 |\n'
+                 '|---|---|---|---|---|---|\n')
+        P6 = '| 1 | 专利 | CN110404188A | 一种节点 | 公开日 2019-07-26 | 2026-09-25 |'
+        bad, _, _ = vsr.check_report('r.md', rpt([P6], hdr=nohdr))
+        assert_(len(bad) == 1 and '缺列' in bad[0] and 'source' in bad[0],
+                f'整列缺失被放大成逐条违规: {bad}', None)
+        # 配套必绿：把缺的列补回去，同一行必须零违规
+        bad, _, _ = vsr.check_report('r.md', rpt([P]))
+        assert_(bad == [], f'补回列后仍判违规（缺列判定过头）: {bad}', None)
+
+        # 行列数与表头不符：宁可报格式错，也不按位取列把"出处"读成"核验日期"
+        bad, _, _ = vsr.check_report('r.md', rpt([P + ' 多余 |']))
+        assert_(len(bad) == 1 and '列与表头' in bad[0],
+                f'多出一格的行未被报出（可能已被按位读错列）: {bad}', None)
+
+        # 无小节与无表分别给成因（两者修法不同）
+        bad, _, _ = vsr.check_report('r.md', '# 检索报告\n正文里没有小节\n')
+        assert_(len(bad) == 1 and '小节' in bad[0], f'无小节成因不对: {bad}', None)
+        bad, _, _ = vsr.check_report('r.md', '# 检索报告\n## 2. 已核验条目\n表还没填\n')
+        assert_(len(bad) == 1 and '没有表格' in bad[0], f'无表成因不对: {bad}', None)
+    finally:
+        vsr.fetch_json, vsr.verify_online = orig_fetch, orig_probe
+
+    # 公开号形状必须与 R5 同一处定义：两份正则各自漂移时，报告里"合法"的号
+    # 可能在铁律门禁那边判"越界"，反之亦然。
+    s2 = ilu.spec_from_file_location('cir_cmp', os.path.join(S, 'check_iron_rules.py'))
+    cir = ilu.module_from_spec(s2)
+    s2.loader.exec_module(cir)
+    assert_(vsr.PUB_NO.pattern == cir.PUB_NO.pattern,
+            f'V1 与 R5 的公开号形状各写了一份：{vsr.PUB_NO.pattern!r} vs {cir.PUB_NO.pattern!r}',
+            None)
+
+    # ---- CLI 档（全部走 --offline 或死代理，不碰真网络）----
+    with tempfile.TemporaryDirectory() as d:
+        good = os.path.join(d, '检索报告.md')
+        open(good, 'w', encoding='utf8').write(rpt([P, A, D]))
+        r = run([PY, f'{S}/verify_search_report.py', good, '--offline'])
+        assert_(r.returncode == 0 and '在线核成 0 条' in r.stdout and '未核' in r.stdout,
+                '--offline 合规报告未全绿或未说明未核', r)
+        r = run([PY, f'{S}/verify_search_report.py', os.path.join(d, '不存在.md')])
+        # 必须指名"哪条路径、因为什么"：只核 '输入不可用' 前缀的话，
+        # "一个文件都没挑出来"那条消息会把"路径不存在"的失守顶包（变异实测如此）
+        assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
+                '路径不存在未按要求说清成因并 fail-closed', r)
+        # 目录模式：只挑 *检索*.md，别的文书不得混进来被判
+        open(os.path.join(d, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n无关内容\n')
+        r = run([PY, f'{S}/verify_search_report.py', d, '--offline'])
+        assert_(r.returncode == 0 and good in r.stdout and '交底书.md' not in r.stdout,
+                '目录模式挑文件不对', r)
+        # 死代理强制"源不可达"：--require-online 必须 rc=2 说"本次判定不成立"，
+        # 既不得判绿（假装核过）也不得判红（把网络故障算成造假）
+        env = dict(os.environ, https_proxy='http://127.0.0.1:9/',
+                   HTTP_PROXY='http://127.0.0.1:9/', http_proxy='http://127.0.0.1:9/')
+        p = subprocess.run([PY, f'{S}/verify_search_report.py', good, '--require-online'],
+                           cwd=d, capture_output=True, text=True, env=env)
+        assert_(p.returncode == 2 and '本次判定不成立' in p.stdout,
+                '--require-online 在源全不可达时未 rc=2', p)
+        r = run([PY, f'{S}/verify_search_report.py', good])
+        assert_(r.returncode == 0, '默认档（不带 --require-online）受网络故障影响被误判红', r)
+
+    # ---- live 档：真打 Crossref / arXiv，无网络时如实 SKIP ----
+    if orig_fetch('https://api.crossref.org/works/10.1038/nature14539')[0] == 'unreachable':
+        print('     SKIP 检索报告 live 档：本机网络到不了核验源，不把"没跑"说成"跑过"')
+    else:
+        assert_(vsr.verify_online('doi', '10.1038/nature14539') == 'ok',
+                '真 DOI 被源判为不存在', None)
+        assert_(vsr.verify_online('doi', '10.1038/definitely-not-a-real-doi-99999') == 'absent',
+                '假 DOI 未被源判为不存在', None)
+        assert_(vsr.verify_online('arxiv', '1706.03762') == 'ok',
+                '真 arXiv id 被源判为不存在', None)
+        assert_(vsr.verify_online('arxiv', '9999.99999') == 'absent',
+                '假 arXiv id 未被源判为不存在', None)
+        assert_(vsr.verify_online('patent', 'CN110404188A') == 'unreachable',
+                '专利公开号在无源可用时被当成了"核过"', None)
+        print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 四判）')
 
 
 def test_patent_figure():
@@ -721,7 +859,8 @@ if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    test_check_iron_rules(); test_patent_figure(); test_docs_scripts_contract()
+    test_check_iron_rules(); test_verify_search_report(); test_patent_figure()
+    test_docs_scripts_contract()
     ran = TOTAL_TESTS - len(SKIPPED)
     tail = f'另有 {len(missing)} 项环境依赖缺失，见上方环境自检' if missing else ''
     if SKIPPED:
