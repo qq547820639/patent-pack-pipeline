@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""常驻变异电池：证明 tests/test_scripts.py 里那些判据断言真的会咬人。
+
+为什么住在仓库里：判据门禁本身有常驻冒烟测试，但"这些测试有没有牙"这件事
+此前只存在于 /tmp 的一次性脚本里，清一次 /tmp 就没了（实际发生过两次）。
+
+用法:
+    python3 tests/mutation_battery.py                 # 三支全跑
+    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr）
+    python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
+
+约定（与判据类脚本一致）:
+    0 = 所有变异都被"点名该条款的断言"抓红，且还原后套件 GREEN
+    1 = 有变异未被抓红（SURVIVED）、红因归错条款（MISRED）、探针失效（PROBE-FAIL）
+        或崩溃致红（CRASH-KILL，崩溃不算覆盖）
+    2 = 环境不可用（如缺 matplotlib 导致 fig 档无法判定），未做判定 ≠ 判定通过
+
+自带的卫生规矩（都是踩过的坑）:
+  · 变异必须写成 plausible 的错误实现。把判据改成让它抛异常，套件也会"红"，
+    但那不是覆盖——所以分类器先认 CRASH-KILL。
+  · 每支 arm 结束必须打一行「汇总」；缺行按 arm 崩溃处理（批跑时把日志 grep
+    成只剩关键词，曾把一支电池 import 期的 SyntaxError 整个吞掉）。
+  · fig 档需要 matplotlib；没有就如实 SKIP 并把退出码判 2，不折成"通过"。
+"""
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+PY = sys.executable
+
+IRON = 'scripts/check_iron_rules.py'
+CF = 'scripts/check_figures.py'
+PF = 'scripts/patent_figure.py'
+V = 'scripts/verify_search_report.py'
+NP = 'scripts/new_product_package.py'
+
+# (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可多元])
+MUTS = {
+    'iron': [
+        ('R1 禁用词判据关闭', IRON, "        for w in BANNED_ALWAYS:", '        for w in []:',
+         'R1「首创」未触发'),
+        ('R2b 白名单收窄回旧式样（应被【待填写】误伤档抓住）', IRON,
+         "PLACEHOLDER_KIND = re.compile(r'^【(?:待[^】]{0,60}|占位)】$')",
+         "PLACEHOLDER_KIND = re.compile(r'^【(?:待团队补充|待签署)】$')",
+         ('R2b 把【待确认】式样判红', '新生成的包未通过铁律门禁')),
+        ('R2b 判据关闭', IRON, '            if not PLACEHOLDER_KIND.match(token):',
+         '            if False:', 'R2b 未拦非 待*/占位 方括号标记'),
+        ('R2b 反向（恒判红）', IRON, '            if not PLACEHOLDER_KIND.match(token):',
+         '            if True:', ('R2b 把【待确认】式样判红', '新生成的包未通过铁律门禁')),
+        ('R2c 三字段核不掉', IRON,
+         '            elif token.startswith(CONFIRM3_PREFIX) and not CONFIRM3_SHAPE.match(token):',
+         '            elif False:', 'R2c 未拦缺字段三字段占位'),
+        ('R2c 恒判红（误伤合规三字段）', IRON,
+         '            elif token.startswith(CONFIRM3_PREFIX) and not CONFIRM3_SHAPE.match(token):',
+         '            elif token.startswith(CONFIRM3_PREFIX):', 'R2c 误判合规三字段占位'),
+        ('R3 权文占位核不掉', IRON, '            m = CLAIM_ANNOTATION.search(ln)',
+         '            m = None', 'R3 权文内占位注释未触发'),
+        ('R4 摘要字数核不掉', IRON, '        if n > ABSTRACT_LIMIT:', '        if False:',
+         'R4 超限未触发'),
+        ('R5 越界公开号核不掉', IRON, '    if allowed_pub_nos is not None:',
+         '    if False:', 'R5 越界公开号未触发'),
+        ('R6 清单不生效', IRON, '    for term in (brand_terms or []):', '    for term in []:',
+         'R6 未命中已声明的型号'),
+        ('R6 缺清单时不再报未核', IRON, '    if brand_terms is None:', '    if False:',
+         '缺 --brand-terms 时 R6 应报'),
+        ('R7 字数核不掉', IRON, '            if n > TITLE_MAX:', '            if False:',
+         'R7 未拦超长发明名称'),
+        ('R7 阈值过严误伤合规名称', IRON, '            if n > TITLE_MAX:', '            if n > 3:',
+         'R7 误判合规发明名称'),
+        ('R8 逐字串不核', IRON, '        if PRODUCTION_CLAUSE not in text:', '        if False:',
+         'R8 未拦缺逐字投产总则的'),
+        ('R8 误伤 EVT 之外的文书', IRON,
+         '    if EVT_DIR.search(path) or EVT_SCOPE.search(text):', '    if True:',
+         ('合规稿件未全绿', '新生成的包未通过铁律门禁')),
+        ('R8 适用域退化回"正文提到 04_EVT 就算 EVT 文书"', IRON,
+         '    if EVT_DIR.search(path) or EVT_SCOPE.search(text):',
+         '    if EVT_DIR.search(path) or EVT_DIR.search(text) or EVT_SCOPE.search(text):',
+         '新生成的包未通过铁律门禁'),
+        ('脚本总结行谎称 R1–R5', IRON, '（规则 R1–R8，判据见脚本 docstring）',
+         '（规则 R1–R5，判据见脚本 docstring）', '门禁自报规则区间与实际判据'),
+        ('--all 只扫顶层（不递归）', IRON, '        for dp, _, fs in os.walk(root):',
+         '        for dp, _, fs in [(root, [], [f for f in os.listdir(root)\n'
+         '                              if os.path.isfile(os.path.join(root, f))])]:',
+         ('--all 未递归到子目录里的两份文书', '--all 未抓到子目录内的违规',
+          '新生成的包未通过铁律门禁')),
+        ('--all 指到文件时不说成因', IRON, "f'--all 需要目录，实得不是目录: ",
+         "f'，实得不是目录: ", '--all 指向非目录时未说明原因'),
+    ],
+    'fig': [
+        ('C1 彩色判据关闭', CF, '    if colored > 0:', '    if False:',
+         'C1 彩色判据未触发或未标名'),
+        ('C1 恒判红（误伤合规稀疏框图）', CF, '    if colored > 0:', '    if True:',
+         '稀疏合法框图被误判违规'),
+        ('C2 空白判据关闭', CF, '    if ink == 0:', '    if False:',
+         'C2 空白判据未触发或未标名'),
+        ('C2 阈值反向（ink>0 即判空白）', CF, '    if ink == 0:', '    if ink > 0:',
+         'C2 空白判据未触发或未标名'),
+        ('回归：把 C2 改回旧的字节阈值 10240', CF, '    if ink == 0:',
+         '    if os.path.getsize(path) < 10240:', '稀疏合法框图被误判违规'),
+        ('C3 只打印不判红（历史事故原样复现）', CF,
+         '        total_bad += len(check_docx_media(d))', '        _printed_only = check_docx_media(d)',
+         'docx 丢图未计入退出码'),
+        ('C3 只查目录里第一份 docx（历史缺陷）', CF,
+         "    for f in sorted(os.listdir(d)):\n        if not f.endswith('.docx'):",
+         "    for f in [x for x in sorted(os.listdir(d)) if x.endswith('.docx')][:1]:\n        if False:",
+         '同目录第二份 docx 丢图未被逐个核对'),
+        ('C3 丢图判据关闭', CF, '        else:\n            print(f"  FAIL {f}: media=',
+         '        elif False:\n            print(f"  FAIL {f}: media=',
+         'docx 丢图未计入退出码'),
+        ('C3 在没有 figures 目录时仍然判红', CF,
+         '    if not os.path.isdir(figdir):\n        return bad', '    if False:\n        return bad',
+         '无 figures 目录被判违规'),
+        ('F1 dpi 下限不核', PF, '        if dpi < DPI_MIN:', '        if False:', 'F1 未拦住'),
+        ('F1 图宽区间不核', PF,
+         '        if not (WIDTH_CM_RANGE[0] <= fig_w_cm <= WIDTH_CM_RANGE[1]):', '        if False:',
+         'F1 未拦住'),
+        ('F1 恒判红（误伤合规出图）', PF,
+         '        if not (WIDTH_CM_RANGE[0] <= fig_w_cm <= WIDTH_CM_RANGE[1]):', '        if True:',
+         '合规几何参数被建图即判红'),
+        ('F2 图题照收不误', PF, '        if caption:', '        if False:',
+         'save(caption=) 未拒绝嵌图题'),
+        ('F3 同图内同号异件不查', PF, '            if prev is not None and prev != part:',
+         '            if False:', '同图内同号异件未被 F3 抓到'),
+        ('F3 与已登记历史不一致不查', PF, '            if hist is not None and hist != part:',
+         '            if False:', '与本案登记表同号异件未在出图当场抓到'),
+        ('F3 与已登记历史恒判红', PF, '            if hist is not None and hist != part:',
+         '            if hist is not None:', 'verify_saved 复检未全绿'),
+        ('F3 跨图同号异件不查', PF, '            if num in seen and seen[num][1] != part:',
+         '            if False:', '跨图同号异件未抓到'),
+        ('F4 框内字数不核', PF, '        if len(text) > BOX_TEXT_MAX:', '        if False:',
+         'F4 未拦超长框内文字'),
+        ('F4 阈值过严误伤合规框', PF, '        if len(text) > BOX_TEXT_MAX:',
+         '        if len(text) > 2:', '合规框内文字被 F4 误判'),
+        ('自检未过的图不删（违规件会被打包带走）', PF, '            os.remove(path)',
+         '            pass', '自检未过的图仍留在盘上'),
+        ('--check 有 dpi 也永不核图宽', PF, '        if dpi and dpi >= DPI_MIN - 1:',
+         '        if False:', 'PNG 带 dpi 元数据时 --check 未核图宽'),
+        ('--check 把无 dpi 元数据按假定 dpi 反推成违规', PF,
+         '        if dpi and dpi >= DPI_MIN - 1:\n            w_cm = w_px / dpi * 2.54',
+         '        if True:\n            w_cm = w_px / (dpi or DPI_MIN) * 2.54',
+         '无 dpi 元数据时 F1 未走三态'),
+        ('--check 无 dpi 时把已判出的像素违规一起丢掉', PF,
+         "            print(f'  note {p}: PNG 无 dpi 元数据，F1 几何未核（不折成违规也不折成合规）')",
+         "            print(f'  note {p}: PNG 无 dpi 元数据，F1 几何未核（不折成违规也不折成合规）')\n"
+         '            probs = []',
+         'F1 三态把该图的像素判据一起免检了'),
+    ],
+    'vsr': [
+        ('V1 放过无可机检标识的条目', V, '        if kind is None:', '        if False:',
+         '无标识条目未判 V1'),
+        ('V1 把所有条目都判成无标识', V, '        if kind is None:', '        if True:',
+         '合规检索报告被 V1/V2/V3 误判'),
+        ('V2 专利关键日期不核', V, "        if kind == 'patent' and 'key_date' not in no_col",
+         "        if False and 'key_date' not in no_col", '缺字段未逐条判 V2'),
+        ('V2 核验出处不核', V, "        if 'source' not in no_col and not cell('source').strip():",
+         '        if False:', '缺字段未逐条判 V2'),
+        ('缺列抑制失效（一条缺陷放大成 N 条）', V,
+         '    no_col = set(missing)     # 整列缺失时不再逐行刷"未填"，否则一条缺陷被放大成 N 条',
+         '    no_col = set()', '整列缺失被放大成逐条违规'),
+        ('行列数不符仍按位取列', V, '        if ncols and len(cells) != ncols:',
+         '        if False and len(cells) != ncols:', '多出一格的行未被报出'),
+        ('V3 源说查无此项却不判红', V, "        if st == 'absent':", '        if False:',
+         '源说查无此项却未判 V3'),
+        ('V3 把源不可达折算成违规', V,
+         "            notes.append(f'{path}: {ident} 在线源不可达，存在性未核（不折成违规也不折成合规）')",
+         "            bad.append(f'{path}: 在线源不可达 {ident} → V3')",
+         '网络不可达被判成引用造假'),
+        ('arXiv 只看状态码不数 entry', V,
+         "        return 'ok' if b'<entry' in body else 'absent'", "        return 'ok'",
+         'arXiv 空 feed 被当成存在'),
+        ('在线核成计数把专利也算进去', V,
+         "            notes.append(f'{path}: {ident} 存在性未核（无可用无密钥源，按 S1 逐条人工核对）')",
+         "            notes.append(f'{path}: {ident} 存在性未核')\n            checked += 1",
+         '在线核成应只数 DOI+arXiv 两条'),
+        ('--require-online 不再 rc=2', V,
+         '    if args.require_online and not args.offline and online_ok == 0:', '    if False:',
+         '--require-online 在源全不可达时未 rc=2'),
+        ('目录模式不再限定 *检索*.md', V,
+         "                      if f.endswith('.md') and '检索' in f]",
+         "                      if f.endswith('.md')]", '目录模式挑文件不对'),
+        ('输入不存在被当成零违规放行', V,
+         "            print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')\n            sys.exit(2)",
+         '            continue', '路径不存在未按要求说清成因'),
+        ('零条目不再如实报"0 条"（rc=0 冒充已核过）', V,
+         '        if n_ent == 0:', '        if False:', '或未如实报出"条目 0 条"'),
+        ('骨架不再生成检索底稿', NP,
+         "    with open(os.path.join(root, f'检索_{name}.md'), 'w', encoding='utf8') as f:\n"
+         '        f.write(SEARCH.format(name=name))', '    pass', '缺检索报告底稿'),
+        ('底稿文件名丢掉"检索"二字（目录模式将挑不到它）', NP,
+         "f'检索_{name}.md'", "f'report_{name}.md'", '缺检索报告底稿'),
+        ('底稿表头列名与 templates §10 漂移', NP,
+         '| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |',
+         '| # | 类型 | 编号 | 标题 | 日期 |', '骨架底稿未通过 V1'),
+    ],
+}
+
+
+def make_work():
+    work = tempfile.mkdtemp(prefix='mutbat_')
+    for sub in ('scripts', 'tests', 'references'):
+        shutil.copytree(os.path.join(ROOT, sub), os.path.join(work, sub))
+    for f in ('README.md', 'SKILL.md'):
+        src = os.path.join(ROOT, f)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(work, f))
+    return work
+
+
+def suite(work):
+    """跑常驻套件。默认把网络放进死代理：V 的 live 档自己 SKIP，其余各档不依赖网络。"""
+    env = dict(os.environ, https_proxy='http://127.0.0.1:9/', http_proxy='http://127.0.0.1:9/',
+               HTTPS_PROXY='http://127.0.0.1:9/', HTTP_PROXY='http://127.0.0.1:9/')
+    r = subprocess.run([PY, 'tests/test_scripts.py'], cwd=work, capture_output=True,
+                       text=True, env=env)
+    return r.returncode, r.stdout + r.stderr
+
+
+def run_arm(name, work, verbose=False):
+    killed = misred = surv = broken = crash = 0
+    for label, rel, old, new, expect in MUTS[name]:
+        path = os.path.join(work, rel)
+        if not os.path.isfile(path):
+            print(f'  [PROBE-FAIL] {label} —— 目标脚本不存在 {rel}')
+            broken += 1
+            continue
+        orig = open(path, encoding='utf8').read()
+        if old not in orig:
+            print(f'  [PROBE-FAIL] {label} —— needle 未命中（脚本已改，请同步电池）')
+            broken += 1
+            continue
+        open(path, 'w', encoding='utf8').write(orig.replace(old, new, 1))
+        rc, out = suite(work)
+        open(path, 'w', encoding='utf8').write(orig)
+        wants = expect if isinstance(expect, tuple) else [expect]
+        if rc == 0:
+            print(f'  [SURVIVED ]  {label}')
+            surv += 1
+        elif 'Traceback' in out and 'AssertionError' not in out:
+            print(f'  [CRASH-KILL] {label} —— 崩溃致红，不算覆盖')
+            crash += 1
+        elif any(w in out for w in wants):
+            got = next(w for w in wants if w in out)
+            print(f'  [KILLED ]    {label}  (点名断言 "{got}")')
+            killed += 1
+        else:
+            first = [l.strip()[:78] for l in out.splitlines() if l.startswith('AssertionError')]
+            print(f'  [MISRED ]    {label}  预期 {wants}，实际先红 {first}')
+            misred += 1
+    total = len(MUTS[name])
+    bad = surv + misred + broken + crash
+    print(f'汇总[{name}]: 共 {total} · 抓红 {killed} · 红因不对 {misred} · 未检出 {surv} · '
+          f'探针失效 {broken} · 崩溃致红 {crash}')
+    return bad, total, killed
+
+
+def main():
+    ap = argparse.ArgumentParser(description='常驻变异电池：证明判据断言真的会咬人')
+    ap.add_argument('--arm', default='all', choices=['all'] + sorted(MUTS))
+    ap.add_argument('--keep-work', action='store_true', help='保留工作副本便于复查')
+    args = ap.parse_args()
+
+    try:
+        import matplotlib    # noqa: F401
+        have_mpl = True
+    except ImportError:
+        have_mpl = False
+
+    arms = sorted(MUTS) if args.arm == 'all' else [args.arm]
+    if not have_mpl and 'fig' in arms:
+        print('fig 档需要 matplotlib（出图期 F1–F4 与真像素核对）→ 本次未判定，不是通过。'
+              '装上后重跑，或 --arm iron/vsr 先跑其余两支。')
+        arms = [a for a in arms if a != 'fig']
+        if not arms:
+            sys.exit(2)
+
+    work = make_work()
+    print(f'工作副本 {work}')
+    rc0, out0 = suite(work)
+    if rc0 != 0:
+        print('baseline 未 GREEN，先修套件再谈变异覆盖：\n' + out0[-1200:])
+        shutil.rmtree(work, ignore_errors=True)
+        sys.exit(1)
+    print('=== baseline === GREEN')
+
+    bad_total = 0
+    for name in arms:
+        if not have_mpl and name == 'fig':
+            continue
+        b, n, k = run_arm(name, work)
+        # 每档必须"要么全数要么报错"：killed+b+… 与总档数对不上即为本电池自身失效
+        if k + b != n:
+            print(f'汇总[{name}] 自相矛盾：抓红 {k} + 异常 {b} != 总 {n} —— 电池自身失效')
+            b += 1
+        bad_total += b
+    rc_end, out_end = suite(work)
+    print(f'还原后套件 {"GREEN" if rc_end == 0 else "RED!!（还原失败）"}')
+    if not args.keep_work:
+        shutil.rmtree(work, ignore_errors=True)
+    else:
+        print(f'工作副本留在 {work}')
+    sys.exit(1 if (bad_total or rc_end) else 0)
+
+
+if __name__ == '__main__':
+    main()

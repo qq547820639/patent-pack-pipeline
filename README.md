@@ -128,6 +128,12 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 - `check_figures.py`：C1、C2、C3 都计入退出码，图数不一致不再只打印放行。
 - `regen_docx.py`：1 才是文件级转换失败；2 表示前置依赖（pandoc 或 python-docx）缺失，一个文件都没转。
 
+判据断言自己有没有牙，由常驻变异电池核：`python3 tests/mutation_battery.py [--arm iron|fig|vsr]`。
+它把每条判据改成 plausible 的错误实现（不是改成崩溃），再跑一遍 `tests/test_scripts.py`，
+要求每个变异都被**点名该条款的断言**抓红；分类为 SURVIVED / MISRED / PROBE-FAIL / CRASH-KILL
+任一出现即 rc=1（崩溃致红不算覆盖，红因归错条款也不算）。fig 档需要 matplotlib，
+缺依赖时该档不判定并以 rc=2 退出——未跑过不等于跑过了。
+
 铁律门禁只覆盖**可机械判定**的部分；「是否真的作新颖性声明」「数值有无出处」这类语义判断仍归独立审查轮，脚本不冒充结论。缺 `--search-report` 时 R5 报"未核"，既不折成违规也不折成合规。
 
 关键操作纪律：
