@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 9
+TOTAL_TESTS = 10
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -149,6 +149,10 @@ def test_new_product_package():
                 '骨架底稿未通过 V1–V3，或未如实报出"条目 0 条"', rv)
         ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
         assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
+        # 骨架期还没有 EVT 报告：E 门禁必须说"未做任何判定"（rc=2），而不是判绿冒充核过
+        re_ = run([PY, f'{S}/check_evt.py', d, '--all'])
+        assert_(re_.returncode == 2 and '没有一份落在 EVT 适用域内' in re_.stdout,
+                '骨架上的 E 门禁未走"未判定"三态', re_)
     print('PASS new_product_package（五段目录+README+检索底稿，开箱即过 R/V 两门禁）')
 
 
@@ -543,14 +547,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFV]\d)", s))
-                 | set(re.findall(r'^\s+([RCFV]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([V]\d)', s)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVE]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVE]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([VE]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFV][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVE][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -594,6 +598,91 @@ def test_docs_scripts_contract():
     assert_(hit >= 2, f'只核到 {hit} 处自报区间，覆盖面过窄（曾有两处各自漂移）')
     print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
           f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处）')
+
+
+def test_check_evt():
+    """EVT 诚实性门禁 E1–E4：判定三态、非✅带下一步、物理实测列不得有实测值、偏差标注。"""
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('check_evt', os.path.join(S, 'check_evt.py'))
+    ce = ilu.module_from_spec(spec)
+    spec.loader.exec_module(ce)
+
+    HDR = ('| # | 验证项目 | 物理实测项 | 判定 |\n|---|---|---|---|\n')
+    OK = '# EVT 报告\n## 2. 投产判定\n' + HDR + (
+        '| 1 | 立杆屈曲 | 屈曲载荷，样本量 5 只，判据：不断裂（待物理实测） | ✅ |\n'
+        '| 2 | 关节噪声 | 预测值 42 N（待物理实测） | ⚠️ 缺口：无样机；关闭判据：实测≤3 dB |\n'
+        '| 3 | 折叠锁疲劳 | 跌落台架，Not Run | ❌ 改法：换锁舌材料并重算 |\n')
+    bad, notes = ce.check_text('04_EVT验证/EVT.md', OK)
+    assert_(bad == [], f'合规 EVT 报告被 E1–E4 误判: {bad}', None)
+    assert_(notes == [], f'域内文书却报了未判: {notes}', None)
+
+    # 引用号普查：标准号/IPC/条款号里的数字不得当成疑似实测值。
+    # 第 1 行刻意不带"待物理实测"字样——否则 PENDING 先把行救下，豁免根本没吃上力，
+    # 这条断言就成了假绿（上一版正是这样，变异"取消引用号豁免"因此存活）。
+    cite = ('# EVT\n## 投产判定\n' + HDR +
+            '| 1 | 织物 | 依据 GB/T 31701-2015 第 4.3 条与 IPC A42B3 类工装判定 | ✅ |\n'
+            '| 2 | 电池 | 送检 UN 38.3 全项，Not Run | ✅ |\n')
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', cite)
+    assert_(bad == [], f'标准号/IPC 号被当成实测值: {bad}', None)
+    # 配套必红：把"待物理实测"换成真写了一个测量结果，E3 必须开火
+    real = cite.replace('UN 38.3 全项，Not Run', 'UN 38.3 测得 47 mg/kg 甲醛')
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', real)
+    assert_(len(bad) == 1 and 'E3' in bad[0], f'编造的实测值未被 E3 抓到: {bad}', None)
+
+    # E1 必红：无符号措辞 / 两个符号并存；E2 必红：⚠️ 缺关闭判据、❌ 缺改法。
+    # 四行各配一条独立断言——合在一条"总数 2+2"上时，任一档失守都会由总数那档先红，
+    # 红因就归不到具体条款上（变异电池把这暴露得很清楚）。
+    worst = ('# EVT\n## 投产判定\n' + HDR +
+             '| 1 | 立杆 | 待物理实测 | 基本通过 |\n'
+             '| 2 | 关节 | 待物理实测 | ✅ ❌ |\n'
+             '| 3 | 锁 | 待物理实测 | ⚠️ 缺口：无样机 |\n'
+             '| 4 | 疲劳 | 待物理实测 | ❌ |\n')
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', worst)
+    for probe, msg in (('未落三态', 'E1 空判定（含糊措辞）未判红'),
+                       ('同时出现', 'E1 双符号并存未判红'),
+                       ('缺口与关闭判据', 'E2 ⚠️ 缺关闭判据未判红'),
+                       ('未给改法', 'E2 ❌ 缺改法未判红')):
+        assert_(sum(probe in b for b in bad) == 1, f'{msg}（实得 {bad}）', None)
+    # 配套必绿：四行都补全后必须零违规
+    fixed = ('# EVT\n## 投产判定\n' + HDR +
+             '| 1 | 立杆 | 待物理实测 | ✅ |\n'
+             '| 2 | 关节 | 待物理实测 | ⚠️ 缺口：无样机；关闭判据：实测 ≤3 dB |\n'
+             '| 3 | 锁 | 待物理实测 | ❌ 改法：换材料重算 |\n')
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', fixed)
+    assert_(bad == [], f'判定齐全的报告仍被判红: {bad}', None)
+
+    # E4：偏差>10% 未标注必红；标了原因必绿；只给一侧走三态
+    e4_bad = '# EVT\n## 投产判定\n复算 设计值 12.0 mm，复算值 15.0 mm。\n'
+    e4_ok = '# EVT\n## 投产判定\n复算 设计值 12.0 mm，复算值 15.0 mm，偏差 25% 原因：载荷谱保守。\n'
+    e4_half = '# EVT\n## 投产判定\n设计值 12.0 mm（复算待做）。\n'
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_bad)
+    assert_(len(bad) == 1 and 'E4' in bad[0], f'偏差 25% 未标注未被 E4 抓到: {bad}', None)
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_ok)
+    assert_(bad == [], f'已标注偏差原因仍被判红: {bad}', None)
+    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_half)
+    assert_(bad == [], f'缺复算值被折成违规（应走未判）: {bad}', None)
+
+    # 域外文书：不判、不折成合规；rc=2 说明"本次未做任何判定"
+    bad, notes = ce.check_text('01_交底书/交底书.md', '# 交底书\n普通内容\n')
+    assert_(bad == [] and len(notes) == 1 and '未判' in notes[0],
+            f'域外文书未走三态: bad={bad} notes={notes}', None)
+
+    with tempfile.TemporaryDirectory() as d:
+        evt = os.path.join(d, '04_EVT验证'); os.makedirs(evt)
+        open(os.path.join(evt, 'EVT报告.md'), 'w', encoding='utf8').write(OK)
+        open(os.path.join(d, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n普通内容\n')
+        r = run([PY, f'{S}/check_evt.py', d, '--all'])
+        assert_(r.returncode == 0 and '实核 EVT 文书 1 份' in r.stdout,
+                '整包 --all 未只把 EVT 域内文书计入实核数', r)
+        os.remove(os.path.join(evt, 'EVT报告.md'))
+        r = run([PY, f'{S}/check_evt.py', d, '--all'])
+        assert_(r.returncode == 2 and '没有一份落在 EVT 适用域内' in r.stdout,
+                '域内文书为零时被当成"已通过"', r)
+        r = run([PY, f'{S}/check_evt.py', os.path.join(d, '不存在.md')])
+        # 只核 rc 与"输入不可用"前缀会被另一条同类消息顶包（V 门禁那边实测过同一形状）
+        assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
+                '路径不存在未按要求说清成因并 fail-closed', r)
+    print('PASS check_evt（E1–E4 各成对 + 引用号普查 + 域外三态 + rc=2）')
 
 
 def test_verify_search_report():
@@ -870,7 +959,8 @@ if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    test_check_iron_rules(); test_verify_search_report(); test_patent_figure()
+    test_check_iron_rules(); test_check_evt(); test_verify_search_report()
+    test_patent_figure()
     test_docs_scripts_contract()
     ran = TOTAL_TESTS - len(SKIPPED)
     tail = f'另有 {len(missing)} 项环境依赖缺失，见上方环境自检' if missing else ''

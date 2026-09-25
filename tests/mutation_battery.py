@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 三支全跑
-    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr）
+    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr|evt）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -37,8 +37,9 @@ CF = 'scripts/check_figures.py'
 PF = 'scripts/patent_figure.py'
 V = 'scripts/verify_search_report.py'
 NP = 'scripts/new_product_package.py'
+CE = 'scripts/check_evt.py'
 
-# (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可多元])
+# (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
     'iron': [
         ('R1 禁用词判据关闭', IRON, "        for w in BANNED_ALWAYS:", '        for w in []:',
@@ -192,9 +193,55 @@ MUTS = {
          '        f.write(SEARCH.format(name=name))', '    pass', '缺检索报告底稿'),
         ('底稿文件名丢掉"检索"二字（目录模式将挑不到它）', NP,
          "f'检索_{name}.md'", "f'report_{name}.md'", '缺检索报告底稿'),
-        ('底稿表头列名与 templates §10 漂移', NP,
+        ('骨架表头列名与 templates §10 漂移', NP,
          '| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |',
          '| # | 类型 | 编号 | 标题 | 日期 |', '骨架底稿未通过 V1'),
+    ],
+    'evt': [
+        ('E1 空判定被整行跳过（含糊措辞当已判）', CE,
+         "                if not present:\n"
+         "                    bad.append(f'{where} 判定列未落三态（须 ✅/⚠️/❌ 恰一个），'\n"
+         "                               f'实得「{cells[jv][:20]}」→ E1')",
+         '                if not present:\n                    continue',
+         'E1 空判定（含糊措辞）未判红'),
+        ('E1 两符号并存不再判红', CE, '                elif len(present) > 1:',
+         '                elif False:', 'E1 双符号并存未判红'),
+        ('E2 ⚠️ 的缺口要求核不掉', CE,
+         "                elif present[0].startswith(WARN) and not all(w in v for w in GAP_WORDS):",
+         '                elif False:', 'E2 ⚠️ 缺关闭判据未判红'),
+        ('E2 ❌ 的改法要求核不掉', CE,
+         "                elif present[0].startswith(FAIL) and not any(w in v for w in FIX_WORDS):",
+         '                elif False:', ('E2 ❌ 缺改法未判红', 'E2 ⚠️ 缺关闭判据未判红')),
+        ('E3 疑似实测值不判红', CE,
+         '                if (UNIT_NUM.search(cell) or VERB_NUM.search(cell))'
+         ' and not PENDING.search(cell):',
+         '                if False:', '编造的实测值未被 E3 抓到'),
+        ('E3 恒判红（把合规的待实测行也咬了）', CE,
+         '                if (UNIT_NUM.search(cell) or VERB_NUM.search(cell))'
+         ' and not PENDING.search(cell):',
+         '                if UNIT_NUM.search(cell) or VERB_NUM.search(cell):',
+         '合规 EVT 报告被 E1–E4 误判'),
+        ('量值定义放宽回"任意数字"（标准号与条款号全成假阳性）', CE,
+         '                if (UNIT_NUM.search(cell) or VERB_NUM.search(cell))'
+         ' and not PENDING.search(cell):',
+         "                if re.search(NUM, cell) and not PENDING.search(cell):",
+         '标准号/IPC 号被当成实测值'),
+        ('E4 阈值被放到 90%', CE, '        if dev > 0.10 and not DEV_ANNO.search(raw):',
+         '        if dev > 0.9 and not DEV_ANNO.search(raw):', '偏差 25% 未标注未被 E4 抓到'),
+        ('E4 恒判红（标了原因也咬）', CE, '        if dev > 0.10 and not DEV_ANNO.search(raw):',
+         '        if True:', '已标注偏差原因仍被判红'),
+        ('E4 把缺一侧的值对折成违规（三态失效）', CE,
+         '        if not (md and mr):\n            continue',
+         "        if not (md and mr):\n"
+         "            bad.append(f'{path}:{ln_no} 缺一侧值 → E4')\n            continue",
+         ('缺复算值被折成违规', '合规 EVT 报告被 E1–E4 误判')),
+        ('域外文书被当成已判合规（三态失效）', CE, '    if not in_scope(path, text):',
+         '    if False:', '域外文书未走三态'),
+        ('域内文书为零时不再 rc=2', CE, '    if judged == 0:', '    if False:',
+         ('域内文书为零时被当成"已通过"', '骨架上的 E 门禁未走"未判定"三态')),
+        ('输入不存在被当成零违规放行', CE,
+         "            print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')\n            sys.exit(2)",
+         '            continue', '路径不存在未按要求说清成因'),
     ],
 }
 
@@ -233,6 +280,15 @@ def run_arm(name, work, verbose=False):
             broken += 1
             continue
         open(path, 'w', encoding='utf8').write(orig.replace(old, new, 1))
+        # 变异本身必须仍是"可运行的另一种实现"：改出语法错的文件不是覆盖证据，
+        # 而是电池自己的缺陷（本轮就有一条 needle 只截到半截 f-string，留下孤立续行）
+        chk = subprocess.run([PY, '-m', 'py_compile', rel], cwd=work,
+                             capture_output=True, text=True)
+        if chk.returncode != 0:
+            print(f'  [BAD-MUTATION] {label} —— 变异后文件不能编译：{chk.stderr.strip()[-90:]}')
+            broken += 1
+            open(path, 'w', encoding='utf8').write(orig)
+            continue
         rc, out = suite(work)
         open(path, 'w', encoding='utf8').write(orig)
         wants = expect if isinstance(expect, tuple) else [expect]
@@ -253,7 +309,7 @@ def run_arm(name, work, verbose=False):
     total = len(MUTS[name])
     bad = surv + misred + broken + crash
     print(f'汇总[{name}]: 共 {total} · 抓红 {killed} · 红因不对 {misred} · 未检出 {surv} · '
-          f'探针失效 {broken} · 崩溃致红 {crash}')
+          f'探针失效/坏变异 {broken} · 崩溃致红 {crash}')
     return bad, total, killed
 
 
