@@ -152,11 +152,11 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 
 | 通道 | 状态 / 回退 |
 |---|---|
-| CNIPA 著录检索（Playwright） | 当前环境 `epub.cnipa.gov.cn` 不可达 → 回退 web_search + 二手库并声明局限 |
+| CNIPA 著录检索（Playwright） | 当前环境 `epub.cnipa.gov.cn` 不可达（2026-09-25 本机 curl 超时复核）→ 回退 web_search + 二手库并声明局限 |
 | scholar 插件 | 曾不可达 → 调用前先探测，失败回退 CrossRef API / arXiv API / web_search |
 | materials_project | 仅覆盖无机晶体材料；工程金属 / 聚合物回退厂商数据手册（TDS） |
 | pubmed | 仅生物医学域；跨域回退 CrossRef / web_search |
-| TimesFM | **已拒绝纳入**（3.0 为非商用许可，与产品商业属性冲突） |
+| TimesFM | **已拒绝纳入**：源码与 ≤2.5 权重为 Apache-2.0，但 **3.0 预训练权重为 `timesfm-non-commercial-license-v1.0`**，官方 README 明示限非商用非生产用途、"Commercial or production use of the default pretrained weights is not permitted"——与产品商业属性冲突。（出处 google-research/timesfm README "License notice for pretrained weights" 一节，2026-09-25 实测；如需Apache-2.0 路线只能用 ≤2.5 权重并复核其能力是否够用） |
 | 论文 / 报告插图 | 用 chart-gen；专利附图一律代码手绘，禁止 AI 生成 |
 | 本机 pandoc（Word 交付物） | 未安装 → `regen_docx.py` 以退出码 2 打印安装指引且**不转任何文件**；装法 `brew install pandoc`，或跨平台 `pip install pypandoc-binary`（自带 pandoc 二进制约 25 MB，其许可为 GPL-2.0，对外分发前需按产品方合规口径评估；实测脚本可经 pypandoc 解析到该内置二进制，无需再改 PATH） |
 | 本机 python-docx（转换后复核） | 未安装 → 同样以退出码 2 提示、不转任何文件；装法 `pip install python-docx`（注意导入名是 `docx`，包名不是） |

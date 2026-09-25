@@ -22,7 +22,7 @@
 - **保底规则**：第二轮筛后 <4 条 → 从第一轮按同一分类号+手段沾边回补至约 4–6 条；仍不够 → 仅用分类号再查一次或带相邻分类号；还不够 → 如实写"检索范围内近邻较少"，**禁止编造条目凑数**。
 - **查新 vs 著录清单分离**：技术查新（一词一页、不翻完）与申请人/发明人清单式穷尽检索是两个用途，不混用、不互替。
 - **写入背景技术的门槛**：分类号重合+技术手段对得上才进 1.1/2.1；禁止把召回全集整表写入。
-- **CNIPA 通道现状（本环境实测 2026-09-04）**：epub.cnipa.gov.cn 与 patents.google.com 不可达、pss-system 412、www.cnipa.gov.cn 可达——CNIPA 著录检索须用网页版人工执行或在可达环境执行；该仓库（handsomestWei/patent-disclosure-skill）的 Playwright 工具在 CNIPA 可达环境可直接复用。
+- **CNIPA 通道现状（本环境实测 2026-09-04；2026-09-25 四项逐一复核仍一致）**：epub.cnipa.gov.cn 与 patents.google.com 不可达（curl 超时）、pss-system 返回 HTTP 412、www.cnipa.gov.cn 返回 200 可达——CNIPA 著录检索须用网页版人工执行或在可达环境执行；该仓库（handsomestWei/patent-disclosure-skill）的 Playwright 工具在 CNIPA 可达环境可直接复用。可达性会随网络环境变化，动用前按当次实测为准，不得沿用本条结论。
 
 ## 3. 防御性措辞与划界
 - 禁用词：首次/填补空白/国际领先/首创/国际先进（作新颖性或水平声明时）。其中 首创/填补空白/国际领先/国际先进 四类由 `scripts/check_iron_rules.py` R1 无条件判红；"首次"只在声明语境判红（"首次加载配置表"这类正常描述不判），语义层的新颖性声明判断仍归 reviewer。
