@@ -627,7 +627,7 @@ def test_check_evt():
     # 配套必红：把"待物理实测"换成真写了一个测量结果，E3 必须开火
     real = cite.replace('UN 38.3 全项，Not Run', 'UN 38.3 测得 47 mg/kg 甲醛')
     bad, _ = ce.check_text('04_EVT验证/EVT.md', real)
-    assert_(len(bad) == 1 and 'E3' in bad[0], f'编造的实测值未被 E3 抓到: {bad}', None)
+    assert_(sum('E3' in x for x in bad) == 1, f'编造的实测值未被 E3 抓到: {bad}', None)
 
     # E1 必红：无符号措辞 / 两个符号并存；E2 必红：⚠️ 缺关闭判据、❌ 缺改法。
     # 四行各配一条独立断言——合在一条"总数 2+2"上时，任一档失守都会由总数那档先红，
@@ -655,17 +655,28 @@ def test_check_evt():
     e4_bad = '# EVT\n## 投产判定\n复算 设计值 12.0 mm，复算值 15.0 mm。\n'
     e4_ok = '# EVT\n## 投产判定\n复算 设计值 12.0 mm，复算值 15.0 mm，偏差 25% 原因：载荷谱保守。\n'
     e4_half = '# EVT\n## 投产判定\n设计值 12.0 mm（复算待做）。\n'
-    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_bad)
-    assert_(len(bad) == 1 and 'E4' in bad[0], f'偏差 25% 未标注未被 E4 抓到: {bad}', None)
-    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_ok)
-    assert_(bad == [], f'已标注偏差原因仍被判红: {bad}', None)
-    bad, _ = ce.check_text('04_EVT验证/EVT.md', e4_half)
-    assert_(bad == [], f'缺复算值被折成违规（应走未判）: {bad}', None)
+    bad, _ = ce.check_text('EVT随记.md', e4_bad)
+    assert_(sum('E4' in x for x in bad) == 1, f'偏差 25% 未标注未被 E4 抓到: {bad}', None)
+    bad, _ = ce.check_text('EVT随记.md', e4_ok)
+    assert_(sum('E4' in x for x in bad) == 0, f'已标注偏差原因仍被 E4 判红: {bad}', None)
+    bad, notes = ce.check_text('EVT随记.md', e4_half)
+    assert_(sum('E4' in x for x in bad) == 0, f'缺复算值被折成 E4 违规（应走未判）: {bad}', None)
+    assert_(any('E4 未判' in n for n in notes), f'缺一侧值没报 E4 未判: {notes}', None)
+
+    # 缺"验证总表"的两种写法要分轴处置：交付物（04_EVT 目录内）缺表 = 判红；
+    # 只是正文提到投产判定的文档 = 未判。否则散文体的 EVT 报告会在 E1–E3 上白白通过。
+    prose = '# EVT 报告\n## 2. 投产判定\n立杆稳定，判定 ✅。\n'
+    bad, notes = ce.check_text('04_EVT验证/EVT报告.md', prose)
+    assert_(len(bad) == 1 and '无从判起' in bad[0],
+            f'交付物缺判定表却未判红（散文写法被白白放行）: {bad}', None)
+    bad, notes = ce.check_text('EVT随记.md', prose)
+    assert_(bad == [] and len(notes) == 1 and 'E1–E3 未判' in notes[0],
+            f'规则类文档缺表被误判红，或未报 E1–E3 未判: bad={bad} notes={notes}', None)
 
     # 域外文书：不判、不折成合规；rc=2 说明"本次未做任何判定"
     bad, notes = ce.check_text('01_交底书/交底书.md', '# 交底书\n普通内容\n')
-    assert_(bad == [] and len(notes) == 1 and '未判' in notes[0],
-            f'域外文书未走三态: bad={bad} notes={notes}', None)
+    assert_(bad == [] and len(notes) == 1 and '非 EVT 文书' in notes[0],
+            f'域外文书未走三态或未说明成因: bad={bad} notes={notes}', None)
 
     with tempfile.TemporaryDirectory() as d:
         evt = os.path.join(d, '04_EVT验证'); os.makedirs(evt)

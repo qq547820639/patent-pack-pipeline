@@ -88,11 +88,25 @@ def tables(text):
 def check_text(path, text):
     """返回 (违规列表, 未判列表)。"""
     bad, notes = [], []
-    if not in_scope(path, text):
+    by_path = bool(EVT_DIR.search(path))
+    by_text = bool(EVT_SCOPE.search(text))
+    if not (by_path or by_text):
         return [], [f'{path}: 非 EVT 文书（路径不含 04_EVT，正文无「投产判定/投产总则」），'
                     f'E1–E4 未判']
 
-    for tno, (header, rows) in enumerate(tables(text), 1):
+    found = list(tables(text))
+    has_verdict = any(col(h, '判定') is not None for h, _ in found)
+    if not has_verdict:
+        # 模板 §5 第 1 项就是"验证总表（…判定 ✅⚠️❌）"。交付物缺这张表要判红，
+        # 否则"用散文写的 EVT 报告"会在 E1–E3 上白白通过——没载体不等于已核过。
+        # 规则文档只是正文提到"投产判定"，不是交付物，报未判而不是判红。
+        if by_path:
+            bad.append(f'{path}: 未找到含「判定」列的验证总表 → E1–E3 无从判起'
+                       f'（templates §5 第 1 项要求每项设计一行给出判定）')
+        else:
+            notes.append(f'{path}: 正文提到投产判定但不在 04_EVT 目录内，且无判定列表格'
+                         f'→ E1–E3 未判（仅 E4 逐行核）')
+    for tno, (header, rows) in enumerate(found, 1):
         jv = col(header, '判定')
         jp = col(header, '实测')
         for rno, cells in enumerate(rows, 1):
@@ -118,6 +132,9 @@ def check_text(path, text):
     for ln_no, raw in enumerate(text.splitlines(), 1):
         md, mr = DESIGN_VAL.search(raw), RECALC_VAL.search(raw)
         if not (md and mr):
+            if md or mr:
+                notes.append(f'{path}:{ln_no} 只给出{"设计值" if md else "复算值"}一侧，'
+                             f'相对偏差无从算 → E4 未判')
             continue
         a, b = float(md.group(1)), float(mr.group(1))
         if a == 0:
