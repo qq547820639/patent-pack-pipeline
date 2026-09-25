@@ -51,7 +51,7 @@
 
 1. **先收敛边界**：AI 只问最少必要的问题（技术主题一句话、专利类型、联系人占位策略），信息不全就跳过并注明假设，不反复打断。**未显式指定专利类型时，一律默认发明**（"方法 / 系统"描述的是权利要求形态，不是专利类型）。
 2. **再按阶段要素材**：它会告诉你需要什么——规格书、参数表、BOM、结构图、仿真报告、渲染图等，PDF / Word / PPT / Excel / 图片都收。手头有什么传什么，暂时没有的直接说没有：它不会替你编，能合理推定的走设计补全（注明依据与假设），推不动的记进"待确认问题单"。
-3. **缺运行环境它会提示**：产出 Word、扫描附图、打包这三个环节需要本机有 Python 3 和 pandoc，缺什么 AI 会让你装，也可以先让它跑一次 `python3 tests/test_scripts.py` 自检。
+3. **缺运行环境它会提示**：产出 Word、扫描附图、打包这三个环节需要本机有 Python 3 和 pandoc。让它跑一次 `python3 tests/test_scripts.py`，开头会打印环境自检表，逐项列出 pandoc / numpy / Pillow / python-docx / matplotlib 是否就绪，缺哪个、影响哪个环节；缺什么 AI 会让你装，不会替你静默安装。
 
 ---
 
@@ -107,14 +107,16 @@
 
 ## 6. 脚本与产物校验
 
-四个已验证脚本（自带 `tests/` 冒烟测试）：
+四个已验证脚本（自带 `tests/` 冒烟测试，兼作环境自检）：
 
 ```bash
 python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 生成交付包五段骨架
-python3 scripts/check_figures.py <申请文件目录>                  # 附图：彩色像素必须为 0、图数一致
-python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale）
+python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白，另核图数一致
+python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
+
+`regen_docx.py` 退出码：0 全部成功 / 1 有文件转换失败 / 2 前置依赖（pandoc 或 python-docx）缺失——一个文件都没转，属环境问题，不是转换失败。
 
 关键操作纪律：
 
@@ -149,6 +151,9 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 | pubmed | 仅生物医学域；跨域回退 CrossRef / web_search |
 | TimesFM | **已拒绝纳入**（3.0 为非商用许可，与产品商业属性冲突） |
 | 论文 / 报告插图 | 用 chart-gen；专利附图一律代码手绘，禁止 AI 生成 |
+| 本机 pandoc（Word 交付物） | 未安装 → `regen_docx.py` 以退出码 2 打印安装指引且**不转任何文件**；装法 `brew install pandoc`，或跨平台 `pip install pypandoc-binary`（自带 pandoc 二进制约 25 MB，其许可为 GPL-2.0，对外分发前需按产品方合规口径评估；实测脚本可经 pypandoc 解析到该内置二进制，无需再改 PATH） |
+| 本机 python-docx（转换后复核） | 未安装 → 同样以退出码 2 提示、不转任何文件；装法 `pip install python-docx`（注意导入名是 `docx`，包名不是） |
+| 本机 matplotlib（专利附图） | 未安装 → 附图绘制环节不可执行；**禁止**因此改用 AI 生成图充当专利附图，改跑 `python3 tests/test_scripts.py` 复核环境 |
 
 渠道分层：**官方 / 原厂（S 级）> 数据库 / API（A 级）> 权威媒体（B 级）> 聚合站（C 级，仅作参考锚点并标注）**。
 
