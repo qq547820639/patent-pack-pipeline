@@ -111,12 +111,14 @@
 
 ```bash
 python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 生成交付包五段骨架
-python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白，另核图数一致
+python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白 / C3 docx 图数一致
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
 
-`regen_docx.py` 退出码：0 全部成功 / 1 有文件转换失败 / 2 前置依赖（pandoc 或 python-docx）缺失——一个文件都没转，属环境问题，不是转换失败。
+退出码：
+- `check_figures.py`：0 合规 / 1 任一判据触发（C1、C2、C3 都计入，图数不一致不再只打印放行）。
+- `regen_docx.py`：0 全部成功 / 1 有文件转换失败 / 2 前置依赖（pandoc 或 python-docx）缺失——一个文件都没转，属环境问题，不是转换失败。
 
 关键操作纪律：
 

@@ -262,8 +262,59 @@ def test_regen_docx():
         print('     SKIP 真 pandoc 端到端：本机无 pandoc，装上后这一档自动启用；不把"没跑"说成"跑过"')
 
 
+def test_check_figures_media_count():
+    """C3：docx 嵌入图数 = figures 图数。这条曾只打印 MISMATCH 不影响退出码（实测 rc=0 放行）。"""
+    try:
+        from docx import Document
+    except ImportError:
+        print('SKIP check_figures C3 图数比对（本机无 python-docx，无法构造带图 docx）')
+        return
+    with tempfile.TemporaryDirectory() as d:
+        fd = os.path.join(d, 'figures'); os.makedirs(fd)
+        # 各图内容必须互不相同：python-docx 按图片字节哈希去重 media part，
+        # 两张逐字节相同的图只会落 1 个 word/media/ 条目，那样 C3 比对就成了测夹具本身。
+        for i in (1, 2):
+            _line_figure(f'{fd}/图{i}.png', elements=i)
+
+        def build(path, n_img):
+            doc = Document()
+            doc.add_paragraph('申请文件草稿')
+            for i in range(1, n_img + 1):
+                doc.add_picture(f'{fd}/图{i}.png')
+            doc.save(path)
+
+        # 必红：2 张附图只嵌 1 张 → 必须 rc=1 且报出 C3
+        build(os.path.join(d, '缺图.docx'), 1)
+        r = run([PY, f'{S}/check_figures.py', d])
+        assert_(r.returncode == 1 and 'C3' in r.stdout,
+                'docx 丢图未计入退出码（只打印不判红即放行）', r)
+
+        # 必红：同一目录放两份申请文件草稿，图数不足的是第二份
+        # （02_申请文件/ 常同时有发明/实用新型两份——只查第一份必须被抓到）
+        os.remove(os.path.join(d, '缺图.docx'))
+        build(os.path.join(d, 'a_齐全.docx'), 2)
+        build(os.path.join(d, 'b_缺图.docx'), 1)
+        r4 = run([PY, f'{S}/check_figures.py', d])
+        assert_(r4.returncode == 1 and 'b_缺图' in r4.stdout and 'C3' in r4.stdout,
+                '同目录第二份 docx 丢图未被逐个核对', r4)
+
+        # 必绿：全合规样本必须整条门禁放行（C1/C2/C3 同时满足）
+        os.remove(os.path.join(d, 'b_缺图.docx'))
+        build(os.path.join(d, '齐全.docx'), 2)
+        r2 = run([PY, f'{S}/check_figures.py', d])
+        assert_(r2.returncode == 0 and '-> OK' in r2.stdout, '图数齐全时误判违规', r2)
+
+        # 边界：无 figures 目录时不参与比对，不得凭空判红
+        with tempfile.TemporaryDirectory() as d2:
+            build(os.path.join(d2, '无图目录.docx'), 0)
+            r3 = run([PY, f'{S}/check_figures.py', d2])
+            assert_(r3.returncode == 0, '无 figures 目录被判违规', r3)
+    print('PASS check_figures C3（丢图必红 / 齐全必绿 / 无 figures 不误伤）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
-    test_check_figures(); test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    print('\n全部 4 项冒烟测试 PASS'
+    test_check_figures(); test_check_figures_media_count()
+    test_new_product_package(); test_rebuild_package(); test_regen_docx()
+    print('\n全部 5 项冒烟测试 PASS'
           + (f'（另有 {len(missing)} 项环境依赖缺失，见上方环境自检）' if missing else ''))
