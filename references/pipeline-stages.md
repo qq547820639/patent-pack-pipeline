@@ -43,6 +43,7 @@ S0 素材评估 → S1 特征提取 → S2 现有技术排查 → S2.5 处置表
 
 ## S6 附图+申请文件（每专利 1 个代理）
 - 附图规则见 references/hard-rules.md 附图节；申请文件模板见 references/templates.md。
+- 出图一律经 `scripts/patent_figure.py`（F1 几何 / F2 无图题+像素 / F3 标记编号同号同件 / F4 框内文字≤12 字；自检不过即删图并报错，禁止手写 pyplot 绕开）。
 - 自检：`scripts/check_figures.py`（C1 彩色像素=0 / C2 非空白 / C3 docx 嵌入图数=figures 图数，三条均计入退出码）；每图被附图说明与实施方式引用；标记对照表在场。
 
 ## S7 二轮审查+修订

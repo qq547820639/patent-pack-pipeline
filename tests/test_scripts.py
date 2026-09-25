@@ -11,6 +11,8 @@ from PIL import Image, ImageDraw
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
+SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
+TOTAL_TESTS = 8
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -40,7 +42,7 @@ DEPS = [
     ('numpy', 'numpy', '附图彩色像素扫描 scripts/check_figures.py'),
     ('Pillow', 'PIL', '附图读取 scripts/check_figures.py'),
     ('python-docx', 'docx', 'docx 转换后复核 scripts/regen_docx.py'),
-    ('matplotlib', 'matplotlib', '专利附图代码绘制（SKILL.md 关键操作纪律 2）'),
+    ('matplotlib', 'matplotlib', '专利附图出图 scripts/patent_figure.py（F1–F4 与出图自检，SKILL 纪律 2）'),
     ('pypandoc(可选)', 'pypandoc', 'pandoc 不在 PATH 时的兜底定位路径'),
 ]
 
@@ -462,14 +464,20 @@ def test_docs_scripts_contract():
     doctxt = '\n'.join(open(p, encoding='utf8').read() for p in doc_paths)
 
     defined_rules, flags_by_script = set(), {}
+    rule_home = {}
     for name, s in scripts.items():
-        defined_rules |= set(re.findall(r"Finding\(['\"]([RC]\d)", s))
-        defined_rules |= set(re.findall(r'^\s+([RC]\d)\s', s, re.M))
+        found = set(re.findall(r"Finding\(['\"]([RCF]\d)", s)) | set(re.findall(r'^\s+([RCF]\d)\s', s, re.M))
+        for t in found:
+            rule_home.setdefault(t, set()).add(name)
+        defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RC][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCF][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
+    # 同号两义防线：一个判据号只许有一个脚本定义它
+    coll = {t: sorted(v) for t, v in rule_home.items() if len(v) > 1}
+    assert_(not coll, f'判据号被两个脚本各自定义，读者无法分辨指代: {coll}')
 
     doc_scripts = set(re.findall(r'scripts/([A-Za-z0-9_\-]+\.py)', doctxt))
     assert_(doc_scripts == set(scripts),
@@ -495,10 +503,106 @@ def test_docs_scripts_contract():
           f'参数 {len(all_flags)} 项，双向对齐）')
 
 
+def test_patent_figure():
+    """绘图期约束 F1–F4：几何/图题/标记/框内文字。缺 matplotlib 时如实 SKIP，不冒充跑过。"""
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        SKIPPED.append('patent_figure')
+        print('SKIP patent_figure（本机无 matplotlib；装上后本档自动启用，见环境自检）')
+        return
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('patent_figure', os.path.join(S, 'patent_figure.py'))
+    pf = ilu.module_from_spec(spec)
+    spec.loader.exec_module(pf)
+
+    with tempfile.TemporaryDirectory() as d:
+        # 必绿：按纪律默认值出图，几何与像素均应通过
+        f = pf.Figure('图1', fig_w_cm=15.0, dpi=200)
+        right = f.box(1, 4, 3, 2, text='躯干框架')
+        f.label(1, '躯干框架', at=(5.2, 5.0), anchor=right)
+        p = f.save(os.path.join(d, '图1.png'))
+        assert_(f.verify_saved(p) == [], '合规出图被 F1/F2 误判')
+        with __import__('PIL').Image.open(p) as im:
+            w_px = im.size[0]
+        assert_(abs(w_px / 200 * 2.54 - 15.0) < 0.1, f'实际图宽 {w_px}px@200dpi 不落在 15cm')
+
+        # F1 必红：dpi 不足 / 图宽越界
+        for kw, tag in ((dict(dpi=100), 'F1'), (dict(fig_w_cm=20.0), 'F1')):
+            bad = pf.Figure('图X', **kw)
+            assert_(any(tag in v for v in bad.violations), f'F1 未拦住 {kw}')
+
+        # F4 必红：框内文字 >12 字
+        g = pf.Figure('图Y')
+        g.box(1, 1, 5, 2, text='一二三四五六七八九十十一十二')
+        assert_(any('F4' in v for v in g.violations), 'F4 未拦超长框内文字')
+
+        # F2 必红：把图题塞进图内
+        h = pf.Figure('图Z')
+        h.box(1, 1, 3, 2, text='载荷带')
+        try:
+            h.save(os.path.join(d, '图Z.png'), caption='图Z 主视图')
+            raised = False
+        except SystemExit as e:
+            raised = 'F2' in str(e)
+        assert_(raised, 'save(caption=) 未拒绝嵌图题')
+
+        # F3 必红 + 拒绝交付：同一编号在同图内指两个部件 → save 报错并删掉该文件
+        k = pf.Figure('图W')
+        a = k.box(1, 1, 2, 2, text='框架')
+        b = k.box(6, 1, 2, 2, text='驱动')
+        k.label(1, '框架', at=(4, 2), anchor=a)
+        k.label(1, '驱动', at=(5, 2), anchor=b)
+        wp = os.path.join(d, '图W.png')
+        try:
+            k.save(wp)
+            raised = False
+        except SystemExit as e:
+            raised = 'F3' in str(e)
+        assert_(raised, '同图内同号异件未被 F3 抓到')
+        assert_(not os.path.exists(wp), '自检未过的图仍留在盘上（会被打包带走）')
+
+        # F3 跨图：一致必绿、不一致必红
+        bad, _ = pf.check_cross_figure({'图1': {1: '框架'}, '图2': {1: '框架'}})
+        assert_(bad == [], f'跨图同号一致却报红: {bad}')
+        bad, _ = pf.check_cross_figure({'图1': {1: '框架'}, '图2': {1: '驱动'}})
+        assert_(any('F3' in x for x in bad), '跨图同号异件未抓到')
+
+        # --check CLI：合规整目录必绿
+        parts = os.path.join(d, 'parts.json')
+        open(parts, 'w', encoding='utf8').write('{"图1.png": {"1": "躯干框架"}}')
+        r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
+        assert_(r.returncode == 0 and '违规 0' in r.stdout, '--check 合规目录未全绿', r)
+
+        # --check 必红：混入一张彩色图
+        _line_figure(os.path.join(d, '图9.png'), tint=(255, 0, 0))
+        r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
+        assert_(r.returncode == 1 and 'F2 C1' in r.stdout, '--check 未拦彩色图', r)
+        os.remove(os.path.join(d, '图9.png'))
+
+        # 三态：不给 parts 时 F3 报未核，既不折成违规也不折成合规
+        r = run([PY, f'{S}/patent_figure.py', '--check', d])
+        assert_(r.returncode == 0 and 'F3 跨图同号未核' in r.stdout,
+                '缺 parts 登记表时 F3 未走三态', r)
+
+        # 输入不可用两类，均须 rc=2 并说出成因
+        r = run([PY, f'{S}/patent_figure.py', '--check', os.path.join(d, '图1.png')])
+        assert_(r.returncode == 2 and '--check 需要目录' in r.stdout, '--check 指文件未说明成因', r)
+        with tempfile.TemporaryDirectory() as empty:
+            r = run([PY, f'{S}/patent_figure.py', '--check', empty])
+            assert_(r.returncode == 2 and '未找到 .png' in r.stdout, '--check 空目录未说明成因', r)
+    print('PASS patent_figure（F1–F4 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    test_check_iron_rules(); test_docs_scripts_contract()
-    print('\n全部 7 项冒烟测试 PASS'
-          + (f'（另有 {len(missing)} 项环境依赖缺失，见上方环境自检）' if missing else ''))
+    test_check_iron_rules(); test_patent_figure(); test_docs_scripts_contract()
+    ran = TOTAL_TESTS - len(SKIPPED)
+    tail = f'另有 {len(missing)} 项环境依赖缺失，见上方环境自检' if missing else ''
+    if SKIPPED:
+        print(f'\n{ran}/{TOTAL_TESTS} 项冒烟测试 PASS，{len(SKIPPED)} 项 SKIP（{", ".join(SKIPPED)}）'
+              f'——SKIP 的档未跑过，不得计入通过' + (f'（{tail}）' if tail else ''))
+    else:
+        print(f'\n全部 {ran} 项冒烟测试 PASS' + (f'（{tail}）' if tail else ''))

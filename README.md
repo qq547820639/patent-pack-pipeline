@@ -107,10 +107,11 @@
 
 ## 6. 脚本与产物校验
 
-五个已验证脚本（自带 `tests/` 冒烟测试，兼作环境自检）：
+六个已验证脚本（自带 `tests/` 冒烟测试，兼作环境自检）：
 
 ```bash
 python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 生成交付包五段骨架
+python3 scripts/patent_figure.py --check <figures 目录> [--parts parts.json]  # 出图期约束 F1–F4
 python3 scripts/check_iron_rules.py <文书.md ...> [--search-report 检索报告.md]  # 铁律门禁 R1–R5
 python3 scripts/check_iron_rules.py <交付包目录> --all             # 递归检整个包下所有 .md
 python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白 / C3 docx 图数一致
@@ -118,10 +119,11 @@ python3 scripts/regen_docx.py <根目录>                           # 批量 md�
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
 
-退出码（三个判据类脚本统一约定）：
-- `check_iron_rules.py`：0 合规 / 1 存在违规 / 2 输入不可用（未做任何判定）。判据 R1 绝对化措辞、R2 占位符格式、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告。
-- `check_figures.py`：0 合规 / 1 任一判据触发（C1、C2、C3 都计入，图数不一致不再只打印放行）。
-- `regen_docx.py`：0 全部成功 / 1 有文件转换失败 / 2 前置依赖（pandoc 或 python-docx）缺失——一个文件都没转，属环境问题，不是转换失败。
+退出码（判据类脚本统一约定：0 合规 / 1 违规 / 2 环境或输入问题，未做判定）：
+- `patent_figure.py`：既可当绘图库用（`Figure(...).save()` 保存即自检，**自检不过会删掉该图并退出**，防止违规图被打包带走），也可离线核对已出图；F1 几何（dpi≥200、图宽 14–16cm）、F2 图内不嵌图题 + 过 C1/C2、F3 标记编号跨图同号同件、F4 框内文字 ≤12 字。PNG 无 dpi 元数据时 F1 报"未核"，不拿假定 dpi 反推的数字误判。
+- `check_iron_rules.py`：R1 绝对化措辞、R2 占位符格式、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告。
+- `check_figures.py`：C1、C2、C3 都计入退出码，图数不一致不再只打印放行。
+- `regen_docx.py`：1 才是文件级转换失败；2 表示前置依赖（pandoc 或 python-docx）缺失，一个文件都没转。
 
 铁律门禁只覆盖**可机械判定**的部分；「是否真的作新颖性声明」「数值有无出处」这类语义判断仍归独立审查轮，脚本不冒充结论。缺 `--search-report` 时 R5 报"未核"，既不折成违规也不折成合规。
 
@@ -160,7 +162,7 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 | 论文 / 报告插图 | 用 chart-gen；专利附图一律代码手绘，禁止 AI 生成 |
 | 本机 pandoc（Word 交付物） | 未安装 → `regen_docx.py` 以退出码 2 打印安装指引且**不转任何文件**；装法 `brew install pandoc`，或跨平台 `pip install pypandoc-binary`（自带 pandoc 二进制约 25 MB，其许可为 GPL-2.0，对外分发前需按产品方合规口径评估；实测脚本可经 pypandoc 解析到该内置二进制，无需再改 PATH） |
 | 本机 python-docx（转换后复核） | 未安装 → 同样以退出码 2 提示、不转任何文件；装法 `pip install python-docx`（注意导入名是 `docx`，包名不是） |
-| 本机 matplotlib（专利附图） | 未安装 → 附图绘制环节不可执行；**禁止**因此改用 AI 生成图充当专利附图，改跑 `python3 tests/test_scripts.py` 复核环境 |
+| 本机 matplotlib（专利附图） | 未安装 → `scripts/patent_figure.py` 以退出码 2 说明并拒绝出图；**禁止**因此改用 AI 生成图充当专利附图，改跑 `python3 tests/test_scripts.py` 复核环境 |
 
 渠道分层：**官方 / 原厂（S 级）> 数据库 / API（A 级）> 权威媒体（B 级）> 聚合站（C 级，仅作参考锚点并标注）**。
 
@@ -195,7 +197,7 @@ patent-pack-pipeline/
 ├── SKILL.md          # AI 执行手册：触发词、铁律、流程总览、操作纪律
 ├── README.md         # 本文件
 ├── references/       # 分阶段详细规程与模板（见 §5）
-├── scripts/          # 5 个已验证脚本
+├── scripts/          # 6 个已验证脚本
 └── tests/            # 脚本冒烟测试
 ```
 
