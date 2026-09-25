@@ -532,7 +532,8 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = set(re.findall(r"Finding\(['\"]([RCF]\d)", s)) | set(re.findall(r'^\s+([RCF]\d)\s', s, re.M))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCF]\d)", s))
+                 | set(re.findall(r'^\s+([RCF]\d)\s', s, re.M)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
@@ -565,8 +566,22 @@ def test_docs_scripts_contract():
     # 方向二：脚本声明的每个参数都要至少在文档出现一次
     for flag in sorted(all_flags):
         assert_(flag in doctxt, f'脚本参数 {flag} 无任何文档出处')
+    # 用法行自报的规则区间必须与脚本实际判据一致（README 的 R1–R5 长期谎报，无人核对）
+    rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)",
+                                               scripts['check_iron_rules.py'])})
+    span = f'R{rnums[0]}–R{rnums[-1]}'
+    hit = 0
+    for ln_no, line in enumerate(doctxt.splitlines(), 1):
+        if 'check_iron_rules' not in line:
+            continue
+        m = re.search(r'门禁\s*(R\d+–R\d+)', line)
+        if m:
+            hit += 1
+            assert_(m.group(1) == span,
+                    f'文档第 {ln_no} 行自报 {m.group(1)}，脚本实际判据 {span}')
+    assert_(hit >= 1, '没有任何用法行自报规则区间，本检查空转')
     print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
-          f'参数 {len(all_flags)} 项，双向对齐）')
+          f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处）')
 
 
 def test_patent_figure():

@@ -112,7 +112,7 @@
 ```bash
 python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 生成交付包五段骨架
 python3 scripts/patent_figure.py --check <figures 目录> [--parts parts.json]  # 出图期约束 F1–F4
-python3 scripts/check_iron_rules.py <文书.md ...> [--search-report 检索报告.md]  # 铁律门禁 R1–R5
+python3 scripts/check_iron_rules.py <文书.md ...> [--search-report 检索报告.md]  # 铁律门禁 R1–R8
 python3 scripts/check_iron_rules.py <交付包目录> --all             # 递归检整个包下所有 .md
 python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白 / C3 docx 图数一致
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
@@ -121,7 +121,7 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 
 退出码（判据类脚本统一约定：0 合规 / 1 违规 / 2 环境或输入问题，未做判定）：
 - `patent_figure.py`：既可当绘图库用（`Figure(...).save()` 保存即自检，**自检不过会删掉该图并退出**，防止违规图被打包带走），也可离线核对已出图；F1 几何（dpi≥200、图宽 14–16cm）、F2 图内不嵌图题 + 过 C1/C2、F3 标记编号跨图同号同件、F4 框内文字 ≤12 字。PNG 无 dpi 元数据时 F1 报"未核"，不拿假定 dpi 反推的数字误判；带 dpi 元数据时 `--check` 会真按 PNG 自带 dpi 换算图宽判 F1。重画包内单图时把本案登记表传进去（`Figure(..., parts=json.load(open('parts.json'))[...])`），同号异件在出图当场即拒，不必等离线核对。
-- `check_iron_rules.py`：R1 绝对化措辞、R2 占位符格式（R2a 裸 TODO/FIXME/XXX、R2b 方括号须为 待*/占位 标记、R2c 【待设计方确认：…】须三字段）、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告、R6 本案型号/商标（须 `--brand-terms X,Y` 给出清单，不给报"未核"——自动猜会把 IP67/M5/45#钢 这类标准规格写法判红）、R7 发明名称 ≤25 字、R8 EVT/投产文书缺逐字投产总则。
+- `check_iron_rules.py`：R1 绝对化措辞、R2 占位符格式（R2a 裸 TODO/FIXME/XXX、R2b 方括号须为 待*/占位 标记、R2c 【待设计方确认：…】须三字段）、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告、R6 本案型号/商标（须 `--brand-terms X,Y` 给出清单，不给报"未核"——自动猜会把 IP67/M5/45#钢 这类标准规格写法判红）、R7 发明名称 ≤25 字、R8 EVT/投产文书缺逐字投产总则。**适用域是交付包内的文书**（S5/S7 跑的那批 .md），不是本 skill 自己的规则文档：拿 `--all .` 指向仓库根实测 `合计违规 20`，逐条读下来全部是"规则文档引用了自己禁止的写法"（README/SKILL/hard-rules 列出禁用词清单与占位式样示例 17 条；hard-rules/master-execution/pipeline-stages 因正文讨论 `04_EVT`/`投产判定` 而落入 R8 适用域 3 条）。这不是判据错，也不是要为此加豁免分支——收窄 EVT_SCOPE 试过，去掉 `投产总则` 一支后那 3 个文件仍靠前两支命中，FP 一条没少。按交付包目录跑即为设计用途。
 - `check_figures.py`：C1、C2、C3 都计入退出码，图数不一致不再只打印放行。
 - `regen_docx.py`：1 才是文件级转换失败；2 表示前置依赖（pandoc 或 python-docx）缺失，一个文件都没转。
 
