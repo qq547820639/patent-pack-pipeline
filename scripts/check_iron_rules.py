@@ -13,6 +13,10 @@
   R3 权利要求文本内嵌"待确认"类注释（hard-rules §4 末条）
   R4 摘要超字数——按含标点口径（hard-rules §7）
   R5 背景技术出现的专利公开号不在检索报告已核验集合内（铁律 2）
+  R6 本案型号/商标出现在文书任何位置（铁律 4；须给 --brand-terms，否则报未核，
+     不自动猜型号——IP67/M5/45#钢 这类标准与规格写法会被模式匹配误伤）
+  R7 发明名称超 25 字（templates §0）
+  R8 EVT/投产文书缺逐字投产总则（铁律 5）
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -25,11 +29,13 @@ BANNED_ALWAYS = ['首创', '填补空白', '国际领先', '国际先进']
 FIRST_TIME_CTX = re.compile(
     r'(首次[^，。；\n]{0,12}(公开|报道|提出|实现|发明|采用|研制|研发|量产|交付|达到|实现于)'
     r'|(?:技术|方案|装置|系统|方法|产品)[^，。；\n]{0,8}首次)')
-# 规定的占位写法（templates §7.3 与 hard-rules §6）
-VALID_PLACEHOLDER = re.compile(
-    r'^【(?:待团队补充|待签署|待设计方确认：[^｜】]+｜[^｜】]+｜[^｜】]+)】$')
-# 以"待"开头却不符合上述格式 ⇒ 意图是占位但写法不合规定
-INTENDED_PLACEHOLDER = re.compile(r'【待[^】]*】')
+# 占位判据分三条适用域。把 §6 的三字段式样当全局唯一式样会误伤自家模板：
+# 2026-09-25 实测照 templates §0 写的交底书被判 R2 违规，而【待填】【待回填】【占位】
+# 【待团队补充：对象】等分别是 templates / companion-papers / grant-application 规定的写法。
+PLACEHOLDER_TOKEN = re.compile(r'【[^】]*】')
+PLACEHOLDER_KIND = re.compile(r'^【(?:待[^】]{0,60}|占位)】$')          # R2b：须为 待*/占位 标记
+CONFIRM3_PREFIX = '【待设计方确认：'                                      # R2c：仅此式样核三字段
+CONFIRM3_SHAPE = re.compile(r'^【待设计方确认：[^｜】]+｜[^｜】]+｜[^｜】]+】$')
 # 只认这三个为非法裸占位：TBD/TBC/ASSUMPTION 是 hard-rules §1 规定的合规状态标注，
 # "待确认问题单"是本项目自有节名——两者都不能判红，否则门禁与自家规则打架。
 BARE_TODO = re.compile(r'\b(?:TODO|FIXME|XXX)\b')
@@ -46,6 +52,11 @@ CLAIMS_HEAD = re.compile(r'^#{2,3}\s*(?:\d+\.\s*)?(?:权利要求书|权利要�
 BACKGROUND_HEAD = re.compile(r'^#{2,3}\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:背景技术|2\.1|现有技术)')
 NEXT_SECTION = re.compile(r'^#{1,3}\s')
 ABSTRACT_LIMIT = 300
+TITLE_FIELD = re.compile(r'^\s*-\s*发明名称[:：]\s*(\S.*?)\s*$')      # R7（templates §0）
+TITLE_MAX = 25
+EVT_SCOPE = re.compile(r'04_EVT|投产判定|投产总则')                    # R8 适用域
+# 逐字规范串：以 templates §5 / evt-and-regulatory / README §4 三处一致写法为准（句号在引号内）
+PRODUCTION_CLAUSE = '任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据。'
 
 
 class Finding:
@@ -73,7 +84,7 @@ def section_body(lines, head_re):
     return None, []
 
 
-def check_text(path, text, allowed_pub_nos=None):
+def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
     """对单份文书文本跑全部判据，返回 (findings, notes)。notes 为不计入违规的说明行。"""
     findings, notes = [], []
     lines = text.splitlines()
@@ -85,14 +96,20 @@ def check_text(path, text, allowed_pub_nos=None):
         if '首次' in raw and FIRST_TIME_CTX.search(raw):
             findings.append(Finding('R1 绝对化措辞', path, i, '「首次」用于新颖性声明', raw.strip()[:60]))
 
-        for m in INTENDED_PLACEHOLDER.finditer(raw):
+        for m in PLACEHOLDER_TOKEN.finditer(raw):
             token = m.group(0)
-            if not VALID_PLACEHOLDER.match(token):
+            if not PLACEHOLDER_KIND.match(token):
                 findings.append(Finding(
-                    'R2 占位符格式', path, i,
-                    '占位须为【待团队补充】/【待签署】/【待设计方确认：对象｜阻塞项｜关闭判据】', token))
+                    'R2b 占位符格式', path, i,
+                    '方括号占位须以「待」开头或用【占位】，否则不是本仓库规定的占位式样', token))
+            elif token.startswith(CONFIRM3_PREFIX) and not CONFIRM3_SHAPE.match(token):
+                findings.append(Finding(
+                    'R2c 三字段占位', path, i,
+                    '【待设计方确认：…】须为 对象｜阻塞项｜关闭判据 三字段', token))
         if BARE_TODO.search(raw):
-            findings.append(Finding('R2 占位符格式', path, i, '裸 TODO/TBD/待确认 类字样', raw.strip()[:60]))
+            findings.append(Finding('R2a 占位符格式', path, i,
+                                    '裸 TODO/FIXME/XXX 字样（TBD/TBC 属 §1 允许的状态标注，不判）',
+                                    raw.strip()[:60]))
 
     cstart, cbody = section_body(lines, CLAIMS_HEAD)
     if cstart is not None:
@@ -129,6 +146,42 @@ def check_text(path, text, allowed_pub_nos=None):
         nums = set(re.sub(r'\s', '', x).upper() for x in PUB_NO.findall(text))
         if nums:
             notes.append(f'文书含 {len(nums)} 个公开号，未给 --search-report，R5 未核（不折算合规也不折算违规）')
+    # R6 商标/型号禁令（铁律 4）：须由调用方给出本案的型号/商标清单，
+    # 不自动猜——实测 IP67、M5、45#钢 这类标准/规格写法会被模式匹配误伤。
+    for term in (brand_terms or []):
+        if not term:
+            continue
+        pat = re.compile(re.escape(term), re.I)
+        for i, raw in enumerate(lines, 1):
+            if pat.search(raw):
+                findings.append(Finding('R6 商标型号', path, i,
+                                        f'出现本案型号/商标「{term}」，应改通用名', raw.strip()[:60]))
+    if brand_terms is None:
+        pub = set(re.sub(r'\s', '', x).upper() for x in PUB_NO.findall(text))
+        cand = [t for t in re.findall(r'\b[A-Za-z]{2,}[-_ ]?\d{2,}\b', text)
+                if t.upper() not in pub]
+        notes.append(f'未给 --brand-terms，R6 未核'
+                     + (f'（另有 {len(set(cand))} 处型号形态待人工判）' if cand else ''))
+
+    # R7 发明名称字数（templates §0：≤25 字）
+    for i, raw in enumerate(lines, 1):
+        m = TITLE_FIELD.match(raw)
+        if m:
+            val = m.group(1)
+            n = len(re.sub(r'\s', '', val))
+            if n > TITLE_MAX:
+                findings.append(Finding('R7 发明名称字数', path, i,
+                                        f'发明名称 {n} 字 > {TITLE_MAX}'))
+            break
+    else:
+        notes.append('未找到「发明名称：」字段，R7 未核')
+
+    # R8 EVT 投产总则逐字（铁律 5 / EVT 诚实边界）
+    if EVT_SCOPE.search(path) or EVT_SCOPE.search(text):
+        if PRODUCTION_CLAUSE not in text:
+            findings.append(Finding(
+                'R8 投产总则', path, 1,
+                'EVT/投产文书缺逐字投产总则：' + PRODUCTION_CLAUSE[:24] + '…'))
     return findings, notes
 
 
@@ -149,6 +202,7 @@ def main():
     ap.add_argument('targets', nargs='+', help='待检 .md 文件，或配合 --all 传交付包目录')
     ap.add_argument('--all', action='store_true', help='递归检查目录下所有 .md')
     ap.add_argument('--search-report', help='检索报告 .md：提供 R5 的已核验公开号集合')
+    ap.add_argument('--brand-terms', help='逗号分隔的本案型号/商标清单（R6）；不给则 R6 报未核')
     args = ap.parse_args()
 
     if args.all and not os.path.isdir(args.targets[0]):
@@ -172,17 +226,22 @@ def main():
                       for x in PUB_NO.findall(open(args.search_report, encoding='utf8').read()))
         print(f'检索报告已核验公开号 {len(allowed)} 个')
 
+    brands = None
+    if args.brand_terms is not None:
+        brands = [t.strip() for t in args.brand_terms.split(',') if t.strip()]
+        print(f'型号/商标清单 {len(brands)} 项: {", ".join(brands)}')
+
     total = 0
     for p in paths:
         text = open(p, encoding='utf8').read()
-        findings, notes = check_text(p, text, allowed)
+        findings, notes = check_text(p, text, allowed, brands)
         for note in notes:
             print(f'  note {p}: {note}')
         for f in findings:
             print(str(f))
         total += len(findings)
         print(f'{p}: 违规 {len(findings)}')
-    print(f'合计违规 {total}（规则 R1–R5，判据见脚本 docstring）')
+    print(f'合计违规 {total}（规则 R1–R8，判据见脚本 docstring）')
     sys.exit(1 if total else 0)
 
 

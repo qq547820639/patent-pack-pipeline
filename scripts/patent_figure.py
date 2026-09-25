@@ -52,7 +52,9 @@ def _require_matplotlib():
 class Figure:
     """一张专利附图。fig_w_cm 与 dpi 决定像素尺寸，落不进纪律区间就不让建图。"""
 
-    def __init__(self, name, fig_w_cm=15.0, fig_h_cm=10.0, dpi=200):
+    def __init__(self, name, fig_w_cm=15.0, fig_h_cm=10.0, dpi=200, parts=None):
+        """parts 传入本案已登记的 {编号: 部件}（通常由 parts.json 读出），
+        重画单图时也能在出图当场核 F3 同号异件，而不是等离线 --check 才发现。"""
         self.violations = []
         if dpi < DPI_MIN:
             self.violations.append(f'F1 dpi={dpi} < {DPI_MIN}')
@@ -62,7 +64,7 @@ class Figure:
         self._plt = _require_matplotlib()
         self.name = name
         self.dpi = dpi
-        self.parts = {}
+        self.parts = dict(parts or {})
         self._pending_labels = []
         self.fig = self._plt.figure(
             figsize=(fig_w_cm / 2.54, fig_h_cm / 2.54), dpi=dpi, facecolor='white')

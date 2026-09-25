@@ -89,9 +89,10 @@ def probe_env():
 
 # ---------- 各脚本冒烟 ----------
 
-def _line_figure(path, w=1260, h=900, elements=1, tint=None):
+def _line_figure(path, w=1260, h=900, elements=1, tint=None, dpi=None):
     """生产口径白底黑线附图：16cm@200dpi≈1260px 宽。tint 给定时叠加彩色像素。
-    elements=1 刻意取"稀疏但合法"的框图——它压缩后仅约 5.4KB，用来钉住字节阈值回归。"""
+    elements=1 刻意取"稀疏但合法"的框图——它压缩后仅约 5.4KB，用来钉住字节阈值回归。
+    dpi 给定时写入 pHYs 元数据（模拟 matplotlib/第三方导出件），不给则 PNG 无 dpi 元数据。"""
     im = Image.new('RGB', (w, h), (255, 255, 255))
     d = ImageDraw.Draw(im)
     for i in range(elements):
@@ -101,7 +102,7 @@ def _line_figure(path, w=1260, h=900, elements=1, tint=None):
     if tint:
         a = np.array(im); a[100, 100] = tint
         im = Image.fromarray(a)
-    im.save(path)
+    im.save(path, **({'dpi': (dpi, dpi)} if dpi else {}))
     return path
 
 
@@ -362,26 +363,39 @@ def test_check_iron_rules():
         # R1 绝对化措辞
         write(d, bg=IRON_OK_BG + '\n本方案为业界首创。')
         r = gate(d)
-        assert_(r.returncode == 1 and 'R1' in r.stdout, 'R1「首创」未触发', r)
+        assert_(r.returncode == 1 and 'FAIL R1' in r.stdout, 'R1「首创」未触发', r)
         write(d, bg=IRON_OK_BG + '\n控制模块在首次加载配置表时读取版本号。')
         r = gate(d)
         assert_(r.returncode == 0, 'R1 把正常语境里的「首次」误判违规', r)
 
-        # R2 占位符格式（含两处不得误伤的合规写法）
+        # R2 三条各配成对：非法写法必红、自家文档规定的式样一律不得误伤
         write(d, bg=IRON_OK_BG + '\n减振件硬度【待确认】。')
         r = gate(d)
-        assert_(r.returncode == 1 and 'R2' in r.stdout, 'R2 非法占位未触发', r)
-        write(d, bg=IRON_OK_BG + '\n减振件硬度【待设计方确认：硬度值｜来料批次｜实测通过】。')
+        assert_(r.returncode == 0, 'R2b 把【待确认】式样判红（合法 待* 占位）', r)
+        write(d, bg=IRON_OK_BG + '\n减振件硬度【TBD】。')
         r = gate(d)
-        assert_(r.returncode == 0, 'R2 误判规定的三字段占位写法', r)
+        assert_(r.returncode == 1 and 'R2b' in r.stdout, 'R2b 未拦非 待*/占位 方括号标记', r)
+        write(d, bg=IRON_OK_BG + '\n见下【待设计方确认：只有对象一项】。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R2c' in r.stdout, 'R2c 未拦缺字段三字段占位', r)
+        write(d, bg=IRON_OK_BG + '\n见下【待设计方确认：硬度值｜来料批次｜实测通过】。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R2c 误判合规三字段占位', r)
+        write(d, bg=IRON_OK_BG + '\n此处 TODO 待补。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'R2a' in r.stdout, 'R2a 未拦裸 TODO', r)
         write(d, bg=IRON_OK_BG + '\n整机质量 4.2kg（设计目标 v3，TBD）。')
         r = gate(d)
         assert_(r.returncode == 0, 'R2 把 hard-rules §1 允许的 TBD 状态标注判红', r)
+        # 自家 templates §0 规定的【待填写】不得误伤（曾实测误判，是门禁与模板打架）
+        write(d, bg=IRON_OK_BG + '\n申请人（建议）：【待填写】；发明人：【占位】。')
+        r = gate(d)
+        assert_(r.returncode == 0, 'R2 误判 templates/companion-papers 规定的占位式样', r)
 
         # R3 权文内占位注释（真实形态是括号里带说明文字）
         write(d, claims='2. 根据权利要求 1 所述装置，其特征是设减振件（待确认：型号）。')
         r = gate(d)
-        assert_(r.returncode == 1 and 'R3' in r.stdout, 'R3 权文内占位注释未触发', r)
+        assert_(r.returncode == 1 and 'FAIL R3' in r.stdout, 'R3 权文内占位注释未触发', r)
         write(d, claims='2. 根据权利要求 1 所述装置，其特征是设减振件。')
         r = gate(d)
         assert_(r.returncode == 0, 'R3 误判合规从权', r)
@@ -392,7 +406,7 @@ def test_check_iron_rules():
         assert_(n_over > 300, f'必红夹具仅 {n_over} 字，未过 300 限值，夹具失效')
         write(d, abstract=over)
         r = gate(d)
-        assert_(r.returncode == 1 and 'R4' in r.stdout and str(n_over) in r.stdout, 'R4 超限未触发', r)
+        assert_(r.returncode == 1 and 'FAIL R4' in r.stdout and str(n_over) in r.stdout, 'R4 超限未触发', r)
         n_ok = len(re.sub(r'\s', '', IRON_OK_ABSTRACT))
         assert_(n_ok <= 300, f'合规夹具 {n_ok} 字已超限')
         write(d, abstract=IRON_OK_ABSTRACT)
@@ -402,11 +416,63 @@ def test_check_iron_rules():
         # R5 公开号须属于检索报告（集合差）
         write(d, bg=IRON_OK_BG + ' 另见 CN999999999X。')
         r = gate(d)
-        assert_(r.returncode == 1 and 'R5' in r.stdout, 'R5 越界公开号未触发', r)
+        assert_(r.returncode == 1 and 'FAIL R5' in r.stdout, 'R5 越界公开号未触发', r)
         write(d, bg=IRON_OK_BG + ' 另见 CN999999999X。')
         r = gate(d, report=False)
         assert_(r.returncode == 0 and 'R5 未核' in r.stdout,
                 '缺检索报告时 R5 应报"未核"三态，不得折成违规也不得折成合规', r)
+
+        # R6 商标/型号：给了清单才核，命中必红；不给报"未核"而不是凭空判红
+        write(d, bg=IRON_OK_BG + ' 参见 XJ-200 型产品。')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md'),
+                 '--brand-terms', 'XJ-200'])
+        assert_(r.returncode == 1 and 'FAIL R6' in r.stdout, 'R6 未命中已声明的型号', r)
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md')])
+        assert_(r.returncode == 0 and 'R6 未核' in r.stdout,
+                '缺 --brand-terms 时 R6 应报"未核"，不得凭空判红或判合规', r)
+        # 反向：标准/规格写法不得被当型号（不给清单时也只报未核，不自动判红）
+        write(d, bg=IRON_OK_BG + ' 紧固件按 M5 螺纹、防护等级 IP67、材料 45#钢。')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md')])
+        assert_(r.returncode == 0 and 'R6 未核' in r.stdout, '标准规格写法被自动判红', r)
+
+        # R7 发明名称 ≤25 字（templates §0）：超限必红，合规必绿，字段缺失报未核
+        named = '# 专利技术交底书\n\n## 0. 著录项目\n   - 发明名称：{t}\n'
+        long_name = '一种' + '腰部助力外骨骼控制装置' * 3
+        assert_(len(long_name) > 25, f'必红夹具仅 {len(long_name)} 字，未超限')
+        open(os.path.join(d, '命名.md'), 'w', encoding='utf8').write(named.format(t=long_name))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '命名.md')])
+        assert_(r.returncode == 1 and 'FAIL R7' in r.stdout, 'R7 未拦超长发明名称', r)
+        open(os.path.join(d, '命名.md'), 'w', encoding='utf8').write(
+            named.format(t='一种腰部助力外骨骼装置'))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '命名.md')])
+        assert_(r.returncode == 0, 'R7 误判合规发明名称', r)
+        r = gate(d)
+        assert_('R7 未核' in r.stdout, '无发明名称字段时 R7 未报未核', r)
+
+        # R8 EVT 文书逐字投产总则（铁律 5）
+        evt_dir = os.path.join(d, '04_EVT验证'); os.makedirs(evt_dir, exist_ok=True)
+        evt = os.path.join(evt_dir, 'EVT报告.md')
+        open(evt, 'w', encoding='utf8').write('# EVT 报告\n\n## 投产判定\n分析结论：满足判据。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', evt])
+        assert_(r.returncode == 1 and 'FAIL R8' in r.stdout, 'R8 未拦缺逐字投产总则的 EVT 报告', r)
+        open(evt, 'w', encoding='utf8').write(
+            '# EVT 报告\n\n## 投产判定\n'
+            '任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', evt])
+        assert_(r.returncode == 0, 'R8 误判已逐字写入投产总则的报告', r)
+        r = gate(d)
+        assert_('FAIL R8' not in r.stdout, '非 EVT 文书被 R8 误伤', r)
+
+        # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
+        # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）
+        irtxt = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
+        # \s* 不可省：R8 的 Finding( 与实参之间有换行，紧凑写法会漏读成 R1–R7
+        rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)", irtxt)})
+        assert_(rnums == list(range(rnums[0], rnums[0] + len(rnums))) if rnums else False,
+                f'判据 R 号推导有断档（说明推导正则漏读了某个 token）：{rnums}', r)
+        claim = f'（规则 R{rnums[0]}–R{rnums[-1]}，'
+        assert_(claim in r.stdout,
+                f'门禁自报规则区间与实际判据 R1–R{rnums[-1]} 不一致：{claim}', r)
 
         # 输入不可用 → rc=2，不得静默判绿
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '不存在.md')])
@@ -432,7 +498,7 @@ def test_check_iron_rules():
         open(p2, 'w', encoding='utf8').write(_iron(bg=IRON_OK_BG + '\n本方案填补空白。'))
         r = run([PY, f'{S}/check_iron_rules.py', d, '--all',
                  '--search-report', os.path.join(d, '检索报告.md')])
-        assert_(r.returncode == 1 and '实用新型.md' in r.stdout and 'R1' in r.stdout,
+        assert_(r.returncode == 1 and '实用新型.md' in r.stdout and 'FAIL R1' in r.stdout,
                 '--all 未抓到子目录内的违规', r)
 
         # --all 误用（指到文件）与空目录：rc=2 且必须说出原因，不许只给空列表
@@ -443,7 +509,7 @@ def test_check_iron_rules():
             r = run([PY, f'{S}/check_iron_rules.py', empty, '--all'])
             assert_(r.returncode == 2 and '未找到待检文件' in r.stdout,
                     '--all 空目录未说明原因', r)
-    print(f'PASS check_iron_rules（R1–R5 各自成对必红必绿 + 三态 + rc=2 + --all 四档；'
+    print(f'PASS check_iron_rules（R1–R8 各条成对必红必绿 + 三态 + rc=2 + --all 四档；'
           f'摘要 {n_ok}/{n_over} 字）')
 
 
@@ -519,10 +585,12 @@ def test_patent_figure():
     with tempfile.TemporaryDirectory() as d:
         # 必绿：按纪律默认值出图，几何与像素均应通过
         f = pf.Figure('图1', fig_w_cm=15.0, dpi=200)
+        assert_(f.violations == [], f'合规几何参数被建图即判红: {f.violations}')
         right = f.box(1, 4, 3, 2, text='躯干框架')
+        assert_(f.violations == [], f'合规框内文字被 F4 误判: {f.violations}')
         f.label(1, '躯干框架', at=(5.2, 5.0), anchor=right)
         p = f.save(os.path.join(d, '图1.png'))
-        assert_(f.verify_saved(p) == [], '合规出图被 F1/F2 误判')
+        assert_(f.verify_saved(p) == [], 'verify_saved 复检未全绿（F1/F2/F3 任一误伤都落这里）')
         with __import__('PIL').Image.open(p) as im:
             w_px = im.size[0]
         assert_(abs(w_px / 200 * 2.54 - 15.0) < 0.1, f'实际图宽 {w_px}px@200dpi 不落在 15cm')
@@ -568,17 +636,57 @@ def test_patent_figure():
         bad, _ = pf.check_cross_figure({'图1': {1: '框架'}, '图2': {1: '驱动'}})
         assert_(any('F3' in x for x in bad), '跨图同号异件未抓到')
 
+        # F3 出图当场对登记表核对：同号异件必红、同号同件必绿
+        q = pf.Figure('图Q', parts={1: '躯干框架'})
+        aq = q.box(2, 1, 3, 2, text='驱动带')
+        q.label(1, '驱动带', at=(6, 2), anchor=aq)
+        assert_(any('F3' in x for x in q.verify_saved(p)),
+                '与本案登记表同号异件未在出图当场抓到')
+        w = pf.Figure('图W', parts={1: '躯干框架'})
+        aw = w.box(2, 1, 3, 2, text='驱动带')
+        w.label(1, '躯干框架', at=(6, 2), anchor=aw)
+        assert_(not any('F3' in x for x in w.verify_saved(p)),
+                '与登记表同号同件被 F3 误判')
+
         # --check CLI：合规整目录必绿
         parts = os.path.join(d, 'parts.json')
         open(parts, 'w', encoding='utf8').write('{"图1.png": {"1": "躯干框架"}}')
         r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
         assert_(r.returncode == 0 and '违规 0' in r.stdout, '--check 合规目录未全绿', r)
 
-        # --check 必红：混入一张彩色图
-        _line_figure(os.path.join(d, '图9.png'), tint=(255, 0, 0))
+        # --check 必红：混入一张彩色图（带 dpi 元数据，让它走几何已核那条路，
+        # 免得"几何三态"的变异被这一档抢先判红，红因就归不到正确的条款上）
+        _line_figure(os.path.join(d, '图9.png'), w=1181, tint=(255, 0, 0), dpi=200)
         r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
         assert_(r.returncode == 1 and 'F2 C1' in r.stdout, '--check 未拦彩色图', r)
         os.remove(os.path.join(d, '图9.png'))
+
+        # --check 必红：PNG 自带 dpi 且换算图宽 25.4cm → F1 必须现判
+        _line_figure(os.path.join(d, '图7_超宽.png'), w=2000, dpi=200)
+        r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
+        assert_(r.returncode == 1 and 'F1 图宽' in r.stdout,
+                'PNG 带 dpi 元数据时 --check 未核图宽', r)
+        # --check 必绿：同一张图改回 15cm（1181px@200dpi）必须整条放行
+        os.remove(os.path.join(d, '图7_超宽.png'))
+        _line_figure(os.path.join(d, '图7_合规宽.png'), w=1181, dpi=200)
+        r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
+        assert_(r.returncode == 0 and '违规 0' in r.stdout,
+                '带 dpi 的合规宽度图被 --check 判红', r)
+        os.remove(os.path.join(d, '图7_合规宽.png'))
+
+        # 三态：PNG 无 dpi 元数据时 F1 报未核。2000px 宽按纪律下限 200dpi 反推是 25.4cm，
+        # 若脚本拿假定 dpi 反推就会把这张图误判违规——正是这条断言要钉住的。
+        _line_figure(os.path.join(d, '图8_无dpi元数据.png'), w=2000)
+        r = run([PY, f'{S}/patent_figure.py', '--check', d])
+        assert_(r.returncode == 0 and 'F1 几何未核' in r.stdout,
+                '无 dpi 元数据时 F1 未走三态（可能被假定 dpi 反推误判）', r)
+        # 配套必红：几何未核不得把同一张图的像素判据一起免检
+        os.remove(os.path.join(d, '图8_无dpi元数据.png'))
+        _line_figure(os.path.join(d, '图8_无dpi元数据.png'), w=2000, tint=(255, 0, 0))
+        r = run([PY, f'{S}/patent_figure.py', '--check', d])
+        assert_(r.returncode == 1 and 'F2 C1' in r.stdout and 'F1 几何未核' in r.stdout,
+                'F1 三态把该图的像素判据一起免检了', r)
+        os.remove(os.path.join(d, '图8_无dpi元数据.png'))
 
         # 三态：不给 parts 时 F3 报未核，既不折成违规也不折成合规
         r = run([PY, f'{S}/patent_figure.py', '--check', d])
