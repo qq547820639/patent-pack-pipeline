@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|doc|dc|evt|fig|iron|lab|reg|text|vsr）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|claims|doc|dc|evt|fig|iron|lab|reg|text|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -53,11 +53,37 @@ CR = 'scripts/check_regulatory.py'
 CD = 'scripts/check_design_completion.py'
 CN = 'scripts/check_figure_labels.py'
 CT = 'scripts/check_figure_text.py'
+CQ = 'scripts/check_claims.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
+    'claims': [
+        ('Q1 编号连续性判据关掉', CQ,
+         '    if sorted(nums) != list(range(1, len(nums) + 1)):', '    if False:',
+         '权项跳号未被 Q1 抓到'),
+        ('Q2 独权位置判据关掉', CQ,
+         '        late = sorted(x for x in ind if first_dep is not None and x > first_dep)',
+         '        late = []', '独权排在从权之后未被 Q2 抓到'),
+        ('Q3 在后的引用不报', CQ,
+         '            elif r >= n:', '            elif False:', '从权向后引用未被 Q3 抓到'),
+        ('Q4 多项引多项不报', CQ,
+         '            if bases:', '            if False:', '多项从权引多项基础未被 Q4 抓到'),
+        ('Q5 括号外标记不报', CQ,
+         '                if [nm for nm in name2num if pre.endswith(nm) and name2num[nm] == num]:',
+         '                if False:', '附图标记写在括号外未被 Q5 抓到'),
+        ('没有权要节时把未判折成合规', CQ,
+         '    if not hit:', '    if False:', '没有权利要求书节被折成合规或未上报'),
+        # 引用语里的权项号不当标记：真正兜住这层误伤的是"前缀必须逐字以表内名称结尾"，
+        # 由合规档（含两处"根据权利要求 1"）与 q5 档两头钉；源码里那句 DEP_REF 扣除只是第二层保险，
+        # 单独给它配注入会在改名后的判据下永不开火，宁可不占 arm 也不留一支不复现的变异。
+        ('读不动的 docx 不再兜异常（崩一次就是一张假违规单）', CQ,
+         '    except Exception as e:', '    except ImportError as e:',
+         '读不动的 docx 崩成异常或退码不是 2'),
+        ('输入档不再只接目录（文件当目录喂进 Q）', CQ,
+         '        if os.path.isdir(p):', '        if True:', '传文件未说成因并 fail-closed'),
+    ],
     'iron': [
         ('R1 禁用词判据关闭', IRON, "        for w in BANNED_ALWAYS:", '        for w in []:',
          'R1「首创」未触发'),

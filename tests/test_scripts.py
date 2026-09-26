@@ -1149,14 +1149,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNT]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEGKNT]\d)\s', s, re.M))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNQT]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEGKNQT]\d)\s', s, re.M))
                  | set(re.findall(r'\u2192 ([NVEGKT]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEGKNT][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEGKNQT][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -2006,6 +2006,125 @@ def test_search_report_docx_channel():
     print('PASS search_report_docx_channel（Word 报告真判 + V1/V2 开火 + 成对挑 md + 两档 fail-closed）')
 
 
+def test_check_claims():
+    """权利要求形状门禁 Q1–Q5：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
+
+    合规档必须先过：Q4/Q5 这种"两支互斥"的判据一旦把合规写法也判红，整套就是永久红灯。
+    q4 档刻意写成"引用号都在前"，让它只点亮 Q4——同档撞两支判据时，读数说不清是谁在咬。
+    """
+    TBL = ('## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
+           '| 1 | 躯干框架 | 1 |\n| 2 | 锁扣本体 | 1 |\n')
+    OK = ('# 说明书\n## 权利要求书\n'
+          '1. 一种锁扣装置，包括躯干框架（1）与锁扣本体（2），其特征在于：所述锁扣本体（2）与所述躯干框架（1）铰接。\n'
+          '2. 根据权利要求 1 所述的锁扣装置，其特征在于：所述锁扣本体（2）的弹臂拉脱力 90N。\n'
+          '3. 根据权利要求1或2所述的锁扣装置，其特征在于：所述弹臂为钛合金。\n' + TBL)
+
+    def mkpkg(root, body):
+        os.makedirs(os.path.join(root, '02_申请文件'), exist_ok=True)
+        open(os.path.join(root, '02_申请文件', '说明书.md'), 'w', encoding='utf8').write(body)
+        return root
+
+    with tempfile.TemporaryDirectory() as d:
+        ok = mkpkg(os.path.join(d, 'ok'), OK)
+        r = run([PY, f'{S}/check_claims.py', ok])
+        assert_(r.returncode == 0 and '实判判据 5 条' in r.stdout and '→ Q' not in r.stdout,
+                f'合规权要被判红，或五条没各判到: {show(r)}', r)
+
+        p = os.path.join(d, 'q1')
+        mkpkg(p, OK.replace('\n3. 根据权利要求1或2', '\n4. 根据权利要求1或2'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '不是从 1 起的连续号' in r.stdout and '→ Q1' in r.stdout,
+                f'权项跳号未被 Q1 抓到: {show(r)}', r)
+
+        p = os.path.join(d, 'q2')
+        mkpkg(p, OK.replace('1. 一种锁扣装置', '3. 一种锁扣装置')
+                .replace('2. 根据权利要求 1 所述', '1. 根据权利要求 3 所述')
+                .replace('3. 根据权利要求1或2所述', '2. 根据权利要求1或3所述'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '排在从属权利要求' in r.stdout and '→ Q2' in r.stdout,
+                f'独权排在从权之后未被 Q2 抓到: {show(r)}', r)
+
+        p = os.path.join(d, 'q3')
+        mkpkg(p, OK.replace('2. 根据权利要求 1 所述', '2. 根据权利要求 3 所述'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '引用了在后的' in r.stdout and '→ Q3' in r.stdout,
+                f'从权向后引用未被 Q3 抓到: {show(r)}', r)
+
+        p = os.path.join(d, 'q4')
+        # 3 本身是多项从属（引 1或2），4 又以它为引用基础 → Q4；引用号全都在前，Q3 不陪跑
+        mkpkg(p, OK.replace('## 图中标记说明',
+                            '4. 根据权利要求1或3所述的锁扣装置，其特征在于：所述弹臂表面镀硬铬。\n'
+                            '## 图中标记说明'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '同为多项从属' in r.stdout and '→ Q4' in r.stdout,
+                f'多项从权引多项基础未被 Q4 抓到: {show(r)}', r)
+        # 同档不许顺手点亮 Q3：引用号都在前，Q4 的开火才归因得清
+        assert_('→ Q3' not in r.stdout, f'Q4 夹具同时点亮 Q3，读数无法归因: {show(r)}', r)
+
+        p = os.path.join(d, 'q5')
+        mkpkg(p, OK.replace('躯干框架（1）与锁扣本体（2）', '躯干框架 1 与锁扣本体（2）'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '写在括号外' in r.stdout and '→ Q5' in r.stdout,
+                f'附图标记写在括号外未被 Q5 抓到: {show(r)}', r)
+        # "根据权利要求 1" 里的 1 是权项号不是标记；"拉脱力 90N" 是量值不是标记。
+        # 这两处若被判红，Q5 就是一把造假红的尺子——合规档（上面第一支）同时钉着这条。
+
+        p = os.path.join(d, 'noclaims')
+        os.makedirs(p)
+        open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and 'Q1–Q5 未判' in r.stdout,
+                f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
+
+        r = run([PY, f'{S}/check_claims.py', os.path.join(ok, '02_申请文件', '说明书.md')])
+        assert_(r.returncode == 2 and '只接目录' in r.stdout,
+                f'传文件未说成因并 fail-closed: {show(r)}', r)
+
+        # docx 通道：交付物只有 Word 件时 Q 必须照判（与 T/N/V 同口径）
+        try:
+            from docx import Document
+        except ImportError:
+            print('  SKIP check_claims 的 docx 通道（无 python-docx）')
+        else:
+            wd = os.path.join(d, 'wordonly')
+            os.makedirs(wd)
+            doc = Document()
+            for ln in OK.replace('## 图中标记说明\n'
+                                 '| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
+                                 '| 1 | 躯干框架 | 1 |\n| 2 | 锁扣本体 | 1 |\n', '').splitlines():
+                if ln.startswith('## '):
+                    doc.add_heading(ln[3:], level=2)
+                elif ln.startswith('# '):
+                    doc.add_heading(ln[2:], level=1)
+                elif ln.strip():
+                    doc.add_paragraph(ln)
+            t = doc.add_table(rows=3, cols=3)
+            for i, row in enumerate((('标记', '名称', '所在图号'), ('1', '躯干框架', '1'),
+                                     ('2', '锁扣本体', '1'))):
+                for j, v in enumerate(row):
+                    t.cell(i, j).text = v
+            doc.save(os.path.join(wd, '说明书.docx'))
+            r = run([PY, f'{S}/check_claims.py', wd])
+            assert_(r.returncode == 0 and '实判判据 5 条' in r.stdout,
+                    f'Word-only 权要未被 Q 真判（只认 md 的话这里假绿或成串假红）: {show(r)}', r)
+            bad_doc = os.path.join(d, 'wordbad')
+            os.makedirs(bad_doc)
+            doc = Document()
+            doc.add_heading('权利要求书', level=2)
+            for ln in ('1. 一种装置，包括甲。', '2. 根据权利要求 3 所述的装置，其特征在于：乙。',
+                       '3. 根据权利要求 1 所述的装置，其特征在于：丙。'):
+                doc.add_paragraph(ln)
+            doc.save(os.path.join(bad_doc, '说明书.docx'))
+            r = run([PY, f'{S}/check_claims.py', bad_doc])
+            assert_(r.returncode == 1 and '引用了在后的' in r.stdout and '→ Q3' in r.stdout,
+                    f'Word 件里的向后引用未被 Q3 抓到: {show(r)}', r)
+            open(os.path.join(bad_doc, '坏件.docx'), 'wb').write(b'not a zip')
+            r = run([PY, f'{S}/check_claims.py', bad_doc])
+            assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
+                    f'读不动的 docx 崩成异常或退码不是 2: {show(r)} / {r.stderr[-140:]}', r)
+    print('PASS check_claims（Q1–Q5 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + rc=2）')
+
+
 def test_figure_text_channel():
     """图↔文书对账 T1–T7：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
 
@@ -2485,7 +2604,8 @@ def test_patent_figure():
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
-             test_new_product_package, test_rebuild_package, test_regen_docx,
+             test_new_product_package, test_rebuild_package, test_check_claims,
+             test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
