@@ -33,6 +33,8 @@ F5 为什么判在**矢量侧**（入参），而不是回读像素量笔画：
 用法:
   from patent_figure import Figure          # 见 tests/test_scripts.py 的真实用例
   python3 patent_figure.py --check <figures 目录> [--parts parts.json]
+离线 --check 只判 F1/F2/F3：F4 走 manifest（check_figure_text.py），F5 无位图侧 witness，
+这句话由 --check 自己在开头打印出来（不许被删，常驻与电池各有一支盯着）。
 
 退出码: 0 合规 / 1 存在违规 / 2 前置依赖缺失或未检到图（环境问题，未做判定）
 """
@@ -225,6 +227,12 @@ def main():
 
     bad_total = 0
     parts_by_fig = {}
+    # 覆盖面先说清：离线这一档**不是**"F1–F5 全核一遍"。
+    # F4 事后还能核是因为出图时留了 <图名>.manifest.json（由 check_figure_text.py T1/T2 读）；
+    # F5 事后没有任何 witness——线宽只活在矢量入参里，位图上量不出来（量法与被否决的读数见 §8）。
+    print('本档离线只判 F1（几何）/ F2（像素 C1/C2）/ F3（须给 --parts）；'
+          'F4 由 manifest 交给 check_figure_text.py 事后核，'
+          'F5 线宽无位图侧 witness、本档一律不判（不是"核过且合规"）。')
     if args.parts:
         if not os.path.isfile(args.parts):
             print(f'parts 登记表不存在: {args.parts}（未做判定）')

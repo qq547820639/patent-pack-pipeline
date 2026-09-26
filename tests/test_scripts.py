@@ -2769,6 +2769,10 @@ def test_patent_figure():
         open(parts, 'w', encoding='utf8').write('{"图1.png": {"1": "躯干框架"}}')
         r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
         assert_(r.returncode == 0 and '违规 0' in r.stdout, '--check 合规目录未全绿', r)
+        # 离线档必须自己说清"这一档不判 F4/F5"：F5 事后没有 witness，
+        # 不打印这句的话，"违规 0"会被读成"F1–F5 全核过"。（needle 与电池注入共用这半句）
+        assert_('F5 线宽无位图侧 witness' in r.stdout,
+                '--check 未打印离线覆盖面自述，违规 0 会被读成全核过', r)
 
         # --check 必红：混入一张彩色图（带 dpi 元数据，让它走几何已核那条路，
         # 免得"几何三态"的变异被这一档抢先判红，红因就归不到正确的条款上）
