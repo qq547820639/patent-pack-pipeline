@@ -233,6 +233,17 @@ MUTS = {
         ('离线档不再自述"这一档不判 F5"（违规 0 会被读成全核过）', PF,
          'F5 线宽无位图侧 witness、本档一律不判', 'F5 线宽本档不判（自述被删）',
          '未打印离线覆盖面自述'),
+        ('F6 的填充面扫描整段摘掉', PF,
+         '        for p in self.ax.patches:', '        for p in []:',
+         'F6 未拦住'),
+        ('F6 只写了扫描没接进 save()（灰底图照样落盘）', PF,
+         '        self.violations += self.scan_vector()      # F6：画布对象上还看得见，存成 PNG 就没了',
+         '        pass  # F6 钩子被摘',
+         'F6 没接进 save()'),
+        ('F6 白底豁免收掉（实心白填充与剖面 hatch 全被判红）', PF,
+         '            if p.get_fill() and a > 0.999 and not (r > 0.95 and g > 0.95 and b > 0.95):',
+         '            if p.get_fill() and a > 0.0:',
+         'F6 把实心白填充判红了'),
         ('把 --help 豁免抹掉（用法出口退回"不认 flag"档）', CF,
          "    if any(a in ('-h', '--help') for a in args):", '    if False:',
          '出口未打印用法并退 0'),
@@ -929,7 +940,7 @@ def main():
 
     arms = sorted(MUTS) if args.arm == 'all' else [args.arm]
     if not have_mpl and 'fig' in arms:
-        print('fig 档需要 matplotlib（出图期 F1–F5 与真像素核对）→ 本次未判定，不是通过。'
+        print('fig 档需要 matplotlib（出图期 F1–F6 与真像素核对）→ 本次未判定，不是通过。'
               '装上后重跑，或 --arm iron/vsr 先跑其余两支。')
         arms = [a for a in arms if a != 'fig']
         if not arms:

@@ -15,6 +15,8 @@
   F4 框内文字 ≤12 字
   F5 线宽落在 0.8–1.5pt（**房内口径，非法条**：《专利法实施细则》这页没有任何线宽数值，
      官方出处未亲验——所以本条只约束走本库出图的线，不得冒充法定要求）
+  F6 不得有灰底/半透明填充/内嵌位图/带 colormap 的集合（§5「禁止灰度照片/渐变」的执行点；
+     判在**画布对象**上而不是像素上，理由与被否决的像素量法见 §9 与 scan_vector 的 docstring）
 
 F5 为什么判在**矢量侧**（入参），而不是回读像素量笔画：
   像素量法在这台机器上连"带内/带外"都分不开，四条读数各足以否掉它（完整表与固定量法见
@@ -129,11 +131,58 @@ class Figure:
                      bbox=dict(facecolor='white', edgecolor='none', pad=0.1))
         self._pending_labels.append((num, part))
 
+    def scan_vector(self):
+        """F6：在**画布对象**上查灰底／半透明／内嵌位图与渐变。
+
+        为什么又走矢量侧（与 F5 同因，但这次是量出来才定的）：按像素量"中灰占比"在
+        这台机器上分不开——合法但字多的图会一路顶高，违规的小面积灰底又几乎不动读数：
+        48 框 × 11 汉字的**合法**图 mid=4.91%，而只填一块灰底的违例图 mid=12.68%、
+        渐变 14.96%、照片状 39.43%；把阈值定在 8% 上下各只剩 1.6 倍余量，
+        而合法侧的读数随文字密度往上走（24 框 2.12% → 48 框 4.91%，本探针没测过更高的密度，
+        也就是说这条阈值**没有已知的安全上界**）。
+        完整表与量法见 references/tooling-pitfalls.md §9。
+        矢量侧不需要猜：灰底就是 facecolor 不透明非白，半透明就是 alpha∉(0,1)，
+        照片/渐变就是 ax.images / 带 colormap 的 collection——三条都是对象形状。
+        规则自己要的 45° 剖面斜线（hatch，facecolor='none'）因此天然落在允许侧。
+        """
+        from matplotlib.colors import to_rgba
+        bad = []
+        for p in self.ax.patches:
+            try:
+                r, g, b, a = to_rgba(p.get_facecolor())
+            except (ValueError, TypeError):
+                bad.append(f'F6 填充色读不出（无法判白底）：{type(p).__name__} {p.get_facecolor()!r}')
+                continue
+            if p.get_fill() and a > 0.999 and not (r > 0.95 and g > 0.95 and b > 0.95):
+                bad.append(f'F6 填充面不是白底（灰底/阴影渲染）：{type(p).__name__} '
+                           f'facecolor=({r:.2f},{g:.2f},{b:.2f})')
+            elif 0.0 < a < 0.999:
+                bad.append(f'F6 半透明填充＝灰度效果：{type(p).__name__} alpha={a:.3f}')
+        if len(self.ax.images):
+            bad.append(f'F6 内嵌位图 {len(self.ax.images)} 张（照片/渲染图/渐变不得进线条图）')
+        for col in self.ax.collections:
+            cmap = getattr(col, 'cmap', None)
+            if cmap is not None and getattr(col, 'get_array', lambda: None)() is not None:
+                bad.append(f'F6 带 colormap 的集合＝渐变/密度图：{type(col).__name__}')
+                continue
+            fcs = getattr(col, 'get_facecolor', lambda: None)()
+            for c in (fcs if fcs is not None and len(fcs) else []):
+                try:
+                    r, g, b, a = to_rgba(c)
+                except (ValueError, TypeError):
+                    continue
+                if a > 0.999 and not (r > 0.95 and g > 0.95 and b > 0.95):
+                    bad.append(f'F6 集合填充非白底：{type(col).__name__} '
+                               f'facecolor=({r:.2f},{g:.2f},{b:.2f})')
+                    break
+        return bad
+
     def save(self, path, caption=None):
         """保存并自检，成功返回路径；任一判据不过就删掉该文件并 SystemExit——
         留一张违规图在 figures/ 里比直接报错更糟（打包时会被当合规件带走）。"""
         if caption:
             self.violations.append('F2 图内不得嵌图题，图题请写在 md 引用处')
+        self.violations += self.scan_vector()      # F6：画布对象上还看得见，存成 PNG 就没了
         if self.violations:
             raise SystemExit(f'{self.name}: 拒绝出图\n  ' + '\n  '.join(self.violations))
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -227,12 +276,13 @@ def main():
 
     bad_total = 0
     parts_by_fig = {}
-    # 覆盖面先说清：离线这一档**不是**"F1–F5 全核一遍"。
+    # 覆盖面先说清：离线这一档**不是**"F1–F6 全核一遍"。
     # F4 事后还能核是因为出图时留了 <图名>.manifest.json（由 check_figure_text.py T1/T2 读）；
     # F5 事后没有任何 witness——线宽只活在矢量入参里，位图上量不出来（量法与被否决的读数见 §8）。
     print('本档离线只判 F1（几何）/ F2（像素 C1/C2）/ F3（须给 --parts）；'
           'F4 由 manifest 交给 check_figure_text.py 事后核，'
-          'F5 线宽无位图侧 witness、本档一律不判（不是"核过且合规"）。')
+          'F5 线宽无位图侧 witness、本档一律不判（不是"核过且合规"）；'
+          'F6 灰底/位图/渐变同为矢量侧判据，存成 PNG 就没有对象可查——本档也不判。')
     if args.parts:
         if not os.path.isfile(args.parts):
             print(f'parts 登记表不存在: {args.parts}（未做判定）')

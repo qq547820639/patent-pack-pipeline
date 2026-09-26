@@ -43,7 +43,7 @@ DEPS = [
     ('numpy', 'numpy', '附图彩色像素扫描 scripts/check_figures.py'),
     ('Pillow', 'PIL', '附图读取 scripts/check_figures.py'),
     ('python-docx', 'docx', 'docx 转换后复核 scripts/regen_docx.py'),
-    ('matplotlib', 'matplotlib', '专利附图出图 scripts/patent_figure.py（F1–F5 与出图自检，SKILL 纪律 2）'),
+    ('matplotlib', 'matplotlib', '专利附图出图 scripts/patent_figure.py（F1–F6 与出图自检，SKILL 纪律 2）'),
     ('pypandoc(可选)', 'pypandoc', 'pandoc 不在 PATH 时的兜底定位路径'),
 ]
 
@@ -2674,7 +2674,7 @@ def test_battery_needle_census():
 
 
 def test_patent_figure():
-    """绘图期约束 F1–F5：几何/图题/标记/框内文字/线宽。缺 matplotlib 时如实 SKIP，不冒充跑过。"""
+    """绘图期约束 F1–F6：几何/图题/标记/框内文字/线宽/灰底与位图。缺 matplotlib 时如实 SKIP，不冒充跑过。"""
     try:
         import matplotlib  # noqa: F401
     except ImportError:
@@ -2710,6 +2710,62 @@ def test_patent_figure():
             okfig.line([(0, 0), (9, 9)], width=w)
             okfig.label(2, '部件', at=(4, 4), anchor=(6, 6))     # 引出线走 0.6pt 豁免
             assert_(okfig.violations == [], f'带宽内的合法线宽被 F5 误伤（{w}pt）: {okfig.violations}')
+
+        # F6 灰底／半透明／内嵌位图／colormap 集合：判在画布对象上（像素侧被实测否决，
+        # 见 tooling-pitfalls §9）。四红三绿，三支绿的每支都是一次"收紧就误伤"的对照：
+        # 常规框线、规则自己要求的 45° 剖面 hatch、实心白填充。
+        def _f6(name, draw):
+            g = pf.Figure(name)
+            draw(g)
+            got = g.scan_vector()
+            g._plt.close(g.fig)        # 不关就会撞上 matplotlib 的 20 图上限告警
+            return got
+
+        def _gray(g):
+            g.box(2, 3, 4, 3)
+            g.ax.add_patch(g._plt.Rectangle((2, 3), 4, 3, fill=True, facecolor='0.5',
+                                            edgecolor='none'))
+
+        def _alpha(g):
+            g.ax.add_patch(g._plt.Rectangle((2, 3), 4, 3, fill=True, facecolor='white',
+                                            alpha=0.4, edgecolor='none'))
+
+        def _img(g):
+            g.ax.imshow([[0, 1], [1, 0]], cmap='gray', aspect='auto')
+
+        def _contour(g):
+            import numpy as _np
+            xx, yy = _np.meshgrid(_np.linspace(0, 1, 6), _np.linspace(0, 1, 6))
+            g.ax.contourf(xx, yy, xx + yy, levels=5)
+
+        for tag, draw in (('灰底填充', _gray), ('半透明填充', _alpha),
+                          ('内嵌位图', _img), ('等高线渐变', _contour)):
+            got = _f6('图F6红', draw)
+            assert_(any('F6' in v for v in got), f'F6 未拦住{tag}: {got}')
+        # 合规侧三支：常规出图、剖面斜线（规则要的画法）、实心白填充
+        right6 = pf.Figure('图F6绿')
+        anchor6 = right6.box(1, 4, 3, 2, text='躯干框架')
+        right6.label(1, '躯干框架', at=(5.2, 5.0), anchor=anchor6)
+        assert_(right6.scan_vector() == [], f'F6 误伤常规出图: {right6.scan_vector()}')
+        def _hatch(g):
+            g.ax.add_patch(g._plt.Rectangle((6, 4), 3, 2, fill=True, facecolor='none',
+                                            edgecolor='black', hatch='///', linewidth=1.0))
+        assert_(_f6('图F6剖面', _hatch) == [], 'F6 把规则自己要求的 45° 剖面斜线判红了')
+        def _white(g):
+            g.ax.add_patch(g._plt.Rectangle((1, 4), 3, 2, fill=True, facecolor='white',
+                                            edgecolor='black', linewidth=1.0))
+        assert_(_f6('图F6白填', _white) == [], 'F6 把实心白填充判红了（白底是纪律要求的底色）')
+        # F6 必须挂在 save() 上：只在 scan_vector 里判、save 不调用，等于出图照样落盘
+        refuse = pf.Figure('图F6拒')
+        _gray(refuse)
+        try:
+            refuse.save(os.path.join(d, '不该存在的图.png'))
+            fired = False
+        except SystemExit:
+            fired = True
+        assert_(fired, 'F6 没接进 save()：灰底图照样落盘')
+        assert_(not os.path.exists(os.path.join(d, '不该存在的图.png')),
+                'F6 拒绝出图却没有删掉文件（违规件会被打包带走）')
 
         # F1 必红：dpi 不足 / 图宽越界
         for kw, tag in ((dict(dpi=100), 'F1'), (dict(fig_w_cm=20.0), 'F1')):
@@ -2770,7 +2826,7 @@ def test_patent_figure():
         r = run([PY, f'{S}/patent_figure.py', '--check', d, '--parts', parts])
         assert_(r.returncode == 0 and '违规 0' in r.stdout, '--check 合规目录未全绿', r)
         # 离线档必须自己说清"这一档不判 F4/F5"：F5 事后没有 witness，
-        # 不打印这句的话，"违规 0"会被读成"F1–F5 全核过"。（needle 与电池注入共用这半句）
+        # 不打印这句的话，"违规 0"会被读成"F1–F6 全核过"。（needle 与电池注入共用那半句）
         assert_('F5 线宽无位图侧 witness' in r.stdout,
                 '--check 未打印离线覆盖面自述，违规 0 会被读成全核过', r)
 
@@ -2819,7 +2875,7 @@ def test_patent_figure():
         with tempfile.TemporaryDirectory() as empty:
             r = run([PY, f'{S}/patent_figure.py', '--check', empty])
             assert_(r.returncode == 2 and '未找到 .png' in r.stdout, '--check 空目录未说明成因', r)
-    print('PASS patent_figure（F1–F5 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
+    print('PASS patent_figure（F1–F6 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
 
 
 if __name__ == '__main__':
