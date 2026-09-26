@@ -26,9 +26,17 @@ import re
 import sys
 
 S = os.path.dirname(os.path.abspath(__file__))
-_spec = _ilu.spec_from_file_location('cir', os.path.join(S, 'check_iron_rules.py'))
-_cir = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_cir)
+
+
+def _load(name):
+    spec = _ilu.spec_from_file_location(name, os.path.join(S, name + '.py'))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_t = _load('mdtable')
+_cir = _load('check_iron_rules')
 EVT_DIR, EVT_SCOPE = _cir.EVT_DIR, _cir.EVT_SCOPE
 
 VERDICTS = ('✅', '⚠️', '❌')
@@ -53,35 +61,10 @@ def in_scope(path, text):
     return bool(EVT_DIR.search(path) or EVT_SCOPE.search(text))
 
 
-def split_row(line):
-    return [c.strip() for c in line.strip().strip('|').split('|')]
-
-
-def col(header, *keys):
-    for idx, h in enumerate(header):
-        if any(k in h for k in keys):
-            return idx
-    return None
-
-
 def tables(text):
-    """产出 (表头, [数据行])——只认含「判定」或「实测」列的表。"""
-    lines = text.splitlines()
-    i = 0
-    while i < len(lines):
-        if not lines[i].strip().startswith('|'):
-            i += 1
-            continue
-        block = []
-        while i < len(lines) and lines[i].strip().startswith('|'):
-            block.append(lines[i])
-            i += 1
-        if len(block) < 2:
-            continue
-        header = split_row(block[0])
-        rows = [split_row(b) for b in block[1:]
-                if not set(''.join(split_row(b))) <= set('-: ')]
-        if col(header, '判定') is not None or col(header, '实测') is not None:
+    """产出 (表头, [数据行])——只认含「判定」或「实测」列的表；分行/取列由 mdtable 唯一实现。"""
+    for header, rows in _t.table_blocks(text):
+        if _t.col(header, '判定') is not None or _t.col(header, '实测') is not None:
             yield header, rows
 
 
@@ -95,7 +78,7 @@ def check_text(path, text):
                     f'E1–E4 未判']
 
     found = list(tables(text))
-    has_verdict = any(col(h, '判定') is not None for h, _ in found)
+    has_verdict = any(_t.col(h, '判定') is not None for h, _ in found)
     if not has_verdict:
         # 模板 §5 第 1 项就是"验证总表（…判定 ✅⚠️❌）"。交付物缺这张表要判红，
         # 否则"用散文写的 EVT 报告"会在 E1–E3 上白白通过——没载体不等于已核过。
@@ -107,8 +90,8 @@ def check_text(path, text):
             notes.append(f'{path}: 正文提到投产判定但不在 04_EVT 目录内，且无判定列表格'
                          f'→ E1–E3 未判（仅 E4 逐行核）')
     for tno, (header, rows) in enumerate(found, 1):
-        jv = col(header, '判定')
-        jp = col(header, '实测')
+        jv = _t.col(header, '判定')
+        jp = _t.col(header, '实测')
         for rno, cells in enumerate(rows, 1):
             where = f'{path}: 表{tno} 第{rno}行'
             if jv is not None and jv < len(cells):

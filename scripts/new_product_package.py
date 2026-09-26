@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""生成新产品专利交付包骨架（五段子目录 + 包 README + 两份底稿）。
+"""生成新产品专利交付包骨架（五段子目录 + 包 README + 三份底稿）。
 用法: python3 new_product_package.py <产品代号> <输出父目录>
 · 检索_<产品>.md：文件名带"检索"，verify_search_report.py 传包目录即可自动挑到（V1–V3）。
-· 04_EVT验证/EVT_<产品>.md：E1–E4 的载体，投产总则从 check_iron_rules  import 同一份常量，
+· 04_EVT验证/EVT_<产品>.md：E1–E4 的载体，投产总则从 check_iron_rules import 同一份常量，
   不在这里重抄一遍——重抄的那份迟早和判据漂移。
+· 05_法规与裁决/法规_<产品>.md：G1–G5 的载体（适用性判定/逐条映射/缺口/送检/裁决五张表）。
 """
 import importlib.util as _ilu
 import os, sys
@@ -74,6 +75,32 @@ EVT = """# {name} EVT 分析报告（分析级；不含物理实测数据）
 {clause}
 """
 
+# 05 段同样需要载体：G1–G5 读的是表，规程 §4/§5 要求裁决与判定以表落地。
+# 五张表都只给表头不给行——空表在骨架期是"未判"，填了行才会被判红（列名与
+# templates 的法规/裁决文书格式节同源）。
+REG = """# {name} 法规适用性与冲突裁决
+
+## 1. 适用性判定
+| 标准/法规 | 判定 | 依据 |
+|---|---|---|
+
+## 2. 逐条映射
+| 条款 | 要求 | 结论 |
+|---|---|---|
+
+## 3. 合规缺口清单
+| 编号 | 缺口 | 修订建议 | 实测规程 |
+|---|---|---|---|
+
+## 4. 送检包清单
+| 项目 | 费用 | 周期 |
+|---|---|---|
+
+## 5. 裁决总表
+| 冲突项 | 结论 | 依据 | 约束 | 生效范围 |
+|---|---|---|---|---|
+"""
+
 
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
@@ -86,6 +113,9 @@ def main(name, parent):
     evt = os.path.join(root, '04_EVT验证')
     with open(os.path.join(evt, f'EVT_{name}.md'), 'w', encoding='utf8') as f:
         f.write(EVT.format(name=name, clause=PRODUCTION_CLAUSE))
+    reg_dir = os.path.join(root, '05_法规与裁决')
+    with open(os.path.join(reg_dir, f'法规_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(REG.format(name=name))
     print('created', root)
 
 if __name__ == '__main__':

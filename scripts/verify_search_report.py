@@ -28,10 +28,17 @@ import urllib.request
 
 S = os.path.dirname(os.path.abspath(__file__))
 
+
+def _load(name):
+    spec = _ilu.spec_from_file_location(name, os.path.join(S, name + '.py'))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_t = _load('mdtable')
 # 复用铁律门禁里的公开号形状，避免两处各写一份正则而漂移
-_spec = _ilu.spec_from_file_location('cir', os.path.join(S, 'check_iron_rules.py'))
-_cir = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_cir)
+_cir = _load('check_iron_rules')
 PUB_NO = _cir.PUB_NO
 
 DOI_RE = re.compile(r'\b(10\.\d{4,9}/[^\s|，。；)】]+)', re.I)
@@ -89,10 +96,6 @@ def classify(ident):
     return None, None
 
 
-def split_row(line):
-    return [c.strip() for c in line.strip().strip('|').split('|')]
-
-
 def parse_report(text):
     """取「已核验条目」小节里的表格。
     返回 (缺列列表, 行列表, 表头列数)；小节整体缺席时缺列列表返回 ['<无小节>']，
@@ -100,20 +103,20 @@ def parse_report(text):
     lines = text.splitlines()
     start = None
     for i, ln in enumerate(lines):
-        if re.match(r'^#{1,6}\s', ln) and '已核验' in ln:
+        if _t.heading_line(ln) and '已核验' in ln:
             start = i
             break
     if start is None:
         return ['<无小节>'], [], 0
     header, rows = None, []
     for ln in lines[start + 1:]:
-        if re.match(r'^#{1,6}\s', ln):
+        if _t.heading_line(ln):
             break
         s = ln.strip()
         if not s.startswith('|'):
             continue
-        cells = split_row(s)
-        if set(''.join(cells)) <= set('-: '):
+        cells = _t.split_row(s)
+        if _t.is_separator(cells):
             continue
         if header is None:
             header = cells

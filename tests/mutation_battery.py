@@ -5,8 +5,8 @@
 此前只存在于 /tmp 的一次性脚本里，清一次 /tmp 就没了（实际发生过两次）。
 
 用法:
-    python3 tests/mutation_battery.py                 # 三支全跑
-    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr|evt|doc）
+    python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
+    python3 tests/mutation_battery.py --arm reg       # 只跑一支（iron|fig|vsr|evt|reg|doc）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -38,6 +38,8 @@ PF = 'scripts/patent_figure.py'
 V = 'scripts/verify_search_report.py'
 NP = 'scripts/new_product_package.py'
 CE = 'scripts/check_evt.py'
+CR = 'scripts/check_regulatory.py'
+MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
@@ -326,6 +328,87 @@ MUTS = {
         ('输入不存在被当成零违规放行', CE,
          "            print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')\n            sys.exit(2)",
          '            continue', '路径不存在未按要求说清成因'),
+    ],
+    # G 组：法规/裁决门禁。每条判据至少配一支"关掉它"和一支"让它恒红"的变异，
+    # 外加三态（残行/空表/域外/rc=2）与共用读取器 mdtable 各自的反向对照。
+    'reg': [
+        ('G1 未落三态不判红（含糊措辞当已判）', CR, '    if not hits:', '    if False:',
+         'G1 未恰好开火一条'),
+        ('G1 恒判红（合规的"适用"也咬）', CR, '    if not hits:', '    if True:',
+         '合规法规文书被判红'),
+        ('G1 两态并存不再判红', CR, '    elif len(hits) > 1:', '    elif False:',
+         'G1 未恰好开火一条'),
+        ('状态词放宽回子串（"基本适用""符合性"当成已判）', CR,
+         "        if (not prev or prev in BEFORE) and (not nxt or nxt in AFTER or nxt in '（('):",
+         '        if True:',
+         ('合规法规文书被判红', 'G1 未恰好开火一条', '合法结论被判红（子串边界失效）')),
+        ('G1 有判定无依据不核', CR,
+         "                if J['basis'] is not None and not cell(cells, J['basis']).strip():",
+         '                if False:', 'G1 未恰好开火一条'),
+        ('G1 缺「依据」列整表不报（读者以为已判）', CR,
+         "            if J['basis'] is None:", '            if False:',
+         '缺列被放大成逐条或没报'),
+        ('G2 逐条映射结论不核三态', CR, "        if 'G2' in tags:", "        if False and tags:",
+         ('G2 两条未各自开火，或被 G1 抢判', '五条判据未全部真判')),
+        ('G3 缺口的关闭路径不核', CR,
+         "                    if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
+         '                    if False:', 'G3 未开火或放大'),
+        ('G3 恒判红（给了修订建议也咬）', CR,
+         "                    if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
+         '                    if True:', ('合规法规文书被判红', '只给修订建议的缺口被判红')),
+        ('G3 缺列抑制失效（整表一条被逐行放大）', CR,
+         "            if J['fix'] is None and J['test'] is None:", '            if False:',
+         '缺口清单缺列被放大成逐条或没报'),
+        ('G4 四要素减成两要素', CR,
+         "                                    ('约束', J['constraint']), ('生效范围', J['scope'])):",
+         "                                    ('约束', J['constraint'])):",
+         'G4 两半未各自开火'),
+        ('G4 裁决依据不要求 EVT 证据', CR,
+         '                    if basis.strip() and not (EVT_EVIDENCE.search(basis) or DEFER.search(basis)):',
+         '                    if False:', 'G4 两半未各自开火'),
+        ('G4 证据集合把"会议纪要"也算证据', CR,
+         "EVT_EVIDENCE = re.compile(r'复算|仿真|FMEA|公差分析|实测|EVT')",
+         "EVT_EVIDENCE = re.compile(r'复算|仿真|FMEA|公差分析|实测|EVT|会议')",
+         'G4 两半未各自开火'),
+        ('G4 缺列抑制失效', CR, '            if missing_cols:', '            if False:',
+         ('裁决缺列被放大成逐条或没报', 'G4 两半未各自开火')),
+        ('G5 费用数字不带口径也放行', CR,
+         '                    if NUM.search(v) and not ESTIMATE.search(v):',
+         '                    if False:', 'G5 未把费用/周期两列都核到'),
+        ('G5 恒判红（没给数字也咬）', CR,
+         '                    if NUM.search(v) and not ESTIMATE.search(v):',
+         '                    if True:', ('合规法规文书被判红', '没给数字的行被 G5 误伤')),
+        ('G5 只核第一根费用列（周期整列放过）', CR,
+         "        'cost': _t.cols(header, *COST_COLS),",
+         "        'cost': _t.cols(header, *COST_COLS)[:1],",
+         'G5 未把费用/周期两列都核到'),
+        ('残行仍按位取列（静默读错列）', CR,
+         '            (good if len(cells) == len(header) else ragged).append(k + 1)',
+         '            (good if True else ragged).append(k + 1)',
+         ('残行仍被按位取列判红', '合规法规文书被判红')),
+        ('空表不报成因（未判被折成"看起来判过了"）', CR, '            if tags:',
+         '            if False and tags:', ('空表被折成合规或判红', '骨架上的法规底稿未通过 G1–G5')),
+        ('05 目录零表格的散文裁决书不再判红', CR,
+         '    if not tables and REG_DIR.search(path):', '    if False and tables:',
+         '05 目录内零表格的散文裁决书未判红'),
+        ('适用域只看路径不看正文（散文躲过判据）', CR,
+         '    return bool(REG_DIR.search(path) or REG_SCOPE.search(text))',
+         '    return bool(REG_DIR.search(path))', '正文按表名认域未生效'),
+        ('域外文书被当成已判合规（三态失效）', CR, '    if not in_scope(path, text):',
+         '    if False:', '域外文书未走三态'),
+        ('域内文书为零时不再 rc=2', CR, '    if judged == 0:', '    if False:',
+         ('域内文书为零时被当成"已通过"', '删掉法规底稿后未走"未判定"三态')),
+        ('输入不存在被当成零违规放行', CR,
+         "            print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')\n            sys.exit(2)",
+         '            continue', '路径不存在未说清成因并 fail-closed'),
+        ('共用读取器把分隔行当数据行（三处判据一起漂）', MT,
+         "    return bool(cells) and set(''.join(cells)) <= set('-: ')",
+         '    return False',
+         ('合规法规文书被判红', '合规包未 rc=0', '骨架底稿未通过 V1–V3',
+          '骨架上的法规底稿未通过 G1–G5')),
+        ('共用读取器的列名匹配收窄成精确相等', MT,
+         '        if any(k in h for k in keys):', '        if h in keys:',
+         ('五条判据未全部真判', '同义列名未认，G1 空转', '编造的实测值未被 E3 抓到')),
     ],
 }
 

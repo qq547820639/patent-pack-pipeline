@@ -12,7 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 13
+# 测试个数不手写：手写分母会漏掉新加的测试（新增一档忘了改数，收尾行就把 N+1 档报成 N 档）。
+# 分母由下面 __main__ 里的 TESTS 清单现算，并核对清单与模块里定义的 test_* 函数一一对应。
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -236,7 +237,24 @@ def test_new_product_package():
         re2 = run([PY, f'{S}/check_evt.py', d, '--all'])
         assert_(re2.returncode == 2 and '没有一份落在 EVT 适用域内' in re2.stdout,
                 '删掉 EVT 底稿后未走"未判定"三态', re2)
-    print('PASS new_product_package（五段目录+README+检索/EVT 两份底稿，开箱即过 R/V/E 三门禁）')
+        # 法规底稿在场：五张表都只有表头 → 骨架开箱过 G1–G5（未判注记，不判红）
+        reg = os.path.join(d, 'TESTX_专利交付包', '05_法规与裁决', '法规_TESTX.md')
+        assert_(os.path.isfile(reg), f'缺法规/裁决底稿（G1–G5 没有载体）: {r.stdout}', r)
+        rg = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(rg.returncode == 0 and '实核法规文书 1 份' in rg.stdout
+                and '只有表头没有数据行' in rg.stdout,
+                '骨架上的法规底稿未通过 G1–G5，或空表没走未判三态', rg)
+        # 载体缺席必红：05 目录里换成一张表都没有的散文裁决书
+        with open(reg, 'w', encoding='utf8') as f:
+            f.write('# 裁决说明\n\n经评审认为适用，无表。\n')
+        rg2 = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(rg2.returncode == 1 and '没有任何表格' in rg2.stdout,
+                '05 目录内零表格的散文裁决书未判红', rg2)
+        os.remove(reg)
+        rg3 = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(rg3.returncode == 2 and '没有一份落在法规/裁决适用域内' in rg3.stdout,
+                '删掉法规底稿后未走"未判定"三态', rg3)
+    print('PASS new_product_package（五段目录+README+检索/EVT/法规三份底稿，开箱即过 R/V/E/G 四门禁）')
 
 
 def test_rebuild_package():
@@ -799,14 +817,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVE]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVE]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([VE]\d)', s)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEG]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEG]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([VEG]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVE][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEG][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -946,6 +964,162 @@ def test_check_evt():
         assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
                 '路径不存在未按要求说清成因并 fail-closed', r)
     print('PASS check_evt（E1–E4 各成对 + 引用号普查 + 域外三态 + rc=2）')
+
+
+def test_check_regulatory():
+    """法规/裁决门禁 G1–G5：每条判据都要有"必开火"与"合规侧必不开火"两案，
+    且不开火那案必须真被该判据读到（seen 集合里有它），否则是空转的绿。"""
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('check_regulatory', f'{S}/check_regulatory.py')
+    cr = ilu.module_from_spec(spec)
+    spec.loader.exec_module(cr)
+
+    P = '05_法规与裁决/法规_T.md'
+
+    def judge(body, path=P):
+        return cr.check_text(path, body)
+
+    def n_of(bad, tag):
+        return sum(1 for x in bad if f'→ {tag}' in x)
+
+    APPLIC = ('## 适用性判定\n| 标准/法规 | 判定 | 依据 |\n|---|---|---|\n'
+              '| GB 6675.1-2014 | 适用 | 属 6675 系列玩具范围 |\n'
+              '| GB 19865-2005 | 不适用 | 电能来源条款与本产品无关 |\n')
+    MAP = ('## 逐条映射\n| 条款 | 要求 | 结论 |\n|---|---|---|\n'
+           '| 第 4.3 条 | 可触及边缘不得锐利 | 符合 |\n'
+           '| 第 5.1 条 | 小零件不得脱落 | 无法判定 |\n')
+    GAP = ('## 合规缺口清单\n| 编号 | 缺口 | 修订建议 | 实测规程 |\n|---|---|---|---|\n'
+           '| Q1 | 拉脱力未验证 | 表带根部加卡扣倒钩 | 待物理实测：拉脱力 ≥90N |\n'
+           '| Q2 | 电池仓未做开启试验 | 改为需工具开启 | |\n')
+    ARBIT = ('## 裁决总表\n| 冲突项 | 结论 | 依据 | 约束 | 生效范围 |\n|---|---|---|---|---|\n'
+             '| 表带厚度 | 维持 2.4mm | EVT 复算 2.31mm | 投产后不得回退 | XR-7 全部 SKU |\n'
+             '| 螺丝规格 | 待定 | 维持冻结值，转 EVT 实测裁决 | 实测前不得投产 | XR-7 全部 SKU |\n')
+    COST = ('## 送检包清单\n| 项目 | 费用 | 周期 |\n|---|---|---|\n'
+            '| 机械物理试验 | 约 1.2 万元（公开信息估算） | 约 15 个工作日（公开信息估算） |\n')
+
+    # 合规总案：五张表全绿，且五条判据都真的落到了行上
+    bad, notes, seen = judge('# 法规与裁决\n\n' + APPLIC + '\n' + MAP + '\n' + GAP
+                             + '\n' + ARBIT + '\n' + COST)
+    assert_(bad == [], f'合规法规文书被判红: {bad}', None)
+    assert_(seen == {'G1', 'G2', 'G3', 'G4', 'G5'}, f'五条判据未全部真判: {sorted(seen)}', None)
+
+    def swap(table, old, new):
+        assert table.count(old) == 1, f'锚点在夹具里不唯一: {old}'
+        return table.replace(old, new)
+
+    # G1 三态：含糊措辞 / 两态并列 / 有判定无依据 各必开火，且只有 G1 开火
+    for body, needle in ((swap(APPLIC, '| 适用 |', '| 基本适用 |'), '判定列未落三态'),
+                         (swap(APPLIC, '| 适用 | 属', '| 适用 不适用 | 属'), '同时出现'),
+                         (APPLIC.replace('| 属 6675 系列玩具范围 |', '| |'), '有判定却无依据')):
+        bad, notes, seen = judge('# 法规与裁决\n\n' + body)
+        assert_(n_of(bad, 'G1') == 1, f'G1 未恰好开火一条（{needle}）: {bad}', None)
+        assert_(needle in '\n'.join(bad), f'G1 开火但成因不是 {needle}: {bad}', None)
+        assert_(n_of(bad, 'G2') == 0, f'G1 的夹具把 G2 也带红了: {bad}', None)
+    # 同义列名（适用性/出处）也要认——不认就会整条判据静默不判
+    bad, notes, seen = judge('# 法规与裁决\n\n'
+                             '| 法规名称 | 适用性 | 出处 |\n|---|---|---|\n'
+                             '| GB 6675.1-2014 | 部分适用 | 见 S8 记录 |\n')
+    assert_(bad == [] and 'G1' in seen, f'同义列名未认，G1 空转: {bad} seen={sorted(seen)}', None)
+    # 缺「依据」列：整表报一条，不随行数放大
+    bad, notes, seen = judge('# 法规与裁决\n\n| 标准 | 判定 |\n|---|---|\n'
+                             '| GB A | 适用 |\n| GB B | 不适用 |\n')
+    assert_(n_of(bad, 'G1') == 1 and '缺「依据」列' in '\n'.join(bad),
+            f'缺列被放大成逐条或没报: {bad}', None)
+
+    # G2：空结论 / "详见正文" 必红；"无法判定"与"不符合"是合法结论（子串边界要站得住）
+    bad, notes, seen = judge('# 法规与裁决\n\n'
+                             '| 条款 | 要求 | 结论 |\n|---|---|---|\n'
+                             '| 4.3 | 边缘 | |\n| 5.1 | 小零件 | 详见正文 |\n')
+    assert_(n_of(bad, 'G2') == 2 and 'G1' not in seen,
+            f'G2 两条未各自开火，或被 G1 抢判: {bad} seen={sorted(seen)}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n'
+                             '| 条款 | 要求 | 结论 |\n|---|---|---|\n'
+                             '| 4.3 | 边缘 | 不符合 |\n| 5.1 | 小零件 | 符合（附条件） |\n')
+    assert_(bad == [] and 'G2' in seen, f'合法结论被判红（子串边界失效）: {bad}', None)
+
+    # G3：两栏都空必红；只给一侧即合规；两类列都没有→整表一条
+    bad, notes, seen = judge('# 法规与裁决\n\n' + GAP.replace('| 改为需工具开启 | |\n',
+                                                              '| | |\n'))
+    assert_(n_of(bad, 'G3') == 1 and '缺口既无修订建议也无实测规程' in '\n'.join(bad),
+            f'G3 未开火或放大: {bad}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n' + GAP)
+    assert_(bad == [] and 'G3' in seen, f'只给修订建议的缺口被判红: {bad}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n| 编号 | 缺口 |\n|---|---|\n'
+                             '| Q1 | 甲 |\n| Q2 | 乙 |\n')
+    assert_(n_of(bad, 'G3') == 1 and '既无「修订建议」也无「实测规程」列' in '\n'.join(bad),
+            f'缺口清单缺列被放大成逐条或没报: {bad}', None)
+
+    # G4：四要素缺格必红、依据不引证据必红；"转实测裁决"措辞与"公开复算"证据必绿；缺列整表一条
+    bad, notes, seen = judge('# 法规与裁决\n\n| 冲突项 | 结论 | 依据 | 约束 | 生效范围 |\n'
+                             '|---|---|---|---|---|\n'
+                             '| 螺丝 | 维持 M2 | 会议纪要 | 无 | |\n')
+    joined = '\n'.join(bad)
+    assert_(n_of(bad, 'G4') == 2 and '裁决缺「生效范围」' in joined and '既未引 EVT 侧证据' in joined,
+            f'G4 两半未各自开火: {bad}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n| 冲突项 | 结论 | 依据 | 约束 | 生效范围 |\n'
+                             '|---|---|---|---|---|\n'
+                             '| 螺丝 | 待定 | 维持冻结值，转 EVT 实测裁决 | 实测前不得投产 | 全 SKU |\n'
+                             '| 厚度 | 维持 2.4mm | 独立复算 2.31mm，偏差 3.8% | 不得回退 | 全 SKU |\n')
+    assert_(bad == [] and 'G4' in seen, f'合规裁决（含过渡口径）被判红: {bad}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n| 冲突项 | 结论 | 依据 | 生效范围 |\n'
+                             '|---|---|---|---|\n'
+                             '| 甲 | 维持 | 复算 | 全 SKU |\n| 乙 | 维持 | 复算 | 全 SKU |\n')
+    assert_(n_of(bad, 'G4') == 1 and "裁决表缺列 ['约束']" in '\n'.join(bad),
+            f'裁决缺列被放大成逐条或没报: {bad}', None)
+
+    # G5：数字不带口径必红（费用、周期两列都要看）；带"公开…估算"或无数字必绿
+    bad, notes, seen = judge('# 法规与裁决\n\n' + COST.replace('（公开信息估算）', ''))
+    assert_(n_of(bad, 'G5') == 2 and '未标' in '\n'.join(bad),
+            f'G5 未把费用/周期两列都核到: {bad}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n| 项目 | 费用 | 周期 |\n|---|---|---|\n'
+                             '| 机械物理试验 | 待定 | 待认证机构回复 |\n')
+    assert_(bad == [] and 'G5' in seen, f'没给数字的行被 G5 误伤: {bad}', None)
+
+    # 三态：残行不按位取列、只有表头的表、域外文书、正文认域
+    # 第二行只有一格：按位读会把 j_ap 读成空 → 假 G1。它必须只进未判注记。
+    bad, notes, seen = judge('# 法规与裁决\n\n' + APPLIC
+                             + '| 多出一格 | 适用 | 依据 | 又多了 |\n| 少了 |\n')
+    assert_(bad == [], f'残行仍被按位取列判红: {bad}', None)
+    assert_(any('不按位取列' in n and '第3、4行' in n for n in notes),
+            f'残行未报"不按位取列"注记: notes={notes}', None)
+    bad, notes, seen = judge('# 法规与裁决\n\n| 标准/法规 | 判定 | 依据 |\n|---|---|---|\n')
+    assert_(bad == [] and any('只有表头没有数据行' in n for n in notes) and 'G1' not in seen,
+            f'空表被折成合规或判红: bad={bad} notes={notes} seen={sorted(seen)}', None)
+    bad, notes, seen = judge('# 交底书\n普通内容\n', path='01_交底书/交底书.md')
+    assert_(bad == [] and len(notes) == 1 and '非法规/裁决文书' in notes[0] and seen == set(),
+            f'域外文书未走三态: bad={bad} notes={notes}', None)
+    bad, notes, seen = judge('# 会议记录\n\n## 裁决总表\n'
+                             '| 冲突项 | 结论 | 依据 | 约束 | 生效范围 |\n|---|---|---|---|---|\n'
+                             '| 甲 | 维持 | 会议纪要 | 无 | 全 SKU |\n', path='notes/会议.md')
+    assert_(n_of(bad, 'G4') == 1 and 'G4' in seen,
+            f'正文按表名认域未生效（域外散文躲过了 G4）: bad={bad} seen={sorted(seen)}', None)
+
+    # CLI：合规 rc=0、违规 rc=1、域内为零 rc=2、输入不可用 rc=2 且点名路径与成因
+    with tempfile.TemporaryDirectory() as d:
+        rd = os.path.join(d, '05_法规与裁决')
+        os.makedirs(rd)
+        ok_path = os.path.join(rd, '法规_T.md')
+        with open(ok_path, 'w', encoding='utf8') as f:
+            f.write('# 法规与裁决\n\n' + APPLIC)
+        r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(r.returncode == 0 and '实核法规文书 1 份' in r.stdout, '合规包未 rc=0', r)
+        with open(os.path.join(d, 'README.md'), 'w', encoding='utf8') as f:
+            f.write('# 包说明\n\n列出 05_法规与裁决/ 目录而已。\n')
+        r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(r.returncode == 0 and '实核法规文书 1 份' in r.stdout,
+                '包 README 只是提到目录名，却被当成域内文书', r)
+        with open(ok_path, 'w', encoding='utf8') as f:
+            f.write('# 法规与裁决\n\n' + APPLIC.replace('| 适用 |', '| 基本适用 |'))
+        r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(r.returncode == 1 and '→ G1' in r.stdout, '违规包未 rc=1', r)
+        os.remove(ok_path)
+        r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(r.returncode == 2 and '没有一份落在法规/裁决适用域内' in r.stdout,
+                '域内文书为零时被当成"已通过"', r)
+        r = run([PY, f'{S}/check_regulatory.py', os.path.join(d, '不存在.md')])
+        assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
+                '路径不存在未说清成因并 fail-closed', r)
+    print('PASS check_regulatory（G1–G5 各成对 + 同义列名 + 整表只报一条 + 三态 + rc=2）')
 
 
 def test_verify_search_report():
@@ -1228,11 +1402,19 @@ def test_patent_figure():
 
 if __name__ == '__main__':
     missing = probe_env()
-    test_check_figures(); test_check_figures_media_count(); test_check_figures_embedded()
-    test_new_product_package(); test_rebuild_package(); test_regen_docx(); test_regen_docx_stale()
-    test_check_iron_rules(); test_check_iron_rules_docx(); test_check_evt(); test_verify_search_report()
-    test_patent_figure()
-    test_docs_scripts_contract()
+    TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
+             test_new_product_package, test_rebuild_package, test_regen_docx,
+             test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
+             test_check_evt, test_check_regulatory, test_verify_search_report,
+             test_patent_figure, test_docs_scripts_contract]
+    # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
+    defined = {n for n, v in globals().items()
+               if n.startswith('test_') and callable(v)}
+    unrun = sorted(defined ^ {t.__name__ for t in TESTS})
+    assert not unrun, f'测试清单与模块内定义的 test_* 不对齐: {unrun}'
+    TOTAL_TESTS = len(TESTS)
+    for t in TESTS:
+        t()
     ran = TOTAL_TESTS - len(SKIPPED)
     tail = f'另有 {len(missing)} 项环境依赖缺失，见上方环境自检' if missing else ''
     if SKIPPED:
