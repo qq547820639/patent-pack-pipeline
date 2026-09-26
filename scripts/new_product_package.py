@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""生成新产品专利交付包骨架（五段子目录 + 包 README + 检索报告底稿）。
+"""生成新产品专利交付包骨架（五段子目录 + 包 README + 两份底稿）。
 用法: python3 new_product_package.py <产品代号> <输出父目录>
-底稿文件名带"检索"，因此 verify_search_report.py 传包目录即可自动挑到它。
+· 检索_<产品>.md：文件名带"检索"，verify_search_report.py 传包目录即可自动挑到（V1–V3）。
+· 04_EVT验证/EVT_<产品>.md：E1–E4 的载体，投产总则从 check_iron_rules  import 同一份常量，
+  不在这里重抄一遍——重抄的那份迟早和判据漂移。
 """
+import importlib.util as _ilu
 import os, sys
+
+_s = _ilu.spec_from_file_location('cir', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                     'check_iron_rules.py'))
+_c = _ilu.module_from_spec(_s)
+_s.loader.exec_module(_c)
+PRODUCTION_CLAUSE = _c.PRODUCTION_CLAUSE
 
 README = """# {name} 专利交付包
 
@@ -43,6 +52,29 @@ SEARCH = """# {name} 检索报告
 本轮检索未检出与交底书 §2.2 每条缺陷逐条对应的在先方案；未检索到 ≠ 不存在。
 """
 
+# 结构照 templates §5 的五节；两张表都只给表头不给行，
+# 因为 E1/E3 认的是"有判定列的表"，空表在骨架期合法（有行没填才会红）。
+EVT = """# {name} EVT 分析报告（分析级；不含物理实测数据）
+
+## 1. 验证总表
+| # | 设计项 | 验证方法 | 分析结论 | 物理实测项 | 判定 |
+|---|---|---|---|---|---|
+
+## 2. 逐项详细验证
+（验证项目 → 方法 → 结果含可复算过程 → 结论 → 判定 → 投产判定）
+
+## 3. 冲突项验证处置
+（分析证据 + 裁决建议；证据不足则"维持冻结值，转 EVT 实测裁决"）
+
+## 4. 物理实测总清单
+| # | 测试 | 工装 | 样本量 | 合格判据 | 预测值 | 状态 |
+|---|---|---|---|---|---|---|
+
+## 5. 投产判定
+{clause}
+"""
+
+
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
     for d in ['01_交底书','02_申请文件','03_设计补全','04_EVT验证','05_法规与裁决']:
@@ -51,6 +83,9 @@ def main(name, parent):
         f.write(README.format(name=name))
     with open(os.path.join(root, f'检索_{name}.md'), 'w', encoding='utf8') as f:
         f.write(SEARCH.format(name=name))
+    evt = os.path.join(root, '04_EVT验证')
+    with open(os.path.join(evt, f'EVT_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(EVT.format(name=name, clause=PRODUCTION_CLAUSE))
     print('created', root)
 
 if __name__ == '__main__':

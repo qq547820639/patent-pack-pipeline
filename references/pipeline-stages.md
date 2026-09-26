@@ -52,7 +52,7 @@ S0 素材评估 → S1 特征提取 → S2 现有技术排查 → S2.5 处置表
 - 申请文件与交底书两份都要各跑一遍 `scripts/check_iron_rules.py`（R3 权文内占位注释、R4 摘要含标点字数只对申请文件形态生效，务必带 --search-report 才核 R5）。
 
 ## S8 打包交付
-- 用 scripts/new_product_package.py 生成骨架；复制文书；README 含专利清单表+提交前必读（时序/口径/待确认项/FTO 红线）。
+- 用 scripts/new_product_package.py 生成骨架（含 `检索_<产品>.md` 与 `04_EVT验证/EVT_<产品>.md` 两份底稿，开箱即过 R/V/E 三道文本门禁）；复制文书；README 含专利清单表+提交前必读（时序/口径/待确认项/FTO 红线）。
 - scripts/rebuild_package.py 重建 zip（自带目录↔zip 全文件比对）。
 
 ## S9 设计补全（缺失机构）

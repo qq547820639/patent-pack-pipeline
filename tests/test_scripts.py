@@ -149,11 +149,19 @@ def test_new_product_package():
                 '骨架底稿未通过 V1–V3，或未如实报出"条目 0 条"', rv)
         ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
         assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
-        # 骨架期还没有 EVT 报告：E 门禁必须说"未做任何判定"（rc=2），而不是判绿冒充核过
+        # EVT 底稿在场，且骨架就能被 E1–E4 真判一次（有判定列的表，空行合法）
+        evt = os.path.join(d, 'TESTX_专利交付包', '04_EVT验证', 'EVT_TESTX.md')
+        assert_(os.path.isfile(evt), f'缺 EVT 报告底稿（E1–E4 没有载体）: {r.stdout}', r)
         re_ = run([PY, f'{S}/check_evt.py', d, '--all'])
-        assert_(re_.returncode == 2 and '没有一份落在 EVT 适用域内' in re_.stdout,
-                '骨架上的 E 门禁未走"未判定"三态', re_)
-    print('PASS new_product_package（五段目录+README+检索底稿，开箱即过 R/V 两门禁）')
+        assert_(re_.returncode == 0 and '实核 EVT 文书 1 份' in re_.stdout
+                and '无从判起' not in re_.stdout,
+                '骨架上的 EVT 底稿未通过 E1–E4，或没被当成域内文书真判', re_)
+        # 三态另测：把唯一的 EVT 域内文书删掉，必须 rc=2 说"未做任何判定"而不是判绿
+        os.remove(evt)
+        re2 = run([PY, f'{S}/check_evt.py', d, '--all'])
+        assert_(re2.returncode == 2 and '没有一份落在 EVT 适用域内' in re2.stdout,
+                '删掉 EVT 底稿后未走"未判定"三态', re2)
+    print('PASS new_product_package（五段目录+README+检索/EVT 两份底稿，开箱即过 R/V/E 三门禁）')
 
 
 def test_rebuild_package():
