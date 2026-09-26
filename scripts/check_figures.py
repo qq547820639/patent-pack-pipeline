@@ -3,10 +3,11 @@
   C1 彩色像素必须为 0（外观设计与渲染图除外）
   C2 不得为空白图：全图非白像素数为 0 判违规
   C3 目录内每个 docx 嵌入的 media 图片数必须等于 figures 目录图片数
+  C4 每个 docx 内嵌的无损位图也要过 C1/C2（交付物是 docx，图就活在 docx 里）
 判据 C1/C2 刻意用像素内容而非文件字节数——白底线条图 PNG 压缩后仅数 KB，
 按字节设阈值会把合法的稀疏框图误判为违规（实测读数见 references/tooling-pitfalls.md §2）。
 用法: python3 check_figures.py <申请文件目录或figures目录> [...]
-退出码: 0 合规 / 1 存在违规（C1/C2/C3 任一触发均为 1）
+退出码: 0 合规 / 1 存在违规（C1/C2/C3/C4 任一触发均为 1）
 """
 import os, sys, zipfile
 from PIL import Image
@@ -81,11 +82,62 @@ def check_docx_media(d):
     return bad
 
 
+def check_docx_embedded(d, tmp):
+    """C4：交付物是 docx，图就活在 docx 里。只查 figures/ 的话，
+    在 Word 里换掉一张彩色图而不动 figures/，C1/C2 永远看不到。
+    这里把 word/media/ 解出来，复用同一个 verdict()（不重抄像素判据）。
+
+    有损格式（JPEG 等）单独走"未核"：黑白线条图存成 JPEG 也会因压缩产生色度噪声，
+    按 C1 判红就是把纪律没要求的格式当成违规。外观设计与渲染图目录整档跳过。"""
+    bad, noted, seq = [], 0, [0]
+    if 'views' in d or '外观设计' in d:
+        print(f'  note {d}: 外观设计视图目录，C4 内嵌图像素规则不适用')
+        return bad
+    for f in sorted(os.listdir(d)):
+        if not f.endswith('.docx'):
+            continue
+        p = os.path.join(d, f)
+        try:
+            with zipfile.ZipFile(p) as z:
+                names = [x for x in z.namelist() if x.startswith('word/media/')]
+                for n in names:
+                    ext = os.path.splitext(n)[1].lower()
+                    if ext not in ('.png', '.tif', '.tiff', '.bmp', '.gif'):
+                        noted += 1
+                        print(f'  note {f}: {os.path.basename(n)} 为 {ext or "?"} '
+                              f'（有损或非常规位图），C4 未核')
+                        continue
+                    seq[0] += 1
+                    out = os.path.join(tmp, f'{seq[0]}{ext}')
+                    with open(out, 'wb') as w:
+                        w.write(z.read(n))
+                    try:
+                        reasons, colored, ink = verdict(out)
+                    except Exception as e:
+                        # 解不开的内嵌件是交付件本身坏了，不是"看不见"——判违规并说清成因
+                        bad.append(f'{f}: {os.path.basename(n)} 内嵌图无法解码 -> {e}')
+                        print(f'  FAIL {f}: {os.path.basename(n)} -> C4 无法解码：{e}')
+                        continue
+                    if reasons:
+                        why = '; '.join(reasons)
+                        bad.append(f'{f}: {os.path.basename(n)} -> C4 {why}')
+                        print(f'  FAIL {f}: {os.path.basename(n)} 彩色={colored} 非白={ink} '
+                              f'-> C4 {why}')
+        except Exception as e:
+            print(f'  note {f}: docx 无法按 zip 打开（C3 已判），C4 未核 -> {e}')
+    if noted:
+        print(f'  note {d}: {noted} 个内嵌件按有损/非常规格式跳过 C4')
+    return bad
+
+
 def main():
+    import tempfile
     total_bad = 0
     for d in sys.argv[1:]:
         total_bad += check_dir(d)
         total_bad += len(check_docx_media(d))
+        with tempfile.TemporaryDirectory() as tmp:
+            total_bad += len(check_docx_embedded(d, tmp))
     sys.exit(1 if total_bad else 0)
 
 

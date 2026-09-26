@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 11
+TOTAL_TESTS = 12
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -129,6 +129,81 @@ def test_check_figures():
         assert_(sz < 10240, f'回归夹具字节数 {sz} 已 ≥10240，钉不住旧字节阈值缺陷，请重造夹具')
         print(f'PASS check_figures（C1/C2 各自成对必红必绿；{sz}B 稀疏框图不误判）')
 
+
+
+
+def test_check_figures_embedded():
+    """C4：交付物是 docx，图就活在 docx 里——只查 figures/ 会被"在 Word 里换图"绕过。"""
+    try:
+        from docx import Document
+    except ImportError:
+        SKIPPED.append('check_figures_embedded')
+        print('SKIP check_figures_embedded（本机无 python-docx，造不出带内嵌图的 docx）')
+        return
+    # 违规素材必须放在被扫目录之外：上一版把彩色图写进 d 里，
+    # 于是"docx 内嵌彩色"这一判其实是隔壁那条 C1 在开火——C4 被架空了。
+    with tempfile.TemporaryDirectory() as out, tempfile.TemporaryDirectory() as d:
+        fd = os.path.join(d, 'figures'); os.makedirs(fd)
+        _line_figure(f'{fd}/图1.png', elements=1)
+        _line_figure(f'{fd}/图2.png', elements=2)
+        colored = os.path.join(out, '彩色.png')
+        _line_figure(colored, tint=(255, 0, 0))
+
+        def build(path, imgs):
+            doc = Document(); doc.add_heading('说明书附图', level=1)
+            for i in imgs:
+                doc.add_picture(i)
+            doc.save(path)
+
+        # 必红：figures/ 干净、图数也对得上，唯一违规是 docx 里嵌了一张彩色件
+        build(os.path.join(d, '申请文件.docx'), [colored, f'{fd}/图2.png'])
+        r = run([PY, f'{S}/check_figures.py', d])
+        assert_(r.returncode == 1 and 'C4' in r.stdout and 'image1.png' in r.stdout,
+                f'docx 内嵌彩色图未被 C4 抓到: {show(r)}', r)
+        # 必绿：换成合规件必须放行（同一夹具只差内嵌图内容）
+        build(os.path.join(d, '申请文件.docx'), [f'{fd}/图1.png', f'{fd}/图2.png'])
+        r2 = run([PY, f'{S}/check_figures.py', d])
+        assert_(r2.returncode == 0 and '违规 0' in r2.stdout,
+                f'合规内嵌图被 C4 误判: {show(r2)}', r2)
+
+        # 三态：JPEG 是有损格式，黑白线稿存 JPEG 也会出色度噪声 → 只能报未核
+        jpg = os.path.join(out, '扫描.jpg')
+        Image.open(f'{fd}/图1.png').convert('RGB').save(jpg, quality=80)
+        build(os.path.join(d, '申请文件2.docx'), [jpg, f'{fd}/图2.png'])
+        r3 = run([PY, f'{S}/check_figures.py', d])
+        assert_('C4 未核' in r3.stdout, f'有损内嵌图未走"未核"三态: {show(r3)}', r3)
+        assert_(r3.returncode == 0,
+                f'有损格式被当成违规（判据过严）: {show(r3)}', r3)
+        os.remove(os.path.join(d, '申请文件2.docx'))
+
+        # 必红：内嵌件根本解不开，是交付件坏了，不能折成"看不见所以不判"
+        junk = os.path.join(d, '申请文件3.docx')
+        # 替换已有内嵌件而不是新增一张：新增会让 media 数也变，rc=1 就由 C3 白送，
+        # "解码失败要不要计入" 这条判据就被架空了。
+        with zipfile.ZipFile(os.path.join(d, '申请文件.docx')) as src:
+            items = [(i, src.read(i)) for i in src.namelist()]
+        with zipfile.ZipFile(junk, 'w') as z:
+            for name, blob in items:
+                z.writestr(name, b'GARBAGE-NOT-A-PNG'
+                           if name.startswith('word/media/') else blob)
+        r4 = run([PY, f'{S}/check_figures.py', d])
+        assert_(r4.returncode == 1 and '无法解码' in r4.stdout,
+                f'解不开的内嵌件未判红或未说成因: {show(r4)}', r4)
+        os.remove(junk)
+
+    # 外观设计包允许彩色渲染图，C4 必须整档跳过而不是挨个判红
+    with tempfile.TemporaryDirectory() as dv:
+        fdv = os.path.join(dv, 'figures'); os.makedirs(fdv)
+        _line_figure(os.path.join(fdv, '视图1.png'), tint=(255, 0, 0))
+        doc = Document(); doc.add_heading('外观简要说明', level=1)
+        doc.add_picture(os.path.join(fdv, '视图1.png'))
+        doc.save(os.path.join(dv, '外观申请.docx'))
+        os.rename(dv, dv + '_外观设计')
+        dv = dv + '_外观设计'
+        r5 = run([PY, f'{S}/check_figures.py', dv])
+        assert_('C4 内嵌图像素规则不适用' in r5.stdout and 'FAIL' not in r5.stdout,
+                f'外观设计包未被 C4 跳过: {show(r5)}', r5)
+    print('PASS check_figures C4（docx 内嵌图必查 + 有损三态 + 解码失败必红 + 外观设计跳过）')
 
 
 def test_new_product_package():
@@ -1105,7 +1180,7 @@ def test_patent_figure():
 
 if __name__ == '__main__':
     missing = probe_env()
-    test_check_figures(); test_check_figures_media_count()
+    test_check_figures(); test_check_figures_media_count(); test_check_figures_embedded()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
     test_check_iron_rules(); test_check_iron_rules_docx(); test_check_evt(); test_verify_search_report()
     test_patent_figure()

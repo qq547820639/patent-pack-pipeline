@@ -117,7 +117,7 @@ python3 scripts/check_iron_rules.py <文书.md|.docx ...> [--search-report 检�
 python3 scripts/check_iron_rules.py <交付包目录> --all             # 递归检整个包下所有 .md
 python3 scripts/verify_search_report.py <检索报告.md|包目录> [--offline] [--require-online]  # 检索报告 V1–V3
 python3 scripts/check_evt.py <交付包目录> --all                    # EVT 诚实性 E1–E4（域外文书自动走未判）
-python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色像素=0 / C2 非空白 / C3 docx 图数一致
+python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色=0 / C2 非空白 / C3 图数一致 / C4 docx 内嵌图同判
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
@@ -128,7 +128,7 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 - `verify_search_report.py`：V1 每条已核验条目须带可机检标识（公开号/DOI/arXiv id，公开号形状与 R5 同一处定义）、V2 关键字段填齐（关键日期/核验出处/核验日期）、V3 在线存在性（DOI 走 Crossref、arXiv id 走 arXiv 官方 API，都无需密钥）。`--offline` 跳过 V3 一律报未核；`--require-online` 在一条在线核对都没做成时给 rc=2（说"本次判定不成立"，既不判绿也不判红）。**专利公开号一律"存在性未核"**——本机实测 google patents 两端点 75s 无响应、patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、Patentscope 只有 JSF 表单，所以专利存在性仍是 S1 的线下逐条人工核对项；源不可达判"未核"三态，绝不把网络故障折算成"引用造假"。
 - `new_product_package.py` 生成的两份底稿都要能被对应门禁**开箱真判一次**：`检索_<产品>.md` 过 V1–V3（空表合法、并报"条目 0 条"），`04_EVT验证/EVT_<产品>.md` 过 E1–E4（判定表在场，判"实核 EVT 文书 1 份"）；其投产总则是从 `check_iron_rules.PRODUCTION_CLAUSE` import 的同一份串，不是重抄——重抄的那份会和判据漂移，常驻测试用一条变异盯住这件事。
 - `check_evt.py`：E1 判定必须落 ✅/⚠️/❌ 恰一个（「基本通过」这种无符号措辞、或两个符号并存都判红）；E2 非 ✅ 必须带下一步（⚠️ 要同时出现「缺口」与「关闭判据」，❌ 要给「改法」）；E3 物理实测列出现**量值**（数字带单位，或"测得/实测/结果"紧跟数字）却没有「待物理实测/Not Run/预测值」字样即判红——刻意不写"任意数字"，这样标准号 GB/T 31701-2015、条款号"第 4.3 条"、IPC 码 A42B3/00 天然不在其列，不必维护一张永远缺一种写法的引用号豁免表（正反两向都钉在常驻测试里）；E4 同一行同时给出设计值与复算值且相对偏差>10% 而未标「偏差/原因」即判红，只给一侧走三态不判红。投产总则逐字仍归 R8，这里不重复一条。E1–E3 的载体是模板 §5 第 1 项的「验证总表」：**04_EVT 目录内的交付物缺这张判定表直接判红**（散文写的 EVT 报告不能白白通过），只是正文提到「投产判定」的规则类文档缺表则报未判。\n- **若目录里没有一份落在 EVT 适用域内，rc=2 说明「未做任何判定」，不折成「已通过**。本仓库自己的规则文档不是 EVT 交付物：对仓库根跑 `--all .` 时它们一律走未判注记（具体条数随树变，复算以命令为准，不在此写死）。
-- `check_figures.py`：C1、C2、C3 都计入退出码，图数不一致不再只打印放行。
+- `check_figures.py`：C1、C2、C3、C4 都计入退出码，图数不一致不再只打印放行。C4 是「交付物是 docx」的必然推论——只查 `figures/` 时，在 Word 里把一张图换成彩色件而不动 `figures/`，C1/C2 与图数比对全都看不见；C4 把 `word/media/` 解出来复用同一个 `verdict()`（不重抄像素判据）。有损格式（JPEG 等）走「C4 未核」而不是判红：黑白线稿存 JPEG 本身就会带色度噪声；外观设计与渲染图目录整档跳过；内嵌件解不开则判红并说成因——那是交付件本身坏了，不是「看不见」。
 - `regen_docx.py`：1 才是文件级转换失败；2 表示前置依赖（pandoc 或 python-docx）缺失，一个文件都没转。
 
 判据断言自己有没有牙，由常驻变异电池核：`python3 tests/mutation_battery.py [--arm iron|fig|vsr|evt]`。
