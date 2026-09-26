@@ -119,6 +119,7 @@ python3 scripts/verify_search_report.py <检索报告.md|包目录> [--offline] 
 python3 scripts/check_evt.py <交付包目录> --all                    # EVT 诚实性 E1–E4（域外文书自动走未判）
 python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色=0 / C2 非空白 / C3 图数一致 / C4 docx 内嵌图同判
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
+python3 scripts/regen_docx.py <根目录> --check                # 只列待重转（md 比 docx 新）的成对文书，不需要 pandoc
 python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
 ```
 
@@ -130,8 +131,9 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 - `check_evt.py`：E1 判定必须落 ✅/⚠️/❌ 恰一个（「基本通过」这种无符号措辞、或两个符号并存都判红）；E2 非 ✅ 必须带下一步（⚠️ 要同时出现「缺口」与「关闭判据」，❌ 要给「改法」）；E3 物理实测列出现**量值**（数字带单位，或"测得/实测/结果"紧跟数字）却没有「待物理实测/Not Run/预测值」字样即判红——刻意不写"任意数字"，这样标准号 GB/T 31701-2015、条款号"第 4.3 条"、IPC 码 A42B3/00 天然不在其列，不必维护一张永远缺一种写法的引用号豁免表（正反两向都钉在常驻测试里）；E4 同一行同时给出设计值与复算值且相对偏差>10% 而未标「偏差/原因」即判红，只给一侧走三态不判红。投产总则逐字仍归 R8，这里不重复一条。E1–E3 的载体是模板 §5 第 1 项的「验证总表」：**04_EVT 目录内的交付物缺这张判定表直接判红**（散文写的 EVT 报告不能白白通过），只是正文提到「投产判定」的规则类文档缺表则报未判。\n- **若目录里没有一份落在 EVT 适用域内，rc=2 说明「未做任何判定」，不折成「已通过**。本仓库自己的规则文档不是 EVT 交付物：对仓库根跑 `--all .` 时它们一律走未判注记（具体条数随树变，复算以命令为准，不在此写死）。
 - `check_figures.py`：C1、C2、C3、C4 都计入退出码，图数不一致不再只打印放行。C4 是「交付物是 docx」的必然推论——只查 `figures/` 时，在 Word 里把一张图换成彩色件而不动 `figures/`，C1/C2 与图数比对全都看不见；C4 把 `word/media/` 解出来复用同一个 `verdict()`（不重抄像素判据）。有损格式（JPEG 等）走「C4 未核」而不是判红：黑白线稿存 JPEG 本身就会带色度噪声；外观设计与渲染图目录整档跳过；内嵌件解不开则判红并说成因——那是交付件本身坏了，不是「看不见」。
 - `regen_docx.py`：1 才是文件级转换失败；2 表示前置依赖（pandoc 或 python-docx）缺失，一个文件都没转。
+- `regen_docx.py --check` 专管「改过 md 忘了重转」：只读、不碰 pandoc，报「成对文书 N 份，待重转 M 份」，M>0 即 rc=1。配对规则与转换循环共用同一个 `doc_pairs()`（两处各定义迟早漂移）；没有同名 docx 的 md 不算陈旧；一份成对文件都没有时报「无从判陈旧」并按合规退出，不是未判。注意 mtime 语义：全新 git 检出后 mtime 就是检出时刻，那种场合先真实转一遍、再拿这条复核。
 
-判据断言自己有没有牙，由常驻变异电池核：`python3 tests/mutation_battery.py [--arm iron|fig|vsr|evt]`。
+判据断言自己有没有牙，由常驻变异电池核：`python3 tests/mutation_battery.py [--arm iron|fig|vsr|evt|doc]`。
 它把每条判据改成 plausible 的错误实现（不是改成崩溃），再跑一遍 `tests/test_scripts.py`，
 要求每个变异都被**点名该条款的断言**抓红；分类为 SURVIVED / MISRED / PROBE-FAIL / CRASH-KILL
 任一出现即 rc=1（崩溃致红不算覆盖，红因归错条款也不算）。fig 档需要 matplotlib，

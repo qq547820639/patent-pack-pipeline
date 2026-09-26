@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 三支全跑
-    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr|evt）
+    python3 tests/mutation_battery.py --arm iron      # 只跑一支（iron|fig|vsr|evt|doc）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -38,6 +38,7 @@ PF = 'scripts/patent_figure.py'
 V = 'scripts/verify_search_report.py'
 NP = 'scripts/new_product_package.py'
 CE = 'scripts/check_evt.py'
+RG = 'scripts/regen_docx.py'
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
@@ -254,6 +255,26 @@ MUTS = {
         ('骨架表头列名与 templates §10 漂移', NP,
          '| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |',
          '| # | 类型 | 编号 | 标题 | 日期 |', '骨架底稿未通过 V1'),
+    ],
+    'doc': [
+        ('陈旧判据彻底关闭（永不判陈旧）', RG,
+         '            if os.path.getmtime(md) > os.path.getmtime(d) + 1]',
+         '            if False]', 'md 比 docx 新却未判陈旧'),
+        ('容差被放大到一年（正常流程里常年假绿）', RG,
+         '            if os.path.getmtime(md) > os.path.getmtime(d) + 1]',
+         '            if os.path.getmtime(md) > os.path.getmtime(d) + 31536000]',
+         'md 比 docx 新却未判陈旧'),
+        ('陈旧只打印不计入退出码', RG,
+         '        sys.exit(1 if stale else 0)', '        sys.exit(0)',
+         'md 比 docx 新却未判陈旧'),
+        ('配对规则放宽到有 md 就算（无孪生也报陈旧）', RG,
+         '                if os.path.exists(d):', '                if True:',
+         '无孪生 docx 的 md 被算进配对'),
+        ('--check 指到文件时不说成因', RG,
+         "f'--check 需要目录，实得不是目录: ", "f'，实得不是目录: ",
+         '--check 指到文件未说明成因'),
+        ('无成对文件被折成未判定（rc=2）', RG,
+         '        if not n:', '        if n < 0:', '无成对文件时读数不对'),
     ],
     'evt': [
         ('E1 空判定被整行跳过（含糊措辞当已判）', CE,

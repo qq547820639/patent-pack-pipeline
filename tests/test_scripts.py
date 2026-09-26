@@ -4,7 +4,7 @@
 同时兼作环境自检：打印各依赖是否就绪、缺失影响哪个环节。
 """
 import importlib.util
-import os, re, shutil, sys, tempfile, subprocess, zipfile, stat
+import os, re, shutil, sys, tempfile, time, subprocess, zipfile, stat
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 12
+TOTAL_TESTS = 13
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -555,6 +555,54 @@ def test_check_iron_rules_docx():
             assert_(r.returncode == 1 and '实用新型.docx' in r.stdout and '带违规.docx' in r.stdout,
                     f'--all 未递归收 docx: {show(r)}', r)
     print('PASS check_iron_rules_docx（docx 正文可读 + 节还原有牙 + 三种未判/拒绝路径）')
+
+
+
+def test_regen_docx_stale():
+    """--check 陈旧检测：改过 md 忘了重转 must 红，且不需要 pandoc 就能问这一句。"""
+    with tempfile.TemporaryDirectory() as d:
+        md = os.path.join(d, '交底书.md')
+        dx = os.path.join(d, '交底书.docx')
+        open(md, 'w', encoding='utf8').write('# 交底书\n正文\n')
+        open(dx, 'w', encoding='utf8').write('占位：陈旧检测只看 mtime，不需要真 docx')
+
+        def check(root=None, env=None):
+            cmd = [PY, f'{S}/regen_docx.py', root or d, '--check']
+            return subprocess.run(cmd, capture_output=True, text=True,
+                                  env=env or dict(os.environ))
+
+        now = time.time()
+        os.utime(dx, (now - 100, now - 100))          # docx 落后 100 秒
+        os.utime(md, (now, now))
+        r = check()
+        assert_(r.returncode == 1 and '须重转' in r.stdout and '待重转 1 份' in r.stdout,
+                f'md 比 docx 新却未判陈旧: {show(r)}', r)
+        # 反向对照：刚重转完（docx 更新）必须放行，否则这条判据会在正常流程里常年假红
+        os.utime(dx, (now + 10, now + 10))
+        r2 = check()
+        assert_(r2.returncode == 0 and '待重转 0 份' in r2.stdout,
+                f'重转后仍被判陈旧: {show(r2)}', r2)
+        # 只缺孪生 docx 的 md 不算陈旧（交付包里并非每份 md 都出 Word）
+        only_md = os.path.join(d, 'README.md')
+        open(only_md, 'w', encoding='utf8').write('# 包说明\n')
+        r3 = check(d)
+        assert_(r3.returncode == 0 and '成对文书 1 份' in r3.stdout,
+                f'无孪生 docx 的 md 被算进配对: {show(r3)}', r3)
+        # 不需要 pandoc：把 PATH 清空也必须答得上来（只读检查不该被转换依赖挡住）
+        r4 = check(d, env={'PATH': '/nonexistent-dir', 'HOME': os.environ.get('HOME', '/')})
+        assert_(r4.returncode == 0 and '成对文书 1 份' in r4.stdout,
+                f'缺 pandoc 时 --check 未工作: {show(r4)}', r4)
+        # 输入不对必须说成因并 rc=2
+        r5 = check(md)
+        assert_(r5.returncode == 2 and '--check 需要目录' in r5.stdout,
+                f'--check 指到文件未说明成因: {show(r5)}', r5)
+        # 完全没有成对文件 → 说"无从判陈旧"，但不是未判红也不是 rc=2
+        with tempfile.TemporaryDirectory() as e:
+            open(os.path.join(e, 'a.md'), 'w', encoding='utf8').write('# a\n')
+            r6 = check(e)
+            assert_(r6.returncode == 0 and '无从判陈旧' in r6.stdout,
+                    f'无成对文件时读数不对: {show(r6)}', r6)
+    print('PASS regen_docx --check（陈旧必红/新转必绿/无孪生不算/不需 pandoc/rc=2）')
 
 
 def test_check_iron_rules():
@@ -1181,7 +1229,7 @@ def test_patent_figure():
 if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count(); test_check_figures_embedded()
-    test_new_product_package(); test_rebuild_package(); test_regen_docx()
+    test_new_product_package(); test_rebuild_package(); test_regen_docx(); test_regen_docx_stale()
     test_check_iron_rules(); test_check_iron_rules_docx(); test_check_evt(); test_verify_search_report()
     test_patent_figure()
     test_docs_scripts_contract()
