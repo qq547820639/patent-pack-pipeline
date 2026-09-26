@@ -321,12 +321,21 @@ def test_new_product_package():
 
 def test_rebuild_package():
     with tempfile.TemporaryDirectory() as d:
-        pkg = os.path.join(d, 'T包_交付包'); os.makedirs(os.path.join(pkg, '01_交底书'))
+        pkg = os.path.join(d, 'T包_交付包')
+        # 夹具**自己抄一份**五段名，不从判据常量取：取了常量，改常量时夹具跟着一起改，
+        # "P5 会不会真拦住缺段"这条就永远不红（与 IRON_OK_BG 硬编码逐字句同理）。
+        for seg in ('01_交底书', '02_申请文件', '03_设计补全', '04_EVT验证', '05_法规与裁决'):
+            os.makedirs(os.path.join(pkg, seg))
+        open(os.path.join(pkg, 'README.md'), 'w', encoding='utf8').write(
+            '# T包 专利交付包\n\n## 专利清单\n\n| 序号 | 专利名称 | 类型 |\n|---|---|---|\n')
+        open(os.path.join(pkg, '02_申请文件', '说明书_T包.md'), 'w', encoding='utf8').write(
+            '# T包 申请文件（说明书骨架）\n\n## 附图说明\n\n图 1 为躯干框架结构示意图。\n')
         src = os.path.join(pkg, '01_交底书', '交底书.md')
         BODY = '中文内容测试' * 8
         open(src, 'w', encoding='utf8').write(BODY)
         r = run([PY, f'{S}/rebuild_package.py', pkg])
-        assert_(r.returncode == 0 and 'SHA-256+CRC+UTF-8 标志位全过' in r.stdout, '打包或 P1–P4 校验异常', r)
+        assert_(r.returncode == 0 and 'SHA-256+CRC+UTF-8 标志位全过' in r.stdout,
+                '打包或 P1–P7 校验异常', r)
         with zipfile.ZipFile(pkg + '.zip') as z:
             i = [x for x in z.infolist() if '交底书.md' in x.filename][0]
             assert_(i.flag_bits & 0x800, 'UTF-8 标志位未置', r)
@@ -385,7 +394,49 @@ def test_rebuild_package():
         assert_(r.returncode == 2 and '用法' in r.stdout, f'零参数没按 rc=2 收: {show(r)}', r)
         r = run([PY, f'{S}/rebuild_package.py', src])
         assert_(r.returncode == 2 and '只接包目录' in r.stdout, f'传文件没说明成因: {show(r)}', r)
-    print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / rc=2 三档）')
+
+        # P5–P7 包形状：三条各自成对。上面那份合规夹具守"三绿"（verify==[] 已经含它），
+        # 这里各造一份只坏一项的包，坏哪一条必须点名哪一条——顺手把整包判红等于没有判据。
+        def mkshape(tag, drop=None, readme='清单', empty_app=False):
+            p = os.path.join(d, tag)
+            for seg in ('01_交底书', '02_申请文件', '03_设计补全', '04_EVT验证', '05_法规与裁决'):
+                if seg != drop:
+                    os.makedirs(os.path.join(p, seg))
+            if readme is not None:
+                open(os.path.join(p, 'README.md'), 'w', encoding='utf8').write(
+                    '# 交付包\n\n## 专利' + readme + '\n\n| 序号 | 名称 | 类型 |\n')
+            open(os.path.join(p, '02_申请文件', '说明书.md'), 'w', encoding='utf8').write(
+                '正文' if not empty_app else '')
+            return p
+
+        v = rp.shape_violations(mkshape('形状包_合规'))
+        assert_(v == [], f'合规包形状被 P5–P7 判红（假红）: {v}', None)
+        v = rp.shape_violations(mkshape('形状包_缺段', drop='04_EVT验证'))
+        assert_([x for x in v if x.startswith('P5')] and
+                len([x for x in v if x.startswith('P5')]) == 1 and '04_EVT验证' in v[0] and
+                not any(x.startswith('P7') for x in v),
+                f'缺一段没被点名成一条 P5（或牵连误报了别的）: {v}', None)
+        v = rp.shape_violations(mkshape('形状包_无清单', readme='须知道'))
+        assert_(any(x.startswith('P6') for x in v) and not any(x.startswith('P5') for x in v),
+                f'README 缺「专利清单」没被抓成 P6，或被误报成 P5: {v}', None)
+        v = rp.shape_violations(mkshape('形状包_无README', readme=None))
+        assert_(any(x.startswith('P6') and '包根没有 README.md' in x for x in v),
+                f'包根缺 README.md 没被抓到: {v}', None)
+        v = rp.shape_violations(mkshape('形状包_空申请', empty_app=True))
+        assert_(any(x.startswith('P7') for x in v) and not any(x.startswith('P5') for x in v),
+                f'02_申请文件 只有一个 0 字节文件也被当成"有交付物"（P7 漏报或被误报成缺段）: {v}', None)
+        pdir = mkshape('形状包_真空申请')
+        for f in os.listdir(os.path.join(pdir, '02_申请文件')):
+            os.remove(os.path.join(pdir, '02_申请文件', f))
+        v = rp.shape_violations(pdir)
+        assert_(any(x.startswith('P7') for x in v), f'02_申请文件 真是空目录时 P7 没抓到: {v}', None)
+        # 形状判据必须走得到真入口：main() 打完包后要能报出来（否则 shape 只在单元里活着）
+        rpk = mkshape('形状包_走main', drop='05_法规与裁决')
+        r = run([PY, f'{S}/rebuild_package.py', rpk])
+        assert_(r.returncode == 1 and 'P5' in r.stdout and '05_法规与裁决' in r.stdout,
+                f'缺段包从 main() 出去时没被判红点名: {show(r)}', r)
+    print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / '
+          'P5–P7 各成对且从 main() 走得到 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):

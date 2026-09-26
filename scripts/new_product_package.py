@@ -25,6 +25,7 @@ def _load(name):
 _c = _load('check_iron_rules')
 _dc = _load('check_design_completion')
 _nl = _load('check_figure_labels')
+_rp = _load('rebuild_package')          # P5–P7 的判据侧持有五段清单，这里不另抄一份
 PRODUCTION_CLAUSE = _c.PRODUCTION_CLAUSE
 
 README = """# {name} 专利交付包
@@ -138,7 +139,7 @@ def spec_doc(name):
 
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
-    for d in ['01_交底书','02_申请文件','03_设计补全','04_EVT验证','05_法规与裁决']:
+    for d in _rp.PKG_DIRS:      # 清单来自判据侧（P5），在这里另抄一份就是给漂移留活路
         os.makedirs(os.path.join(root, d), exist_ok=True)
     with open(os.path.join(root, 'README.md'), 'w', encoding='utf8') as f:
         f.write(README.format(name=name))

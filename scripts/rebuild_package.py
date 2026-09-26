@@ -13,8 +13,12 @@
   P3 `zipfile.testzip()` 必须返回 None，即每条 CRC 都过；
   P4 全部非 ASCII 条目名必须置 UTF-8 标志位 0x800（见下方"为什么必须用 Python 写包"）。
 名单不齐时仍对**交集**做内容比对：名字差集不该把截断这件事一起藏掉。
+  P5 §8 固定的五段子目录都在（`PKG_DIRS`，`new_product_package.py` 生成骨架时 import 同一份清单）；
+  P6 包根有 README.md 且里面有「专利清单」表；
+  P7 02_申请文件 不是空目录。
+P5–P7 看的是**包本身**而不是 zip：P1–P4 全绿而包里本来就缺一整段，是这两种判据的分界。
 
-退出码: 0 全过 / 1 存在不符（P1–P4 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
+退出码: 0 全过 / 1 存在不符（P1–P7 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
 注意：必须用 Python zipfile 写包——Info-ZIP zip(1) 在本环境不写 UTF-8 标志位（0x800），
 导致中文文件名在 Windows 资源管理器/部分解压软件下显示乱码。Python zipfile 对非 ASCII
 文件名自动置 UTF-8 标志位，Windows/macOS/Linux 全兼容。
@@ -45,6 +49,42 @@ def sha256_of(fp):
     return h.hexdigest()
 
 
+# §8 固定的五段（README.md 另算，见 P6）。这张清单**由判据侧持有**：
+# new_product_package.py 生成骨架时 import 它，于是"生成器写了第六段而判据不知道"这种漂移
+# 从两端同时消失——和 补全表头取自 check_design_completion.SPECS、对照表表头取自
+# check_figure_labels.COLS 是同一条纪律。
+PKG_DIRS = ('01_交底书', '02_申请文件', '03_设计补全', '04_EVT验证', '05_法规与裁决')
+README_HEAD = '专利清单'
+
+
+def shape_violations(pkg):
+    """P5–P7 包形状（hard-rules §8 第一行今天第一次有执行点）。
+    这三条不依赖 zip：zip 对得上而包本来就缺一整段，P1–P4 会全绿——那正是它们看不见的那种坏。"""
+    bad = []
+    for d in PKG_DIRS:
+        if not os.path.isdir(os.path.join(pkg, d)):
+            bad.append(f'P5 缺 §8 固定段 {d}（目录不存在，整段交付物无从谈起）')
+    rd = os.path.join(pkg, 'README.md')
+    if not os.path.isfile(rd):
+        bad.append('P6 包根没有 README.md（§8 六件套之一）')
+    else:
+        try:
+            with open(rd, encoding='utf8', errors='replace') as f:
+                txt = f.read()
+        except OSError as e:
+            bad.append(f'P6 README.md 读不出，未判（不当成合规）：{e}')
+            txt = None
+        if txt is not None and README_HEAD not in txt:
+            bad.append(f'P6 README 里没有「{README_HEAD}」表（提交前须知与清单都挂在这张表上）')
+    app = os.path.join(pkg, '02_申请文件')
+    if os.path.isdir(app):
+        # 「一个非空文件都没有」而不是「目录里有东西」：放一个 0 字节的 说明书.md 进去
+        # 照样能骗过前者——那种包打开就是空的，判据不该被一个文件名哄住。
+        if not any(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(app) for f in fs):
+            bad.append('P7 02_申请文件 里没有任何非空文件（要交的那一段根本没写，打包只会交出一个空壳）')
+    return bad
+
+
 def verify(pkg, zfin):
     """比对 目录↔zip，返回不符清单（空＝全过）。
     单独成一个函数，是因为 main() 每次都重打包：真要在"名单对得上而内容不对"这种
@@ -55,7 +95,7 @@ def verify(pkg, zfin):
     except (OSError, zipfile.BadZipFile) as e:
         print(f"输入不可用，未做任何判定: {zfin}（{type(e).__name__}: {e}）")
         sys.exit(2)
-    bad = []
+    bad = shape_violations(pkg)                                  # P5–P7：包形状先看
     with z:
         crc_bad = z.testzip()                                   # P3
         if crc_bad is not None:
@@ -112,7 +152,7 @@ def main(pkg):
 
     bad = verify(pkg, zfin)
     if bad:
-        print("MISMATCH（P1–P4）:")
+        print("MISMATCH（P1–P7）:")
         for b in bad:
             print('  ✗', b)
         sys.exit(1)
