@@ -2007,7 +2007,7 @@ def test_search_report_docx_channel():
 
 
 def test_figure_text_channel():
-    """图↔文书对账 T1–T3：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
+    """图↔文书对账 T1–T6：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
 
     两半都要验：① `write_manifest` 写了什么（不依赖 matplotlib，否则这条断言会随环境
     一起 SKIP，判据只剩消费侧有牙）；② 门禁对真包开不开火、三态走不走得对。"""
@@ -2037,13 +2037,15 @@ def test_figure_text_channel():
     MAN = '{"figure": "图1.png", "marks": {"12": "底座", "13": "支架"}, ' \
           '"texts": ["躯干框架", "横移速度 ≤25mm/s"]}'
 
-    def make(root, man=MAN, docs=DOCS, png_only=False):
+    def make(root, man=MAN, docs=DOCS, png_only=False, pngs=('图1',), manifest_for='图1'):
         os.makedirs(os.path.join(root, '02_申请文件', 'figures'), exist_ok=True)
         os.makedirs(os.path.join(root, '01_交底书'), exist_ok=True)
         open(os.path.join(root, '01_交底书', '交底书.md'), 'w', encoding='utf8').write(docs)
-        fig = os.path.join(root, '02_申请文件', 'figures', '图1.png')
-        open(fig, 'wb').write(b'\x89PNG\r\n\x1a\n' + b'0' * 40)
-        if not png_only:
+        for name in pngs:
+            open(os.path.join(root, '02_申请文件', 'figures', name + '.png'), 'wb'
+                 ).write(b'\x89PNG\r\n\x1a\n' + b'0' * 40)
+        if not png_only and manifest_for in pngs:
+            fig = os.path.join(root, '02_申请文件', 'figures', manifest_for + '.png')
             open(os.path.splitext(fig)[0] + '.manifest.json', 'w', encoding='utf8').write(man)
 
     def fire(out):
@@ -2062,7 +2064,7 @@ def test_figure_text_channel():
         # '图1.manifest'，与 '图1.png' 的 stem 配不上，合规包会被读成"有 PNG 没有清单"。
         assert_('没有配套 manifest' not in r.stdout,
                 f'并排的 <图名>.manifest.json 没配上 <图名>.png（双后缀被 splitext 切错）: {show(r)}', r)
-        assert_('实判判据 3 条' in r.stdout, f'合规案没把三条判据都判到: {show(r)}', r)
+        assert_('实判判据 6 条' in r.stdout, f'合规案没把六条判据都判到: {show(r)}', r)
 
         # 五档必红各写一条独立断言（不写成循环）：断言消息要留字面量，
         # 电池的 expect 才核得动——f-string 里插 label 会让"哪一档"只剩在运行时。
@@ -2117,7 +2119,10 @@ def test_figure_text_channel():
         make(p)
         open(os.path.join(p, '02_申请文件', 'figures', '图2.png'), 'wb').write(b'\x89PNG\r\n\x1a\n')
         r = run([PY, f'{S}/check_figure_text.py', p])
-        assert_(r.returncode == 2 and '图2.png' in r.stdout and '实判判据 3 条' in r.stdout,
+        # 注意：这张没人引用的 图2.png 既是"缺清单"（→ 不完整）也是 T5 的真违规，
+        # 所以退码按"判出的违规优先"落 1；"不完整"那半句仍要打出来。
+        assert_(r.returncode == 1 and '图2.png' in r.stdout and '实判判据 6 条' in r.stdout
+                and '→ T5' in r.stdout and '另有:' in r.stdout,
                 f'部分图没有清单被当成核过了（判到多少报多少，但包级不完整要说清是谁）: {show(r)}', r)
         # 优先级：真判出的违规不许被"对账不完整"降级成环境档
         p = os.path.join(d, 'mixedbad')
@@ -2136,8 +2141,41 @@ def test_figure_text_channel():
         r = run([PY, f'{S}/check_figure_text.py', p])
         assert_(r.returncode == 2 and '不是目录' in r.stdout,
                 f'路径不可用未说成因并 fail-closed: {show(r)}', r)
+        # ---- T4–T6 图号对账（第 21 轮从《专利法实施细则》第四十六/二十一条捡回来的） ----
+        # 旧状下"说明书写了图2、包里只有图1"能一路全绿：N4 只核表里的所在图号，
+        # T1–T3 只看得到有清单的那几张图，两边都不看"声明过却没这张图"。
+        d4 = os.path.join(d, 't4')
+        make(d4, docs=DOCS.replace('图 1 为整体示意。', '图 1 为整体示意，图 2 为局部放大。'))
+        r = run([PY, f'{S}/check_figure_text.py', d4])
+        assert_(r.returncode == 1 and '声明了 图2' in r.stdout and '→ T4' in r.stdout,
+                f'正文声明图2而包里没有这张图未被 T4 抓到: {show(r)}', r)
+
+        d5 = os.path.join(d, 't5')
+        make(d5, pngs=('图1', '图2'), manifest_for='图1')
+        r = run([PY, f'{S}/check_figure_text.py', d5])
+        assert_(r.returncode == 1 and '图2.png' in r.stdout and '→ T5' in r.stdout,
+                f'多一张没人引用的图未被 T5 抓到: {show(r)}', r)
+
+        d6 = os.path.join(d, 't6')
+        make(d6, docs=DOCS.replace('图 1 为整体示意。', '图 1 为整体示意，图 2 为局部放大。'),
+             pngs=('图1', '图3'))
+        r = run([PY, f'{S}/check_figure_text.py', d6])
+        assert_(r.returncode == 1 and '图号不是从 1 起连续编号（缺 [2]）' in r.stdout and '→ T6' in r.stdout,
+                f'图号跳号未被 T6 抓到: {show(r)}', r)
+        # T6 的分母只用实存文件：这张夹具里正文声明了 图2，若把声明并进分母，
+        # {1,2,3} 就成了"连续"，跳号被缺图反向补圆——两码事必须各报各的。
+        assert_('声明了 图2' in r.stdout and '→ T4' in r.stdout and '→ T5' in r.stdout,
+                f'同一夹具里缺图/未引用两条没同时报出: {show(r)}', r)
+
+        d_un = os.path.join(d, 't_unjudged')
+        make(d_un, docs=DOCS.replace('图 1 为整体示意。', '整体示意见附件。'),
+             pngs=('主视图',), manifest_for='主视图')
+        r = run([PY, f'{S}/check_figure_text.py', d_un])
+        assert_(r.returncode == 0 and 'T4–T6 未判' in r.stdout and '主视图.png' in r.stdout,
+                f'文件名认不出图号时被折成合规或违规（不猜号才对）: {show(r)}', r)
+
         # ---- docx 通道：交付物只有 Word 件时 T 必须照判 ----
-        # 上一轮给 E/G/K/N/V 四把表门禁都接了 docx 通道，T 是本轮新立的，
+        # 第十八轮给 E/G/K/N 四把按列读的门禁接上 docx 通道，T 是第二十轮新立的，
         # 若不接就出现"文书池只认 md"：真交付件（Word）里的对照表与数值读不到，
         # 图上每个部件名都会被判成"文书里没有"——假红成串，且没有一条用例会喊。
         try:
@@ -2166,7 +2204,7 @@ def test_figure_text_channel():
             w_ok = os.path.join(d, 'word_ok')
             wordpkg(w_ok)
             rw = run([PY, f'{S}/check_figure_text.py', w_ok])
-            assert_(rw.returncode == 0 and '实判判据 3 条' in rw.stdout,
+            assert_(rw.returncode == 0 and '实判判据 6 条' in rw.stdout,
                     f'Word-only 交付包未被 T 真判（文书池只认 md 的话这里会成串假红）: {show(rw)}', rw)
             w_bad = os.path.join(d, 'word_bad')
             wordpkg(w_bad, speed='≤35mm/s')
@@ -2184,7 +2222,7 @@ def test_figure_text_channel():
             rw4 = run([PY, f'{S}/check_figure_text.py', w_evil])
             assert_(rw4.returncode == 2 and 'Traceback' not in rw4.stdout + rw4.stderr,
                     f'读不动的 docx 未走 rc=2（或未把 traceback 当违规）: {show(rw4)}', rw4)
-    print('PASS check_figure_text（清单形状 + T1–T3 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
+    print('PASS check_figure_text（清单形状 + T1–T6 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
 
 
 def test_check_figures_input_guard():

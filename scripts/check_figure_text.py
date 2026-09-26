@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""图↔文书对账 T1–T3：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
-「图中数值与文书逐字一致」「不得出现交底书没有的部件/参数」。
+"""图↔文书对账 T1–T6：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
+「图中数值与文书逐字一致」「不得出现交底书没有的部件/参数」——
+外加《专利法实施细则》点名却全仓无人核的图号三对账（T4 缺图 / T5 图未被引用 / T6 跳号）。
 
 为什么要有 manifest：PNG 是像素，事后没有任何东西记录图上画了什么字（F4 量完字数就丢），
 而 parts.json 在本仓**只有读者没有生产者**——由代理手抄。拿手抄件去和文书互比，
@@ -16,8 +17,15 @@
   T3 图上的 标记号→部件 必须与文书里那张「标记｜名称｜所在图号」对照表一致。
      跨图同号同件归 patent_figure 的 F3 管，而图↔表这一头此前没人管：
      图写 12=底座、表写 12=支架，两道门各自都能绿。
+  T4 正文（表格行之外）声明的 图N 必须在包里真有一张 图N.png ——缺整批与缺其中几张都判红。
+     出处：《专利法实施细则》第四十六条（说明书中写有对附图的说明但无附图或缺少部分附图，
+     须限期补交附图或声明取消该说明）。
+  T5 包里每张 图N.png 都要被正文引用过——图存在却没人提到，等于交付物里多出一张说明书写不到的图。
+     出处：hard-rules §5 / pipeline-stages「每图被附图说明与实施方式引用」。
+  T6 包里实存的图号必须是从 1 起的连续号，不得跳号（正文声明只参与 T4，不参与 T6 的分母）。
+     出处：《专利法实施细则》第二十一条（几幅附图应当按照"图1，图2，……"顺序编号排列）。
 
-三态：没有 figures 目录 ⇒ 未判（有的交付形态本就没有图）；
+三态：没有 figures 目录 ⇒ 未判（有的交付形态本就没有图）；      图文件名认不出图号（主视图.png 之类）⇒ T4–T6 未判，不去猜号——猜错会把缺号判成不缺；
       figures 里有 PNG 却没有 manifest ⇒ rc=2 说"图不是本库出的，无从对账"——
       这不是违规，但绝不是"核过了"。这一条与"有没有别的图带着清单"无关：
       12 张图里混 1 张手画 PNG，那张图上写着什么同样没人核过，包级对账就不完整。
@@ -43,6 +51,11 @@ def _load(name):
 
 _t = _load('mdtable')
 _cir = _load('check_iron_rules')
+_cfl = _load('check_figure_labels')
+
+# 图号从文件名侧的认法：只认「图N.png / 图 N.png」。认不出的（如 主视图.png、fig1.png）
+# 一律进"未判"注记而不是猜一个号——猜错会把 T4 的缺图判成不缺，方向上就是假绿。
+FIG_NUM_NAME = re.compile(r'^图\s*(\d+)$')
 
 # 量值 token：可带比较符号、数字（含区间/小数）、紧跟的单位串。单位刻意只列常见工程写法，
 # 认不出的写法一律不判而不是判红——宁可漏报，也不拿一张永远缺一种写法的豁免表去追。
@@ -100,6 +113,70 @@ def load_manifest(p):
     return d, None
 
 
+def present_figures(root):
+    """figures 侧真实存在的图号：{号: 路径}，外加"收进来但文件名认不出图号"的清单。
+
+    外观设计/views 目录走渲染图与照片，不参与线条图的图号对账（与 C1 的跳过同一口径，
+    两边各写一份豁免迟早漂移）。"""
+    have, unnamed = {}, []
+    for dp, _, fs in os.walk(root):
+        if 'views' in dp or '外观设计' in dp:
+            continue
+        for f in sorted(fs):
+            if not f.lower().endswith('.png'):
+                continue
+            m = FIG_NUM_NAME.match(os.path.splitext(f)[0])
+            if m:
+                have.setdefault(m.group(1), os.path.join(dp, f))
+            else:
+                unnamed.append(os.path.join(dp, f))
+    return have, unnamed
+
+
+def number_reconcile(root, docs):
+    """T4–T6：正文声明的图号 ↔ 包里真实存在的图号。
+
+    这三条此前全仓没人管：N4 只核"对照表里的所在图号被正文声明过"（方向是表→正文），
+    T1–T3 只看有清单的那几张图——于是"说明书写了 图3 为……，而 figures 里只有图1、图2"
+    这种交付物今天能一路全绿，而它正是《专利法实施细则》第四十六条要点名补交的情形。
+    """
+    bad, notes, seen = [], [], set()
+    declared = _cfl.figure_numbers(_cfl.prose_only('\n'.join(t for _, t in docs)))
+    present, unnamed = present_figures(root)
+    named = '、'.join(os.path.basename(p) for p in unnamed[:3]) + (' 等' if len(unnamed) > 3 else '')
+    if not present:
+        if declared and not unnamed:
+            seen.add('T4')
+            for n in sorted(declared, key=int):
+                bad.append(f'{root}: 正文声明了 图{n}，包里却没有任何 图N.png → T4'
+                           f'（实施细则第四十六条：说明书中写有对附图的说明但无附图，'
+                           f'须限期补交附图或声明取消该说明）')
+        else:
+            notes.append(f'{root}: {"图文件名认不出图号（" + named + "）" if unnamed else "包内既无图也无图号声明"}'
+                         f' → T4–T6 未判（不折成合规）')
+        return bad, notes, seen
+    seen.update({'T4', 'T5'})
+    for n in sorted(declared - set(present), key=int):
+        bad.append(f'{root}: 正文声明了 图{n}，figures 里没有这张图 → T4'
+                   f'（实施细则第四十六条：缺少部分附图须补交或声明取消对附图的说明）')
+    for n in sorted(set(present) - declared, key=int):
+        bad.append(f'{root}: figures 里有 {os.path.basename(present[n])}，'
+                   f'正文没有任何"图{n}"引用 → T5（每幅图都要被附图说明与具体实施方式引用）')
+    # T6 只看**实存文件**的编号是否连续：把正文声明并进分母，会让"正文写了 图2 但包里没有 图2"
+    # 这种情形反过来把跳号补圆（union 连续、T6 不响），而跳号与缺图是两回事，各判各的。
+    nums = sorted({int(k) for k in present})
+    if nums and not unnamed:
+        seen.add('T6')
+        if nums != list(range(1, len(nums) + 1)):
+            miss = sorted(set(range(1, max(nums) + 1)) - set(nums))
+            bad.append(f'{root}: 图号不是从 1 起连续编号（缺 {miss}）→ T6'
+                       f'（实施细则第二十一条：几幅附图应当按照"图1，图2，……"顺序编号排列）')
+    elif unnamed:
+        notes.append(f'{root}: {len(unnamed)} 个图文件名认不出图号（{named}）'
+                     f' → T6 未判（连号要靠认得出的图号，猜号会把缺号判成不缺）')
+    return bad, notes, seen
+
+
 def label_table_map(docs):
     """从文书里收集「标记｜名称」对照：只认 N 门禁那一族表（表头同时有标记与名称列）。"""
     m, found = {}, False
@@ -131,12 +208,8 @@ def check_package(root, docs=None):
         notes.append(f'{root}: figures 里有 {len(orphan)} 张 PNG 没有配套 manifest'
                      f'（{("、".join(orphan[:3]))}{" 等" if len(orphan) > 3 else ""}）'
                      f'——有清单的那些照常判，但整包对账不完整')
-    if not mans:
-        if orphan:
-            return [], notes, seen, fatal
-        notes.append(f'{root}: 没有 figures 目录，也没有任何图 ↔ 文书的对账对象 → T1–T3 未判')
-        return bad, notes, seen, None
-
+    # 文书要先读：T4–T6 拿"正文声明的图号"对"figures 里真实存在的图号"，
+    # 一个包连 figures 目录都没有时，恰恰最需要这两条（缺整批附图）。
     if docs is None:
         docs = []
         for dp, _, fs in os.walk(root):
@@ -145,6 +218,16 @@ def check_package(root, docs=None):
             for f in sorted(fs):
                 if f.lower().endswith(('.md', '.docx')):
                     docs.append((os.path.join(dp, f), read_any(os.path.join(dp, f))))
+    r_bad, r_notes, r_seen = number_reconcile(root, docs)
+    bad += r_bad
+    notes += r_notes
+    seen |= r_seen
+    if not mans:
+        if orphan:
+            return bad, notes, seen, fatal
+        notes.append(f'{root}: 没有 figures 目录，也没有任何图 ↔ 文书的对账对象 → T1–T3 未判')
+        return bad, notes, seen, None
+
     pool = norm('\n'.join(t for _, t in docs))
 
     for mp in mans:
@@ -200,7 +283,7 @@ def check_package(root, docs=None):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T3')
+    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T6')
     ap.add_argument('targets', nargs='+', help='交付包目录（含 figures/ 与 01/02 段文书）')
     args = ap.parse_args()
 
@@ -227,7 +310,7 @@ def main():
         total += len(bad)
         fatal_all = fatal_all or fatal
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 T1–T3，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 T1–T6，判据见脚本 docstring）；实判 {judged} 个包')
     if total:
         # 真找到的违规不许被"对账不完整"降级成环境档：先报违规，再补一句不完整在哪
         if fatal_all:

@@ -38,7 +38,7 @@ S0 素材评估与渲染 → S1 技术特征提取 → S2 现有技术排查（�
 ## 关键操作纪律（低自由度，照做）
 
 1. **多代理协作**：提取/写手/附图各阶段用并行子代理（foreground 同块并发）；审查必须独立（reviewer 只审不改）；修订派 fix 代理（不内联修补他人稿件）；审查轮次不可跳过（两轮：交底书轮+申请文件轮）。
-2. **附图**：一律用 `scripts/patent_figure.py` 的 `Figure(...).save()` 出图——纪律 2 的机械项被做成结构而非记忆：F1 dpi≥200 且图宽 14–16cm、F2 图内不嵌图题（图题写 md 引用处）且保存即过 C1/C2 像素判据、F3 阿拉伯数字标记+直线引线且同编号同部件（跨图靠 parts 登记表核对）、F4 框内文字 ≤12 字；**自检不过会删掉该图**，不留违规件进包。像素侧复扫仍由 `scripts/check_figures.py`（C1/C2/C3）承担；禁止改 rcParams 的 font.family/font.sans-serif/axes.unicode_minus，禁止用 AI 生成图充当专利附图；附图标记说明对照表必备。
+2. **附图**：一律用 `scripts/patent_figure.py` 的 `Figure(...).save()` 出图——纪律 2 的机械项被做成结构而非记忆：F1 dpi≥200 且图宽 14–16cm、F2 图内不嵌图题（图题写 md 引用处）且保存即过 C1/C2 像素判据、F3 阿拉伯数字标记+直线引线且同编号同部件（跨图靠 parts 登记表核对）、F4 框内文字 ≤12 字；**自检不过会删掉该图**，不留违规件进包。像素侧复扫仍由 `scripts/check_figures.py`（C1/C2/C3，外加 C4 从 docx 的 `word/media/` 里解出内嵌位图同样过 C1/C2）承担；禁止改 rcParams 的 font.family/font.sans-serif/axes.unicode_minus，禁止用 AI 生成图充当专利附图；附图标记说明对照表必备。
 3. **docx 转换与复核**：一律 `LC_ALL=C.utf8 LANG=C.utf8 pandoc`（POSIX locale 丢中文路径图片）；批量转换与验证用 `scripts/regen_docx.py`（缺 pandoc 或 python-docx 时 rc=2 打印安装指引且不转换，勿误判为文件转换失败；rc=1 才是文件级失败）；每轮修订后先跑 `scripts/regen_docx.py <包目录> --check`（只读、不需要 pandoc）问一句「还有几份 md 比它的 docx 新」，M>0 就先重转再进下一步；转后必须 python-docx 验证+`unzip -l` 核对媒体数=附图数；铁律门禁也能直接读 docx 正文（`scripts/check_iron_rules.py <件.docx>`，或整包 `scripts/check_iron_rules.py <包> --all` 一并收 .md/.docx），别让 md 干净而 docx 带病交付。
 4. **打包**：包结构固定为 `README.md + 01_交底书/ + 02_申请文件/ + 03_设计补全/ + 04_EVT验证/ + 05_法规与裁决/`（可用 `scripts/new_product_package.py` 生成骨架）；zip 重建后必须做"目录↔zip 全文件比对"（`scripts/rebuild_package.py` 自带）；脆文件系统环境下禁止长链 glob 拷贝，逐目录拷贝+哈希核验。
 5. **EVT 诚实边界**：分析/仿真验证可执行；物理实测严禁编造——输出测试规程+预测值+判据+"待物理实测"；投产总则逐字写入报告："任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据。"（`check_iron_rules.py` R8 按此逐字串核对，改这四处任一措辞都须同步脚本常量）
@@ -53,7 +53,7 @@ G4 裁决四要素且依据须引 EVT 证据或明写"转 EVT 实测裁决" / G5
 K3 冲突记录七字段 / K4 接口定义七必备字段 / K5 以代理指标为目标的节须有守护项或退化解审查记录）。
 K5 是触发式的：没出现代理指标就报"未判"，不假定"没写就是不需要"。
 6e. **图与文书对账实跑**：出图后跑 `scripts/check_figure_text.py <交付包目录>`
-（T1 图上部件名须逐字见于文书 / T2 图内量值含单位符号须逐字见于文书 / T3 图上标记号→部件须与对照表一致）。
+（T1 图上部件名须逐字见于文书 / T2 图内量值含单位符号须逐字见于文书 / T3 图上标记号→部件须与对照表一致 / T4 正文声明的图号必须有这张图 / T5 每张图必须被正文引用 / T6 实存图号从 1 起连续）。
 读的是出图时代码自己写的 manifest，不是手抄登记表；有 PNG 无 manifest 按 rc=2 说"无从查证"——哪怕同包里其余图都带着清单，那张手画 PNG 上写着什么同样没人核过。
 6d. **附图标记对账实跑**：S6 的说明书落盘即跑 `scripts/check_figure_labels.py <交付包目录> --all`
 （N1 有附图说明节必有 标记｜名称｜所在图号 三列表 / N2 标记为阿拉伯数字且同号不双名、双名不同号 /

@@ -35,7 +35,9 @@ pandoc 中文路径与 locale｜图片像素扫描｜zip 同步核验｜脆文�
 - **时机教训**：大批量拷贝刚结束时立即 zip 曾丢 4 个文件（写入未落盘）——拷贝与 zip 之间 `sync; sleep 1`；zip 后必做比对再交付。
 
 ## 4. 脆文件系统对策
-- 长链 `&&` + glob 的大批量拷贝曾出现静默部分失败——**逐目录拷贝+哈希核验**（参考 scripts/rebuild_package.py 的 sync_tree 逻辑）。
+- 长链 `&&` + glob 的大批量拷贝曾出现静默部分失败——**逐目录拷贝+哈希核验**。可复用的只有"先写临时名再 rename"这一步
+  （`scripts/rebuild_package.py` 的 `ztmp → zfin`）；该脚本**既不拷贝也不做哈希**（全仓无 `sync_tree`，
+  比对面只有路径集合，见 references/grant-application.md §6），所以"哈希核验"目前是人行动作，没有执行点。
 - `rm` 后立刻重建同名 zip 偶发 "File exists"——`sync; sleep 1` 再操作。
 - shutil.copytree 偶发 `FileExistsError`/`No such file or directory`——用"拷到临时目录→核验→rename"模式。
 
