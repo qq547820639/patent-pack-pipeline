@@ -321,15 +321,71 @@ def test_new_product_package():
 
 def test_rebuild_package():
     with tempfile.TemporaryDirectory() as d:
-        pkg = os.path.join(d, 'T包_交付包'); os.makedirs(pkg)
-        open(os.path.join(pkg, '测试_文件.md'), 'w', encoding='utf8').write('中文内容测试')
+        pkg = os.path.join(d, 'T包_交付包'); os.makedirs(os.path.join(pkg, '01_交底书'))
+        src = os.path.join(pkg, '01_交底书', '交底书.md')
+        BODY = '中文内容测试' * 8
+        open(src, 'w', encoding='utf8').write(BODY)
         r = run([PY, f'{S}/rebuild_package.py', pkg])
-        assert_(r.returncode == 0 and 'UTF-8 filenames OK' in r.stdout, '打包或 UTF-8 标志位异常', r)
+        assert_(r.returncode == 0 and 'SHA-256+CRC+UTF-8 标志位全过' in r.stdout, '打包或 P1–P4 校验异常', r)
         with zipfile.ZipFile(pkg + '.zip') as z:
-            i = [x for x in z.infolist() if '测试_文件.md' in x.filename][0]
+            i = [x for x in z.infolist() if '交底书.md' in x.filename][0]
             assert_(i.flag_bits & 0x800, 'UTF-8 标志位未置', r)
-            assert_(z.read(i.filename).decode('utf8') == '中文内容测试', 'zip 内容损坏', r)
-    print('PASS rebuild_package（同步+UTF-8 标志位+内容完整）')
+            assert_(z.read(i.filename).decode('utf8') == BODY, 'zip 内容损坏', r)
+
+        # main() 每次重打包，所以"名单对得上而内容不对"这种成品只能直接喂给 verify()
+        _sp = importlib.util.spec_from_file_location('rp_bt', f'{S}/rebuild_package.py')
+        rp = importlib.util.module_from_spec(_sp); _sp.loader.exec_module(rp)
+        REL = '01_交底书/交底书.md'
+
+        def craft(tag, name, data):
+            z = os.path.join(d, tag + '.zip')
+            with zipfile.ZipFile(z, 'w', zipfile.ZIP_STORED) as zf:
+                zf.writestr('T包_交付包/' + name, data)
+            return z
+
+        assert_(rp.verify(pkg, os.path.join(d, 'T包_交付包.zip')) == [],
+                f'合规包被 P1–P4 判红（这把尺子自己造假红）: {rp.verify(pkg, os.path.join(d, "T包_交付包.zip"))}', None)
+        v = rp.verify(pkg, craft('p1', REL, BODY[:len(BODY) // 2]))
+        assert_(any(x.startswith('P1') for x in v), f'截断（字节数不符）没被抓到: {v}', None)
+        v = rp.verify(pkg, craft('p2', REL, BODY.replace('测试', '测式')))
+        assert_(any(x.startswith('P2') for x in v), f'同长度换字（SHA-256 不符）没被抓到: {v}', None)
+        # 名单差集也要报——且不能因为报了差集就跳过交集内容比对
+        d5 = os.path.join(d, 'P包_两文件'); os.makedirs(os.path.join(d5, '01_交底书'))
+        open(os.path.join(d5, '01_交底书', '交底书.md'), 'w', encoding='utf8').write(BODY)
+        open(os.path.join(d5, '01_交底书', '检索报告.md'), 'w', encoding='utf8').write('一份没进包的文件')
+        p5 = os.path.join(d, 'p5.zip')
+        with zipfile.ZipFile(p5, 'w', zipfile.ZIP_STORED) as zf:
+            zf.writestr('P包_两文件/' + REL, BODY[:4])
+            zf.writestr('P包_两文件/01_交底书/多出来的.md', 'x')
+        v = rp.verify(d5, p5)
+        assert_(any('目录有、zip 里没' in x for x in v) and any('zip 有、目录里没有' in x for x in v)
+                and any(x.startswith('P1') for x in v),
+                f'名单差集或交集内容比对没报全: {v}', None)
+        # P3：翻一个内容字节让 CRC 炸；判据必须把它报成 P3 而不是带 traceback 退 1，
+        # 且 testzip 点过名的条目不再报第二遍（同一件事报两次会淹掉别的原告）。
+        p3 = craft('p3', REL, BODY)
+        raw = bytearray(open(p3, 'rb').read())
+        k = raw.index('中'.encode('utf8')); raw[k] += 1
+        cp = os.path.join(d, 'p3c.zip'); open(cp, 'wb').write(bytes(raw))
+        try:
+            v3 = rp.verify(pkg, cp)
+        except Exception as e:
+            v3 = [f'逃逸异常 {type(e).__name__}']
+        assert_(any(x.startswith('P3') for x in v3)
+                and len([x for x in v3 if x.startswith('P3')]) == 1,
+                f'P3 没抓到、逃逸成异常、或重复上报: {v3}', None)
+        bad = os.path.join(d, '坏包.zip'); open(bad, 'wb').write(b'not a zip')
+        try:
+            rp.verify(pkg, bad); code = None
+        except SystemExit as e:
+            code = e.code
+        assert_(code == 2, f'打不开的 zip 没按 rc=2 收（实得 {code}）', None)
+
+        r = run([PY, f'{S}/rebuild_package.py'])
+        assert_(r.returncode == 2 and '用法' in r.stdout, f'零参数没按 rc=2 收: {show(r)}', r)
+        r = run([PY, f'{S}/rebuild_package.py', src])
+        assert_(r.returncode == 2 and '只接包目录' in r.stdout, f'传文件没说明成因: {show(r)}', r)
+    print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):
@@ -1149,14 +1205,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNQT]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEGKNQT]\d)\s', s, re.M))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNQTP]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEGKNQTP]\d)\s', s, re.M))
                  | set(re.findall(r'\u2192 ([NVEGKT]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEGKNQT][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEGKNQTP][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')

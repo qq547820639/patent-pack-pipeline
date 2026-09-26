@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|claims|doc|dc|evt|fig|iron|lab|reg|text|vsr）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|claims|dc|doc|evt|fig|iron|lab|pack|reg|text|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -56,6 +56,7 @@ CT = 'scripts/check_figure_text.py'
 CQ = 'scripts/check_claims.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
+RP = 'scripts/rebuild_package.py'
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
@@ -328,6 +329,28 @@ MUTS = {
         ('目录模式退回只收 md（Word-only 交付包对 V 完全隐形）', V,
          "f.lower().endswith(('.md', '.docx'))]",
          "f.lower().endswith('.md')]", '目录模式未收 .docx 检索报告'),
+    ],
+    'pack': [
+        # P1–P4 里 P4（UTF-8 标志位）没有注入：合法打包路径下 Python zipfile 总会置位，
+        # 造不出"未置位"的 zip；它由 test_rebuild_package 的直接断言钉（flag_bits & 0x800）。
+        ('P1 字节数比对关掉（截断看不见）', RP,
+         '            if infos[rel].file_size != sz:', '            if False:',
+         '截断（字节数不符）没被抓到'),
+        ('P2 内容哈希比对关掉', RP,
+         '            if a != b:', '            if False:',
+         '同长度换字（SHA-256 不符）没被抓到'),
+        ('P3 读不出条目的兜异常收窄（崩一次就不是一回事了）', RP,
+         '            except zipfile.BadZipFile as e:', '            except ImportError as e:',
+         'P3 没抓到、逃逸成异常、或重复上报'),
+        ('P3 已被 testzip 点名的条目再报一遍', RP,
+         '                if rel != crc_bad:', '                if True:',
+         'P3 没抓到、逃逸成异常、或重复上报'),
+        ('名单差集不报（只比内容，名字丢了不知道）', RP,
+         '        for x in sorted(set(want_rel) ^ set(got)):', '        for x in []:',
+         '名单差集或交集内容比对没报全'),
+        ('输入档不再只接包目录', RP,
+         '    if not os.path.isdir(target):', '    if False:',
+         '传文件没说明成因'),
     ],
     'doc': [
         ('陈旧判据彻底关闭（永不判陈旧）', RG,

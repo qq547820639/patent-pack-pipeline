@@ -125,7 +125,7 @@ python3 scripts/check_figure_text.py <交付包目录>                # 图 ↔ 
 python3 scripts/check_figures.py <申请文件目录> [...]              # 附图：C1 彩色=0 / C2 非空白 / C3 图数一致 / C4 docx 内嵌图同判（递归是默认行为，只接目录；除 `-h` 用法出口外不认任何开关）
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/regen_docx.py <根目录> --check                # 只列待重转（md 比 docx 新）的成对文书，不需要 pandoc
-python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」全文件比对
+python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」内容级比对 P1–P4（路径+字节数+SHA-256+CRC+UTF-8 位）
 ```
 
 退出码（判据类脚本统一约定：0 合规 / 1 违规 / 2 环境或输入问题，未做判定）：
@@ -192,6 +192,7 @@ T4–T6 是图号三对账，出处在《专利法实施细则》：T4 正文声
 - **docx 转换**一律走 `regen_docx.py`（POSIX locale 下 pandoc 会丢中文路径图片），转后需 python-docx 验证 + `unzip -l` 核对媒体数 = 附图数。
 - **附图**由代码绘制（matplotlib）白底黑线，dpi ≥ 200、图宽 14–16cm，阿拉伯数字标记 + 引线，同部件跨图同号，附标记对照表；禁止 AI 生成图用于专利附图。
 - **打包**必须用 `rebuild_package.py`（Python zipfile 会置 UTF-8 文件名标志位；系统 `zip` 命令会导致中文文件名在 Windows 下乱码）。
+- `rebuild_package.py` 的比对面是**内容级**：P1 逐条字节数、P2 逐条 SHA-256、P3 CRC（`testzip()`；条目读不出也报 P3，不带着 traceback 退 1）、P4 非 ASCII 条目名须置 UTF-8 标志位。名单有差集时仍比交集内容，免得"少了一个名字"把"某个文件被截断"一起藏掉；退码 0/1/2 同判据类约定。
 - **审查**必须独立（reviewer 只审不改），两轮不可跳过；修订另派 fix 代理，不内联修补他人稿件。
 
 最终交付包结构固定：

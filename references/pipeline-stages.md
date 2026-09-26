@@ -54,7 +54,7 @@ S0 素材评估 → S1 特征提取 → S2 现有技术排查 → S2.5 处置表
 
 ## S8 打包交付
 - 用 scripts/new_product_package.py 生成骨架（含 `检索_<产品>.md` 与 `04_EVT验证/EVT_<产品>.md` 两份底稿，开箱即过 R/V/E 三道文本门禁）；复制文书；README 含专利清单表+提交前必读（时序/口径/待确认项/FTO 红线）。
-- scripts/rebuild_package.py 重建 zip（自带目录↔zip 全文件比对）。
+- scripts/rebuild_package.py 重建 zip（自带内容级比对 P1 字节数／P2 SHA-256／P3 CRC／P4 UTF-8 位；名单有差集时仍比交集内容）。
 
 ## S9 设计补全（缺失机构）
 - 读 references/design-completion.md。判定树：第三方确认事项保留占位；机构结构/运动学/控制逻辑/电气拓扑/材料方向执行设计补全。

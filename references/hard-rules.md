@@ -88,8 +88,9 @@
 
 ## 8. 打包纪律
 - 包结构：README.md｜01_交底书｜02_申请文件｜03_设计补全｜04_EVT验证｜05_法规与裁决。
-- zip 重建后做目录↔zip 全文件比对（scripts/rebuild_package.py 自带），但比的是**逐条相对路径集合**：
-  内容级（字节数/SHA-256）与 CRC（`testzip()`）今天都没接，脆文件系统把某文件写成半截时路径集合照样相等、
-  脚本照样报 "fully synced"。这三项已登记为下一轮靶子，在那之前不要把"全文件比对"读成"逐文件核过内容"
-  （口径与限制见 references/grant-application.md §6）。
+- zip 重建后做目录↔zip 比对，**比到内容级**（`scripts/rebuild_package.py` 的 `verify()`）：
+  P1 逐条字节数、P2 逐条 SHA-256（两边都流式读）、P3 `testzip()` CRC 且读不出条目也要报成 P3 而不是崩，
+  P4 非 ASCII 条目名必须置 UTF-8 标志位。名单不齐时仍对**交集**比内容——名字差集不该把截断一起藏掉；
+  同一条目被 testzip 点过名就不再报第二遍（一件事报两次会淹掉别的原告）。
+  退码 0 全过 / 1 存在不符 / 2 输入不可用（zip 打不开、传的不是包目录、零参数）。口径见 §6 与 references/grant-application.md。
 - 脆文件系统对策：逐目录拷贝+哈希核验；zip 用临时名重建后 mv；操作间 sync+sleep。
