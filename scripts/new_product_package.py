@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""生成新产品专利交付包骨架（五段子目录 + 包 README + 四份底稿）。
+"""生成新产品专利交付包骨架（五段子目录 + 包 README + 五份底稿）。
 用法: python3 new_product_package.py <产品代号> <输出父目录>
 · 检索_<产品>.md：文件名带"检索"，verify_search_report.py 传包目录即可自动挑到（V1–V3）。
+· 02_申请文件/说明书_<产品>.md：N1–N4 的载体，附图说明节 + 图中标记说明三列表，
+  表头由 check_figure_labels.COLS 生成。
 · 04_EVT验证/EVT_<产品>.md：E1–E4 的载体，投产总则从 check_iron_rules import 同一份常量，
   不在这里重抄一遍——重抄的那份迟早和判据漂移。
 · 05_法规与裁决/法规_<产品>.md：G1–G5 的载体（适用性判定/逐条映射/缺口/送检/裁决五张表）。
@@ -22,6 +24,7 @@ def _load(name):
 
 _c = _load('check_iron_rules')
 _dc = _load('check_design_completion')
+_nl = _load('check_figure_labels')
 PRODUCTION_CLAUSE = _c.PRODUCTION_CLAUSE
 
 README = """# {name} 专利交付包
@@ -121,6 +124,18 @@ def design_doc(name):
     return '\n'.join(parts)
 
 
+def spec_doc(name):
+    """02_申请文件 说明书底稿：小节名与对照表表头都取自判据侧常量。
+    判据 N1 要的是"有附图说明节就必须有三列对照表"，这张表若在这里手抄一遍，
+    列名漂移时判据照绿、底稿照错——正是要防的那种漂移。"""
+    parts = [f'# {name} 申请文件（说明书骨架）\n',
+             '（骨架期对照表只有表头：N2–N4 报"未判"而不是判红，填了行才会被判。）\n']
+    for title, hint in _nl.DOC_SECTIONS:
+        body = hint if hint else f'{_nl.header_row()}\n{_nl.separator_row()}'
+        parts.append(f'## {title}\n{body}')
+    return '\n'.join(parts) + '\n'
+
+
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
     for d in ['01_交底书','02_申请文件','03_设计补全','04_EVT验证','05_法规与裁决']:
@@ -138,6 +153,9 @@ def main(name, parent):
     dc_dir = os.path.join(root, '03_设计补全')
     with open(os.path.join(dc_dir, f'补全_{name}.md'), 'w', encoding='utf8') as f:
         f.write(design_doc(name))
+    fd_dir = os.path.join(root, '02_申请文件')
+    with open(os.path.join(fd_dir, f'说明书_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(spec_doc(name))
     print('created', root)
 
 if __name__ == '__main__':

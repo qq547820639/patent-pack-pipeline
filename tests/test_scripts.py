@@ -282,7 +282,36 @@ def test_new_product_package():
         rk2 = run([PY, f'{S}/check_design_completion.py', d, '--all'])
         assert_(rk2.returncode == 1 and "['约束条件']" in rk2.stdout and '→ K2' in rk2.stdout,
                 '底稿表头被改坏后 K2 未判红（说明骨架底稿没真被这张门禁吃进去）', rk2)
-    print('PASS new_product_package（五段目录+README+检索/EVT/法规/补全四份底稿，开箱即过 R/V/E/G/K 五门禁）')
+        # 说明书底稿：附图说明节 + 三列对照表，表头取自判据侧 COLS（N1–N4 的载体）
+        _sp2 = _il.spec_from_file_location('cfl', f'{S}/check_figure_labels.py')
+        cfl = _il.module_from_spec(_sp2)
+        _sp2.loader.exec_module(cfl)
+        sp_path = os.path.join(d, 'TESTX_专利交付包', '02_申请文件', '说明书_TESTX.md')
+        assert_(os.path.isfile(sp_path), f'缺说明书底稿（N1–N4 没有载体）: {r.stdout}', r)
+        sp_text = open(sp_path, encoding='utf8').read()
+        lost_n = [c for c in cfl.COLS if c not in sp_text]
+        assert_(lost_n == [], f'说明书底稿表头与判据 COLS 不同源，缺列 {lost_n}', None)
+        rn = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
+        assert_(rn.returncode == 0 and '实核附图标记文书 1 份' in rn.stdout
+                and '只有表头没有数据行' in rn.stdout,
+                '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态', rn)
+        # 真开一火：把「所在图号」列抹掉，N1 必须当场缺列判红（空表也看得见结构漂移）
+        with open(sp_path, 'w', encoding='utf8') as f:
+            f.write(sp_text.replace('| 标记 | 名称 | 所在图号 |', '| 标记 | 名称 |'))
+        rn2 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
+        assert_(rn2.returncode == 1 and "['所在图号']" in rn2.stdout and '→ N1' in rn2.stdout,
+                '底稿表头被改坏后 N1 未判红（骨架底稿没真被这张门禁吃进去）', rn2)
+        # 载体整张缺席：留个有附图说明节的说明书却没有对照表 → N1 必红
+        with open(sp_path, 'w', encoding='utf8') as f:
+            f.write(sp_text.split('## 图中标记说明')[0])
+        rn3 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
+        assert_(rn3.returncode == 1 and '却没有图中标记说明对照表' in rn3.stdout,
+                '有附图说明节却无对照表未判红', rn3)
+        os.remove(sp_path)
+        rn4 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
+        assert_(rn4.returncode == 2 and '没有一份落在附图标记适用域内' in rn4.stdout,
+                '删掉说明书底稿后未走"未判定"三态', rn4)
+    print('PASS new_product_package（五段目录+README+检索/EVT/法规/补全/说明书五份底稿，开箱即过 R/V/E/G/K/N 六门禁）')
 
 
 def test_rebuild_package():
@@ -845,14 +874,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGK]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEGK]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([VEGK]\d)', s)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKN]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEGKN]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([NVEGK]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEGK][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEGKN][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -1309,6 +1338,158 @@ def test_check_design_completion():
     print('PASS check_design_completion（K1–K5 各成对 + 触发式未判 + 三条适用域轴 + rc=2）')
 
 
+def test_check_figure_labels():
+    """附图标记门禁 N1–N4：每条判据都要有"必开火"与"合规侧必不开火"两案，
+    且不开火那案必须真被该判据读到（seen 里有它），否则是空转的绿。
+    N3/N4 另各带一条"不许自证"的反案——正文遮掉表格行这件事必须由判红来证明。"""
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('check_figure_labels', f'{S}/check_figure_labels.py')
+    cf = ilu.module_from_spec(spec)
+    spec.loader.exec_module(cf)
+
+    P = '02_申请文件/说明书_T.md'
+    HDR = '| 标记 | 名称 | 所在图号 |\n|---|---|---|'
+    ROWS = '| 12 | 底座 | 1、2 |\n| 13 | 支架 | 1 |'
+    OK = ('# 整机 说明书\n'
+          '## 附图说明\n图 1 为本机构整体示意图；图 2 为底座剖视图。\n'
+          '## 具体实施方式\n所述底座 12 与支架 13 连接，所述支架 13 上装有弹性卡扣。\n'
+          f'## 图中标记说明\n{HDR}\n{ROWS}\n')
+
+    def n_of(bad, tag):
+        return sum(1 for x in bad if f'→ {tag}' in x)
+
+    # 合规总案：四条判据都真读到，且一条都不开火
+    bad, notes, seen = cf.check_text(P, OK)
+    assert_(bad == [], f'合规说明书底稿被误判红: {bad}', None)
+    assert_(seen == {'N1', 'N2', 'N3', 'N4'}, f'合规案未把四条判据都判到: {sorted(seen)}', None)
+
+    # N1 缺列（掉「所在图号」）：整表报一条，且不逐行放大
+    bad, notes, seen = cf.check_text(P, OK.replace(HDR, '| 标记 | 名称 |\n|---|---|'))
+    assert_(n_of(bad, 'N1') == 1 and "['所在图号']" in bad[0] and n_of(bad, 'N2') == 0,
+            f'N1 缺列读数不对（放大成逐行、或整表一条都没报）: {bad}', None)
+
+    # N1 识别列掉一格也要认得出是这张表：报"缺名称列"而不是"没有对照表"
+    bad, _, _ = cf.check_text(P, OK.replace(HDR, '| 标记 | 编号 | 所在图号 |\n|---|---|---|'))
+    assert_(n_of(bad, 'N1') == 1 and "['名称']" in bad[0],
+            f'掉识别列时成因说错（应报缺名称列，而不是无表）: {bad}', None)
+
+    # N1 有附图说明节却整张表缺席 → 判红（散文写的附图说明不能白过）
+    bad, notes, seen = cf.check_text(P, OK.split('## 图中标记说明')[0])
+    assert_(n_of(bad, 'N1') == 1 and '却没有图中标记说明对照表' in bad[0],
+            f'02 目录下无对照表的说明书未判红: {bad} / {notes}', None)
+
+    # N1 域外豁免的另一侧：交底书有附图说明节只报未判，不硬判红
+    bad, notes, seen = cf.check_text('01_交底书/交底书_T.md',
+                                     '# 交底书\n## 附图说明\n图 1 为整体示意。\n')
+    assert_(bad == [] and 'N1 未判' in ''.join(notes) and seen == set(),
+            f'交底书被硬判红，或未如实说未判: {bad} / {notes}', None)
+
+    # N2 标记不是阿拉伯数字
+    bad, _, seen = cf.check_text(P, OK.replace(ROWS, '| 十二 | 底座 | 1、2 |\n| 13 | 支架 | 1 |'))
+    assert_(n_of(bad, 'N2') == 1 and '不是阿拉伯数字' in bad[0] and 'N2' in seen,
+            f'汉字标记未判红: {bad}', None)
+
+    # N2 三格逐格必填（名称空着）
+    bad, _, _ = cf.check_text(P, OK.replace(ROWS, '| 12 | 底座 | 1、2 |\n| 13 |  | 1 |'))
+    assert_(n_of(bad, 'N2') == 1 and '「名称」空着' in bad[0], f'空格子未判红: {bad}', None)
+
+    # N2 同名两标记 / 同号两名：表内自相矛盾必须各判一条
+    bad, _, _ = cf.check_text(P, OK.replace(ROWS, ROWS + '\n| 14 | 支架 | 2 |'))
+    assert_(n_of(bad, 'N2') == 1 and '既挂 13 又挂 14' in bad[0],
+            f'同一名称挂两个标记未判红: {bad}', None)
+    bad, _, _ = cf.check_text(P, OK.replace(ROWS, ROWS + '\n| 13 | 卡箍 | 1 |'))
+    assert_(n_of(bad, 'N2') == 1 and '既指「支架」又指「卡箍」' in bad[0],
+            f'同一标记挂两个名称未判红: {bad}', None)
+
+    # N3 正文号与表不符（借"同号异名"对账方向，词表取自权威表）
+    bad, _, seen = cf.check_text(P, OK.replace('所述支架 13 上', '所述支架 15 上'))
+    assert_(n_of(bad, 'N3') == 1 and '而表内「支架」的标记是 13' in bad[0] and 'N3' in seen,
+            f'正文标记与表错配未判红: {bad}', None)
+
+    # N3 合规侧：正文与表一致时不许开火（上面总案已核，这里核"未核"注记不该出现）
+    bad, notes, _ = cf.check_text(P, OK)
+    assert_(not any('B3 未核' in x or 'N3 未核' in x for x in notes),
+            f'一致正文被记成未核: {notes}', None)
+
+    # N3 取最长匹配：表里同时有「支架」和「弹性支架」时，"弹性支架 14"不许按短名「支架」判错
+    bad, _, _ = cf.check_text(P, OK.replace(ROWS, ROWS + '\n| 14 | 弹性支架 | 1 |')
+                              .replace('装有弹性卡扣', '装有弹性支架 14'))
+    assert_(bad == [], f'最长匹配失效，按短名误判了: {bad}', None)
+
+    # N3 不许误伤：名称前还有未登记前缀（"合金支架"里的"支架"）→ 只记未核
+    bad, notes, _ = cf.check_text(P, OK.replace('所述支架 13 上', '所述合金支架 15 上'))
+    assert_(bad == [] and any('N3 未核' in x for x in notes),
+            f'更长前缀被折成违规或缺少未核说明: {bad} / {notes}', None)
+
+    # N3 不许误伤：紧贴单位的量值不是标记号。这里刻意用"底座 14mm"——名称正好落在
+    # 边界上、数字又与表内 12 不符，豁免支路一关就必然开火（"底座厚度 12mm"那种写法
+    # 连名称匹配都到不了，测不到这条豁免）。
+    bad, _, _ = cf.check_text(P, OK.replace('所述底座 12 与', '底座 14mm 以上的规格同样成立，所述底座 12 与'))
+    assert_(bad == [], f'带单位的量值被当成正文标记错配: {bad}', None)
+
+    # N4 所在图号没声明过 → 判红
+    bad, _, seen = cf.check_text(P, OK.replace('| 13 | 支架 | 1 |', '| 13 | 支架 | 7 |'))
+    assert_(n_of(bad, 'N4') == 1 and '不在本文声明的图号集合' in bad[0] and 'N4' in seen,
+            f'未声明图号未判红: {bad}', None)
+
+    # N4 不许自证：表里自己写"图 7"不算声明了一个图号——正文遮掉表格行才作数
+    bad, _, _ = cf.check_text(P, OK.replace('| 13 | 支架 | 1 |', '| 13 | 支架 | 图 7 |'))
+    assert_(n_of(bad, 'N4') == 1, f'表内自写图号被当成已声明（N4 成了自证）: {bad}', None)
+
+    # N4 未判一侧：正文一个图号都没声明
+    bad, notes, seen = cf.check_text(P, OK.replace(
+        '图 1 为本机构整体示意图；图 2 为底座剖视图。', '附图见随文图纸。'))
+    assert_(bad == [] and any('N4 未判' in x for x in notes),
+            f'正文无图号声明时未走未判: {bad} / {notes}', None)
+
+    # 空表骨架：有表头零行 → 未判不判红（但 N1 算判到了，缺列才有机会出声）
+    bad, notes, seen = cf.check_text(P, OK.replace(ROWS, ''))
+    assert_(bad == [] and '只有表头没有数据行' in ''.join(notes) and seen == {'N1'},
+            f'空表骨架读数不对: {bad} / {notes} / {sorted(seen)}', None)
+
+    # 适用域第三条轴：路径不在 02、正文既不写「附图说明」也不写「标记说明」，
+    # 只有一张被分类器认出的表 → 必须进域真判。（早先这档误用 OK 当夹具，
+    # 而 OK 的节标题里就带"附图说明"，命中的是第二条轴，第三轴等于没测。）
+    only_table = ('# 部件与图号对照\n## 具体实施方式\n所述底座 12 与支架 13 连接（见图 1、图 2）。\n'
+                  f'## 部件清单\n{HDR}\n{ROWS}\n')
+    assert_('附图说明' not in only_table and '标记说明' not in only_table,
+            '第三轴夹具里混进了第二轴的关键词，测不到要测的那条轴', None)
+    bad, notes, seen = cf.check_text('01_交底书/交底书_T.md', only_table)
+    assert_(bad == [] and seen == {'N1', 'N2', 'N3', 'N4'},
+            f'第三条适用域轴（表被认出即域内）未生效: {sorted(seen)} / {notes}', None)
+
+    # 域外文书：一句"未判"交代成因，不折成合规
+    bad, notes, seen = cf.check_text('01_交底书/交底书_T.md', '# 交底书\n普通内容。\n')
+    assert_(bad == [] and len(notes) == 1 and '非附图文书' in notes[0],
+            f'域外文书未走三态或未说明成因: {bad} / {notes}', None)
+
+    # 整包三态与退出码：rc=0 真判 / rc=2 域内为零 / rc=2 输入不可用
+    with tempfile.TemporaryDirectory() as d:
+        pkg = os.path.join(d, '包_专利交付包')
+        ok_dir = os.path.join(pkg, '02_申请文件')
+        os.makedirs(ok_dir)
+        doc = os.path.join(ok_dir, '说明书.md')
+        # 域外文书留在树里：域内为零与"树里没有文件"是两个不同的 rc=2 成因，
+        # 只建一棵空树会让后者顶掉前者，那条分支就等于没测。
+        open(os.path.join(pkg, 'README.md'), 'w', encoding='utf8').write('# 包 README\n普通内容。\n')
+        open(doc, 'w', encoding='utf8').write(OK)
+        r = run([PY, f'{S}/check_figure_labels.py', pkg, '--all'])
+        assert_(r.returncode == 0 and '实核附图标记文书 1 份' in r.stdout,
+                '整包 --all 未把 02 目录内文书计入实核数', r)
+        open(doc, 'w', encoding='utf8').write(
+            OK.replace('所述支架 13 上', '所述支架 15 上'))
+        r = run([PY, f'{S}/check_figure_labels.py', pkg, '--all'])
+        assert_(r.returncode == 1 and '→ N3' in r.stdout, '脏文书未按要求判红', r)
+        os.remove(doc)
+        r = run([PY, f'{S}/check_figure_labels.py', pkg, '--all'])
+        assert_(r.returncode == 2 and '没有一份落在附图标记适用域内' in r.stdout,
+                '域内文书为零时被当成"已通过"', r)
+        r = run([PY, f'{S}/check_figure_labels.py', os.path.join(d, '不存在.md')])
+        assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
+                '路径不存在未按要求说清成因并 fail-closed', r)
+    print('PASS check_figure_labels（N1–N4 各成对 + 域内分轴 + 不许自证 + rc=2 三态）')
+
+
 def test_verify_search_report():
     """检索报告门禁 V1–V3：默认不碰网络（fetch 被桩替），网络路径另有 live 档。"""
     import importlib.util as ilu
@@ -1515,7 +1696,14 @@ def test_battery_needle_census():
     assert_(not miss, f'这些 needle 在目标脚本里找不到，跑批只会整条 PROBE-FAIL: {miss}', None)
     assert_(not dup, f'这些 needle 命中多次，变异会打到同形的另一处: {dup}', None)
     tail = f'，另跳过电池正在生效的 {skipped} 条' if skipped else ''
-    print(f'PASS 变异电池锚点体检（{total} 条 needle × {len(texts)} 个脚本，'
+    # 用法行里的 arm 清单是手抄的：抄漏一支，那支电池就等于不存在（没人会去跑它）
+    listed = re.search(r'只跑一支（([a-z|]+)）', mb.__doc__ or '')
+    assert_(listed is not None, '电池 docstring 没有「只跑一支（…）」这份清单，反漂移断言空转', None)
+    got = sorted(listed.group(1).split('|'))
+    want = sorted(mb.MUTS)
+    assert_(got == want, f'电池 docstring 的 arm 清单与 MUTS 键不对齐: {got} vs {want}', None)
+
+    print(f'PASS 变异电池锚点体检（{total} 条 needle × {len(texts)} 个脚本 / {len(want)} 档，'
           f'全部恰好命中一次{tail}）')
 
 
@@ -1658,7 +1846,7 @@ if __name__ == '__main__':
              test_new_product_package, test_rebuild_package, test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_check_evt, test_check_regulatory, test_check_design_completion,
-             test_verify_search_report, test_battery_needle_census,
+             test_check_figure_labels, test_verify_search_report, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

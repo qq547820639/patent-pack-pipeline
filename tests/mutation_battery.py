@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm reg       # 只跑一支（iron|fig|vsr|evt|reg|doc）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（doc|dc|evt|fig|iron|lab|reg|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -21,6 +21,10 @@
   · 每支 arm 结束必须打一行「汇总」；缺行按 arm 崩溃处理（批跑时把日志 grep
     成只剩关键词，曾把一支电池 import 期的 SyntaxError 整个吞掉）。
   · fig 档需要 matplotlib；没有就如实 SKIP 并把退出码判 2，不折成"通过"。
+  · 两条规则互相遮蔽时不许硬凑 arm：lab 档的 `nm = max(cands, key=len)` 与边界字表
+    是同一条防误伤的两层，注入前者永远先被后者挡下（短名之前的那段字属于更长名称，
+    一般不在边界字表里）⇒ 读成 SURVIVED 是量具真相，不是覆盖缺口：摘掉这支、
+    用例留作回归护栏（改名或加同名词时它仍有意义）。
 """
 import argparse
 import os
@@ -40,6 +44,7 @@ NP = 'scripts/new_product_package.py'
 CE = 'scripts/check_evt.py'
 CR = 'scripts/check_regulatory.py'
 CD = 'scripts/check_design_completion.py'
+CN = 'scripts/check_figure_labels.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 
@@ -492,7 +497,73 @@ MUTS = {
          "        if J['basis'] is None and rows:",
          ('法规底稿表头少一列却未判红', '缺列被放大成逐条或没报')),
     ],
-}
+    'lab': [
+        ('N1 有附图说明节却无表这条判红整个关掉', CN,
+         "        if has_fig_section and (FIG_DIR.search(path) or FIG_WORD.search(text)):",
+         "        if False:", ('02 目录下无对照表的说明书未判红', '有附图说明节却无对照表未判红')),
+        ('N1 判红扩到交底书（该当未判的一侧被误伤）', CN,
+         "        if has_fig_section and (FIG_DIR.search(path) or FIG_WORD.search(text)):",
+         "        if has_fig_section:", '交底书被硬判红，或未如实说未判'),
+        ('识别列改成三列全中（掉列的表就认不出了）', CN,
+         "    return (_t.col(header, '名称') is not None or _t.col(header, '所在图号') is not None)",
+         "    return _t.col(header, '名称') is not None and _t.col(header, '所在图号') is not None",
+         ('掉识别列时成因说错（应报缺名称列，而不是无表）',
+          '底稿表头被改坏后 N1 未判红')),
+        ('识别列不看「标记」列（任何带名称的表都被当对照表）', CN,
+         "    if _t.col(header, '标记') is None:", '    if False:',
+         ('整包 --all 未把 02 目录内文书计入实核数',
+          '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态')),
+        ('适用域第三条轴关掉（写了表却没提名字的文书读成域外）', CN,
+         "    return any(is_label_table(h) for h, _ in _t.table_blocks(text))",
+         "    return False", '第三条适用域轴（表被认出即域内）未生效'),
+        ('prose_only 不遮表格行（N4 用表自证图号）', CN,
+         r"    return '\n'.join(ln for ln in text.splitlines() if not ln.strip().startswith('|'))",
+         "    return text", '表内自写图号被当成已声明（N4 成了自证）'),
+        ('N2 阿拉伯数字校验关闭', CN,
+         r"            if m and not re.fullmatch(r'\d+', m):", '            if False:',
+         '汉字标记未判红'),
+        ('N2 阿拉伯数字校验反向（恒判红）', CN,
+         r"            if m and not re.fullmatch(r'\d+', m):", '            if True:',
+         '合规说明书底稿被误判红'),
+        ('N2 逐格必填关闭', CN, '                if not cell(cs, J[name]).strip():',
+         '                if False:', '空格子未判红'),
+        ('N2 同号两名关闭', CN, '                if m in num2name and num2name[m] != nm:',
+         '                if False:', '同一标记挂两个名称未判红'),
+        ('N2 同名两号关闭', CN, '                if nm in name2num and name2num[nm] != m:',
+         '                if False:', '同一名称挂两个标记未判红'),
+        ('N3 正文↔表对账关闭', CN, '            if num != name2num[nm]:', '            if False:',
+         '正文标记与表错配未判红'),
+        ('N3 未登记前缀不再豁免（误伤"合金支架"）', CN,
+         '            if before and before[-1] not in BOUND_BEFORE:', '            if False:',
+         '更长前缀被折成违规或缺少未核说明'),
+        ('N3 边界字表形同虚设（合规正文也记成未核）', CN,
+         '            if before and before[-1] not in BOUND_BEFORE:', '            if True:',
+         ('正文标记与表错配未判红', '一致正文被记成未核')),
+        ('N3 单位豁免关闭（"底座厚度 12mm"被当标记错配）', CN,
+         '            if UNIT_TAIL.match(prose[m.end():m.end() + 6]):', '            if False:',
+         '带单位的量值被当成正文标记错配'),
+        ('N4 所在图号核验关闭', CN, '                    if fno not in idx:',
+         '                    if False:', '未声明图号未判红'),
+        ('N4 正文无图号时的未判注记丢掉', CN,
+         "        notes.append(f'{path}: 正文没有「图N」式图号声明 → N4 未判（表里的所在图号无从比对）')",
+         '        pass', '正文无图号声明时未走未判'),
+        ('空表折成判红（骨架期底稿过不了自己的闸）', CN,
+         "            notes.append(f'{where_t} 只有表头没有数据行 → 本表 N2 未判')",
+         "            bad.append(f'{where_t} 空表 → N2')",
+         ('空表骨架读数不对', '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态')),
+        ('seen 不记 N3（合规案空转，四判据少一条也报全判到）', CN,
+         "        seen.add('N3')", '        pass', '合规案未把四条判据都判到'),
+        ('域内文书为零不再 rc=2', CN, '    if judged == 0:', '    if False:',
+         ('域内文书为零时被当成"已通过"', '删掉说明书底稿后未走"未判定"三态')),
+        ('底稿对照表头改成手抄（列名与判据漂移）', NP,
+         r"        body = hint if hint else f'{_nl.header_row()}\n{_nl.separator_row()}'",
+         r"        body = hint if hint else '| 标记 | 名称 | 图号 |' + chr(10) + '|---|---|---|'",
+         ('说明书底稿表头与判据 COLS 不同源',
+          '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态')),
+        ('说明书底稿不再生成（N 门禁在骨架期没有载体）', NP,
+         "    with open(os.path.join(fd_dir, f'说明书_{name}.md'), 'w', encoding='utf8') as f:",
+         '    if False:', '缺说明书底稿（N1–N4 没有载体）'),
+    ],}
 
 def make_work():
     work = tempfile.mkdtemp(prefix='mutbat_')
