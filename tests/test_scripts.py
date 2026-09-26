@@ -1940,7 +1940,7 @@ def test_verify_search_report():
     HDR = ('| # | 类型 | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |\n'
            '|---|---|---|---|---|---|---|\n')
     P = '| 1 | 专利 | CN110404188A | 一种节点 | 公开日 2019-07-26 | CNIPA 著录页 | 2026-09-25 |'
-    A = '| 2 | 论文 | arXiv:1706.03762 | Attention | 2017-06-12 | arXiv 摘要页 | 2026-09-25 |'
+    A = '| 2 | 预印本（arXiv） | arXiv:1706.03762 | Attention | 2017-06-12 | arXiv 摘要页 | 2026-09-25 |'
     D = '| 3 | 论文 | doi:10.1038/nature14539 | Deep learning | 2015-05-27 | Nature | 2026-09-25 |'
 
     def rpt(rows, hdr=HDR):
@@ -1953,6 +1953,23 @@ def test_verify_search_report():
         bad, notes, ck, n_ent = vsr.check_report('r.md', rpt([P, A, D]))
         assert_(bad == [], f'合规检索报告被 V1/V2/V3 误判: {bad}', None)
         assert_(ck == 2, f'在线核成应只数 DOI+arXiv 两条（专利不得算在线），实得 {ck}', None)
+        # 合规侧那一档必须是"判过且合规"，不能是"没看着所以绿"
+        assert_(not any('V4 未判' in x for x in notes),
+                f'合规报告里 arXiv 已标预印本，V4 却报未判（说明列没被认出来）: {notes}', None)
+
+        # V4 三档：标错→必红；没有「类型」列→未判；表里没有 arXiv 条目→未判
+        bad, notes, _, _ = vsr.check_report('r.md', rpt([P, A.replace('预印本（arXiv）', '论文'), D]))
+        assert_(len(bad) == 1 and 'V4' in bad[0] and '预印本' in bad[0],
+                f'arXiv 行标成"论文"没被 V4 抓到（或牵连报出别的）: {bad}', None)
+        HDR2 = ('| # | 标识符 | 标题 | 关键日期 | 核验出处 | 核验日期 |\n'
+                '|---|---|---|---|---|---|\n')
+        A2 = '| 2 | arXiv:1706.03762 | Attention | 2017-06-12 | arXiv 摘要页 | 2026-09-25 |'
+        bad, notes, _, _ = vsr.check_report('r.md', rpt([A2], hdr=HDR2))
+        assert_(bad == [] and any('没有「类型」列' in x and 'V4 未判' in x for x in notes),
+                f'缺「类型」列被折成违规或折成合规（该走未判）: bad={bad} notes={notes}', None)
+        bad, notes, _, _ = vsr.check_report('r.md', rpt([P, D]))
+        assert_(bad == [] and any('没有 arXiv 条目' in x and 'V4 未判' in x for x in notes),
+                f'无 arXiv 条目时 V4 未报未判: bad={bad} notes={notes}', None)
 
         # V3 必红：源明确说查无此项
         vsr.fetch_json = lambda url: ('absent', None)
@@ -2076,7 +2093,7 @@ def test_verify_search_report():
                     '假 arXiv id 未被源判为不存在（控制探针本次正常，判定可信）', None)
         assert_(vsr.verify_online('patent', 'CN110404188A') == 'unreachable',
                 '专利公开号在无源可用时被当成了"核过"', None)
-        print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 档两源各配控制探针）')
+        print('PASS verify_search_report（V1–V4 成对 + 三态 + 死代理 rc=2 + live 档两源各配控制探针）')
 
 
 def test_search_report_docx_channel():

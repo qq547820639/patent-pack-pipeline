@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """检索报告核验门禁：把"已核验"从一句自称变成可机检 + 可在线复算的字段。
 
-判据（V1–V3，文档出处见 references/templates.md §C 与 hard-rules §1）：
+判据（V1–V4，文档出处见 references/templates.md §C 与 hard-rules §1/§2）：
   V1 每条已核验条目必须带可机检标识：专利公开号 / DOI / arXiv id 三选一，
      且标识符形状本身合法（公开号沿用 check_iron_rules.PUB_NO，一处定义）。
   V2 每条条目必须填齐：标识符｜关键日期｜核验出处｜核验日期。
@@ -9,10 +9,19 @@
   V3 在线存在性：DOI 走 Crossref、arXiv id 走 arXiv 官方 API。
      源明确说"查无此项"→ 违规；源不可达/超时/DNS 失败 → 一律"未核"三态，
      绝不把网络故障折算成"引用造假"，也不折算成"引用已核验"。
+  V4 arXiv 条目必须在「类型」列写"预印本"（hard-rules §2 第四条）。这条**离线可判**：
+     arXiv id 本身就意味着它来自预印本服务器，缺的只是文书上那句声明。
+     表里没有「类型」列 → 未判（没有可放标签的地方，不折成违规）；报告里没有 arXiv 条目 → 未判。
+     扩展方向（**本轮未证实，没做**）：Crossref 的 work 记录带 `type` 字段，理论上可用来识别
+     "经 Crossref 注册的 posted-article"从而把 V4 扩到 bioRxiv/medRxiv 一类 DOI；
+     我这一台只拿到 HTTP 400（`/works?filter=type:…&select=…`）与 404（`/types/posted-article/works`），
+     没读到过一个真实字段名，因此不据此写判据。
 
-为什么专利号不在线核：本轮实测 google patents 的两个端点在本机 75s 无响应、
-patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、patentscope 只有
-JSF 表单。宁可不判，也不拿一个没跑通的源假装"已核验"。
+为什么专利号不在线核：那是提交 `afcba9b` 留下的一次观察（google patents 端点 75s 无响应、
+patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、patentscope 只有 JSF 表单），
+同一串读数抄在三处（本文件、README 的 V 段、templates §C），**哪一处都没写命令**，
+所以现在无法逐条重放——按"某次未留命令的观察"读，不当作本轮实测（重测登记在普查余项）。
+宁可不判，也不拿一个没跑通的源假装"已核验"。
 
 读 md 与 docx 两个通道（docx 走 check_iron_rules 那份唯一抽取器，表格还原成管道行后按列读）；
 目录模式同时收 .md 与 .docx，同名成对时挑 .md 并把丢了的谁说出来。
@@ -82,9 +91,14 @@ UA = 'patent-pack-pipeline/1.0 (citation existence check; +https://github.com/qq
 TIMEOUT = 15
 # 表头别名：模板里用的列名与脚本认的列名之间只留这一处映射
 COLS = {'identifier': ('标识符', '公开号', '编号', 'ID'),
+        'kind': ('类型', '类别', '文献类型'),        # V4 用；**不**是 V2 的必填列
         'key_date': ('关键日期', '公开日', '授权日', '发表日'),
         'source': ('核验出处', '出处'),
         'verified_on': ('核验日期', '核对日期')}
+# V2 的必填集合不含 kind：底稿里有「类型」列，但一份手工报告没有这一列时该报的是
+# "V4 未判"（没有可放标签的地方），而不是把它升级成 V2 缺列——那是替纪律新增一条要求。
+REQUIRED = ('identifier', 'key_date', 'source', 'verified_on')
+PREPRINT_WORD = '预印本'
 
 
 def fetch_json(url):
@@ -163,7 +177,10 @@ def parse_report(text):
                 idx[key] = col
                 break
         else:
-            missing.append(key)
+            # 这个 else 属于 for（= 一次都没 break）；可选列 kind 找不到列不进 missing：
+            # 它只影响 V4 判不判得成，不是 V2 的缺列。
+            if key in REQUIRED:
+                missing.append(key)
     return missing, [(r, idx) for r in rows], len(header)
 
 
@@ -180,6 +197,7 @@ def check_report(path, text, online=True):
     if missing:
         bad.append(f'{path}: 「已核验条目」表缺列 {missing}（列名见 templates §C）→ V1/V2')
     no_col = set(missing)     # 整列缺失时不再逐行刷"未填"，否则一条缺陷被放大成 N 条
+    saw_arxiv = v4_no_col = False
     for cells, idx in parsed:
         def cell(key):
             i = idx.get(key)
@@ -196,6 +214,13 @@ def check_report(path, text, online=True):
         if kind is None:
             bad.append(f'{path}: 条目「{ident_raw[:40]}」无可机检标识（公开号/DOI/arXiv id 皆不匹配）→ V1')
             continue
+        if kind == 'arxiv':
+            saw_arxiv = True
+            if 'kind' not in idx:
+                v4_no_col = True
+            elif PREPRINT_WORD not in cell('kind'):
+                bad.append(f'{path}: arXiv {ident} 的「类型」列没写「{PREPRINT_WORD}」'
+                           f'（arXiv id 本身就意味着它未走同行评议）→ V4')
         if kind == 'patent' and 'key_date' not in no_col and not DATE_RE.search(cell('key_date')):
             bad.append(f'{path}: {ident} 未填关键日期（铁律 1 要求公开日/授权日核对）→ V2')
         if 'source' not in no_col and not cell('source').strip():
@@ -215,12 +240,17 @@ def check_report(path, text, online=True):
             notes.append(f'{path}: {ident} 在线源不可达，存在性未核（不折成违规也不折成合规）')
         else:
             checked += 1
+    if not saw_arxiv:
+        notes.append(f'{path}: 表内没有 arXiv 条目，V4 未判（不折成违规也不折成合规）')
+    elif v4_no_col:
+        notes.append(f'{path}: 有 arXiv 条目但表里没有「类型」列，V4 未判'
+                     f'（没有可放标签的地方——报成违规等于替纪律新增一条列要求）')
     return bad, notes, checked, len(parsed)
 
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='检索报告核验门禁 V1–V3')
+    ap = argparse.ArgumentParser(description='检索报告核验门禁 V1–V4')
     ap.add_argument('report', nargs='+', help='检索报告 .md 或 .docx（可多份，也可直接传包目录）')
     ap.add_argument('--offline', action='store_true',
                     help='跳过在线核对（V1/V2 照判，V3 一律报未核）')
@@ -261,7 +291,7 @@ def main():
         online_ok += checked
         entries += n_ent
         print(f'{p}: 违规 {len(bad)}')
-    print(f'合计违规 {total}（规则 V1–V3，判据见脚本 docstring）；'
+    print(f'合计违规 {total}（规则 V1–V4，判据见脚本 docstring）；'
           f'条目 {entries} 条，在线核成 {online_ok} 条')
     if args.require_online and not args.offline and online_ok == 0:
         print('--require-online 且在线核对 0 条成 → 本次判定不成立（rc=2）')

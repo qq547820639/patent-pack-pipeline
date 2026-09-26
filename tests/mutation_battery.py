@@ -293,6 +293,13 @@ MUTS = {
          '一个目录都没接却被当成已通过'),
     ],
     'vsr': [
+        ('V4 arXiv 预印本标注判据关掉', V,
+         "            elif PREPRINT_WORD not in cell('kind'):", '            elif False:',
+         '没被 V4 抓到'),
+        ('V4 把"表里没有类型列"折成违规', V,
+         '                v4_no_col = True',
+         "                bad.append(f'{path}: 缺列也判红 → V4')",
+         '被折成违规或折成合规'),
         ('V1 放过无可机检标识的条目', V, '        if kind is None:', '        if False:',
          '无标识条目未判 V1'),
         ('V1 把所有条目都判成无标识', V, '        if kind is None:', '        if True:',
