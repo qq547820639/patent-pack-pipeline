@@ -244,6 +244,13 @@ def test_new_product_package():
         assert_(rg.returncode == 0 and '实核法规文书 1 份' in rg.stdout
                 and '只有表头没有数据行' in rg.stdout,
                 '骨架上的法规底稿未通过 G1–G5，或空表没走未判三态', rg)
+        reg_text = open(reg, encoding='utf8').read()
+        # 真开一火：空表也要能看见"表头掉了一列"，否则骨架与判据漂移永远不出声
+        with open(reg, 'w', encoding='utf8') as f:
+            f.write(reg_text.replace('| 标准/法规 | 判定 | 依据 |', '| 标准/法规 | 判定 |'))
+        rg4 = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(rg4.returncode == 1 and '缺「依据」列' in rg4.stdout,
+                '法规底稿表头少一列却未判红（空表被当成无需看列）', rg4)
         # 载体缺席必红：05 目录里换成一张表都没有的散文裁决书
         with open(reg, 'w', encoding='utf8') as f:
             f.write('# 裁决说明\n\n经评审认为适用，无表。\n')
@@ -254,7 +261,28 @@ def test_new_product_package():
         rg3 = run([PY, f'{S}/check_regulatory.py', d, '--all'])
         assert_(rg3.returncode == 2 and '没有一份落在法规/裁决适用域内' in rg3.stdout,
                 '删掉法规底稿后未走"未判定"三态', rg3)
-    print('PASS new_product_package（五段目录+README+检索/EVT/法规三份底稿，开箱即过 R/V/E/G 四门禁）')
+        # 设计补全底稿：表头由 K 门禁的 SPECS 生成，四张空表开箱走未判
+        import importlib.util as _il
+        _sp = _il.spec_from_file_location('cdc', f'{S}/check_design_completion.py')
+        cdc = _il.module_from_spec(_sp)
+        _sp.loader.exec_module(cdc)
+        dc_path = os.path.join(d, 'TESTX_专利交付包', '03_设计补全', '补全_TESTX.md')
+        assert_(os.path.isfile(dc_path), f'缺设计补全底稿（K1–K4 没有载体）: {r.stdout}', r)
+        dc_text = open(dc_path, encoding='utf8').read()
+        lost = [f'{tag}:{c}' for tag, spec in cdc.SPECS.items() for c in spec['cols']
+                if c not in dc_text]
+        assert_(lost == [], f'底稿表头与判据 SPECS 不同源，缺列 {lost}', None)
+        rk = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(rk.returncode == 0 and '实核设计补全文书 1 份' in rk.stdout
+                and '只有表头没有数据行' in rk.stdout,
+                '骨架上的设计补全底稿未通过 K1–K5，或空表没走未判三态', rk)
+        # 真开一火：把决策卡的「约束条件」列抹掉，K2 必须当场缺列判红
+        with open(dc_path, 'w', encoding='utf8') as f:
+            f.write(dc_text.replace('| 依据 | 约束条件 | 风险与回退 |', '| 依据 | 风险与回退 |'))
+        rk2 = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(rk2.returncode == 1 and "['约束条件']" in rk2.stdout and '→ K2' in rk2.stdout,
+                '底稿表头被改坏后 K2 未判红（说明骨架底稿没真被这张门禁吃进去）', rk2)
+    print('PASS new_product_package（五段目录+README+检索/EVT/法规/补全四份底稿，开箱即过 R/V/E/G/K 五门禁）')
 
 
 def test_rebuild_package():
@@ -817,14 +845,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEG]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEG]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([VEG]\d)', s)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGK]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEGK]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([VEGK]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEG][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEGK][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -1116,10 +1144,169 @@ def test_check_regulatory():
         r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
         assert_(r.returncode == 2 and '没有一份落在法规/裁决适用域内' in r.stdout,
                 '域内文书为零时被当成"已通过"', r)
+        for extra in [f for f in os.listdir(d) if f.endswith('.md')]:
+            os.remove(os.path.join(d, extra))
+        r = run([PY, f'{S}/check_regulatory.py', d, '--all'])
+        assert_(r.returncode == 2 and '未找到任何 .md' in r.stdout,
+                '目录里没有 .md 时未说清"一份都没扫到"这条成因', r)
         r = run([PY, f'{S}/check_regulatory.py', os.path.join(d, '不存在.md')])
         assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
                 '路径不存在未说清成因并 fail-closed', r)
     print('PASS check_regulatory（G1–G5 各成对 + 同义列名 + 整表只报一条 + 三态 + rc=2）')
+
+
+def test_check_design_completion():
+    """设计补全门禁 K1–K5：四类表各自的成对正反案 + 触发式的 K5 + 三条适用域轴 + rc 档。"""
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('check_design_completion',
+                                       f'{S}/check_design_completion.py')
+    dc = ilu.module_from_spec(spec)
+    spec.loader.exec_module(dc)
+
+    P = '03_设计补全/补全_T.md'
+
+    def judge(body, path=P):
+        return dc.check_text(path, body)
+
+    def n_of(bad, tag):
+        return sum(1 for x in bad if f'→ {tag}' in x)
+
+    REG = ('## 1. 缺失项登记表\n' + dc.header_row('K1') + '\n' + dc.separator_row('K1') + '\n'
+           '| M1 | 专利1 | 锁扣结构未画 | | 设计补全 | 决策树：机构结构→执行补全 '
+           '| 高 | 连杆卡扣三视图 | 已补全 |\n'
+           '| M2 | 专利1 | 供应商硬度 | 交底书 §5 | 保留占位-第三方确认 | 决策树：Q1 只能第三方 '
+           '| 中 | 保留占位三字段 | 开放 |\n')
+    CARD_ROW = ('| 驱动方式 | 连杆驱动、气动顶出、弹簧复位 | 连杆驱动 | 与冻结厚度 2.4mm 兼容 '
+                '| 不得增加零件数 | 回退为弹簧复位，不动独权 |\n')
+    CARD = '## 2. 设计决策卡\n' + dc.header_row('K2') + '\n' + dc.separator_row('K2') + '\n' + CARD_ROW
+
+    CONF = ('## 3. 冲突记录\n' + dc.header_row('K3') + '\n' + dc.separator_row('K3') + '\n'
+            '| CON-01 | 倒钩深度 | 0.6mm | 0.75mm | 0.6mm 拉脱力不足（独立复算） '
+            '| 采纳 0.75 并更新处置表 | 待裁决 |\n')
+    IFACE = ('## 4. 接口定义\n' + dc.header_row('K4') + '\n' + dc.separator_row('K4') + '\n'
+             '| 表带-锁扣 | 机械 | 卡扣 | 拉脱力 90N | 120N | 倒钩剪断 | 待物理实测：拉脱试验 |\n')
+    GUARDED = ('## 9. 步态对称性优化\n以对称性指数为优化目标。退化解审查：只压指数可由拖慢健侧达成，'
+               '故目标函数加守护项（健侧步速下限 0.8m/s）。\n')
+    UNGUARDED = '## 9. 步态对称性优化\n以对称性指数为优化目标，把步速差压到 2% 以内。\n'
+
+    # 合规总案：四类表全绿，K1–K4 都真落到行上，K5 由守护记录判过
+    bad, notes, seen = judge('# 补全\n\n' + REG + '\n' + CARD + '\n' + CONF + '\n' + IFACE
+                             + '\n' + GUARDED)
+    assert_(bad == [], f'合规设计补全文书被判红: {bad}', None)
+    assert_(seen == {'K1', 'K2', 'K3', 'K4', 'K5'}, f'五条判据未全部真判: {sorted(seen)}', None)
+
+    # K1 类型裁定：两类互不包含，所以子串计数就够；"补全"这种半截写法必须不开火
+    for cell, needle in (('补全', '未落在'), ('设计补全 保留占位-第三方确认', '同时出现'),
+                         ('待定', '未落在')):
+        body = REG.replace('| 设计补全 | 决策树：机构结构→执行补全 |', f'| {cell} | 决策树 |')
+        assert_(body != REG, f'夹具锚点没命中，这一案实际没改任何东西: {cell}', None)
+        bad, notes, seen = judge('# 补全\n\n' + body)
+        assert_(n_of(bad, 'K1') == 1 and needle in '\n'.join(bad),
+                f'K1 未恰好开火一条（{cell}/{needle}）: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n' + REG.replace('| 已补全 |', '| |'))
+    assert_(n_of(bad, 'K1') == 1 and '「状态」空着' in '\n'.join(bad),
+            f'状态空着未报 K1: {bad}', None)
+    # 缺列整表报一条（两行数据也只报一条），且不再逐行放大
+    bad, notes, seen = judge('# 补全\n\n| 编号 | 缺失项 | 类型裁定 | 裁定依据 |\n|---|---|---|---|\n'
+                             '| M1 | 甲 | 设计补全 | 决策树 |\n| M2 | 乙 | 设计补全 | 决策树 |\n')
+    assert_(n_of(bad, 'K1') == 1 and '缺列' in '\n'.join(bad),
+            f'K1 缺列被放大成逐行或没报: {bad}', None)
+
+    # K2 可选方案：单候选必红，两个候选（含 3 个）必绿，且不会牵动别的档
+    bad, notes, seen = judge('# 补全\n\n' + CARD.replace('连杆驱动、气动顶出、弹簧复位', '连杆驱动'))
+    assert_(n_of(bad, 'K2') == 1 and '只有一个候选' in '\n'.join(bad),
+            f'单候选选型未被 K2 抓到: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n' + CARD.replace('| 不得增加零件数 |', '| |'))
+    assert_(n_of(bad, 'K2') == 1 and '「约束条件」空着' in '\n'.join(bad),
+            f'决策卡约束条件空着未报: {bad}', None)
+
+    # K3 / K4：逐格必填的那几列，空着必红；缺列只报一条
+    bad, notes, seen = judge('# 补全\n\n' + CONF.replace('| 采纳 0.75 并更新处置表 |', '| |'))
+    assert_(n_of(bad, 'K3') == 1 and '「建议处置」空着' in '\n'.join(bad),
+            f'冲突记录无建议处置未报 K3: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n| 编号 | 事项 | 冻结值 | 设计值 | 冲突理由 | 状态 |\n'
+                             '|---|---|---|---|---|---|\n| C1 | 甲 | 1 | 2 | 理由 | 开放 |\n')
+    assert_(n_of(bad, 'K3') == 1 and "['建议处置']" in '\n'.join(bad),
+            f'K3 缺列未报: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n' + IFACE.replace('| 120N |', '| |'))
+    assert_(n_of(bad, 'K4') == 1 and '「极限值」空着' in '\n'.join(bad),
+            f'接口极限值空着未报 K4: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n| 名称 | 方向 | 类型 | 额定值 | 极限值 | 失效模式 |\n'
+                             '|---|---|---|---|---|---|\n| 甲 | 机械 | 卡扣 | 90N | 120N | 剪断 |\n')
+    assert_(n_of(bad, 'K4') == 1 and "['验证方法']" in '\n'.join(bad),
+            f'K4 缺验证方法列未报: {bad}', None)
+
+    # K5 触发式：有代理指标无守护 → 红；带守护记录 → 绿且算真判；没触发 → 未判
+    bad, notes, seen = judge('# 补全\n\n' + UNGUARDED)
+    assert_(n_of(bad, 'K5') == 1 and '没有守护项' in '\n'.join(bad),
+            f'代理指标无守护记录未被 K5 抓到: {bad}', None)
+    bad, notes, seen = judge('# 补全\n\n' + GUARDED)
+    assert_(bad == [] and 'K5' in seen, f'带守护记录的节被 K5 误伤: {bad}', None)
+    # 只命中一根识别列的表不该被认成任何一类：否则一张"参数对照表"会被 K3 按缺列判红
+    bad, notes, seen = judge('# 补全\n\n| 项目 | 冻结值 | 说明 |\n|---|---|---|\n'
+                             '| 壁厚 | 2.4mm | 外观组要求 |\n')
+    assert_(bad == [] and seen == set(),
+            f'只凭一根识别列就被当成登记表/冲突记录: bad={bad} seen={sorted(seen)}', None)
+    bad, notes, seen = judge('# 补全\n\n' + REG)
+    assert_(bad == [] and 'K5' not in seen
+            and any('未出现代理指标' in n for n in notes),
+            f'没触发的 K5 被折成合规或被漏报未判: bad={bad} notes={notes}', None)
+
+    bad, notes, seen = judge('# 补全\n\n' + GUARDED + '\n' + UNGUARDED)
+    assert_(n_of(bad, 'K5') == 1 and '没有守护项' in '\n'.join(bad),
+            f'K5 被另一节的守护记录遮挡（跨节漏水）: {bad}', None)
+    # 适用域第二条轴：正文只出现节名（表认不出来、路径也不在 03），仍须进域
+    bad, notes, seen = judge('# 说明\n\n## 接口定义\n（本节待补）\n', path='02_申请文件/杂项.md')
+    assert_(all('非设计补全文书' not in n for n in notes),
+            f'正文出现节名却没被认成域内文书: notes={notes}', None)
+    # 适用域第三条轴：正文既不提表名也不在 03 目录，但真有一张决策卡 → 仍要进域
+    bare = ('# 会议记录\n\n' + dc.header_row('K2') + '\n' + dc.separator_row('K2')
+            + '\n' + CARD_ROW)
+    assert_('决策卡' not in bare and '03_设计补全' not in bare,
+            '夹具里混进了表名，第三条轴就没被单独验到', None)
+    bad, notes, seen = judge(bare, path='01_交底书/杂记.md')
+    assert_(bad == [] and 'K2' in seen,
+            f'按表类认域这条轴没生效（散文里的决策卡躲过了 K2）: bad={bad} seen={sorted(seen)}',
+            None)
+    bad, notes, seen = judge('# 交底书\n普通内容\n', path='01_交底书/交底书.md')
+    assert_(bad == [] and len(notes) == 1 and '非设计补全文书' in notes[0] and seen == set(),
+            f'域外文书未走三态: bad={bad} notes={notes}', None)
+    # 空表与残行都走未判，不折成合规也不折成违规
+    bad, notes, seen = judge('# 补全\n\n' + dc.header_row('K2') + '\n'
+                             + dc.separator_row('K2') + '\n')
+    assert_(bad == [] and any('只有表头没有数据行' in n for n in notes) and 'K2' not in seen,
+            f'骨架式空表未走未判: bad={bad} notes={notes} seen={sorted(seen)}', None)
+    bad, notes, seen = judge('# 补全\n\n' + IFACE + '| 又多一格 | 机械 | 卡扣 | 90N | 120N '
+                             '| 剪断 | 待实测 | 多了 |\n')
+    assert_(any('不按位取列' in n for n in notes), f'残行未报不按位取列: notes={notes}', None)
+
+    # CLI 四档
+    with tempfile.TemporaryDirectory() as d:
+        dd = os.path.join(d, '03_设计补全')
+        os.makedirs(dd)
+        doc = os.path.join(dd, '补全_T.md')
+        with open(doc, 'w', encoding='utf8') as f:
+            f.write('# 补全\n\n' + REG + '\n' + CARD)
+        r = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(r.returncode == 0 and '实核设计补全文书 1 份' in r.stdout, '合规包未 rc=0', r)
+        with open(doc, 'w', encoding='utf8') as f:
+            f.write('# 补全\n\n' + REG + '\n' + UNGUARDED)
+        r = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(r.returncode == 1 and '→ K5' in r.stdout, '违规包未 rc=1', r)
+        os.remove(doc)
+        with open(os.path.join(d, '交底书.md'), 'w', encoding='utf8') as f:
+            f.write('# 交底书\n普通内容，没有这四类表。\n')
+        r = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(r.returncode == 2 and '没有一份落在设计补全适用域内' in r.stdout,
+                '域内文书为零时被当成"已通过"', r)
+        os.remove(os.path.join(d, '交底书.md'))
+        r = run([PY, f'{S}/check_design_completion.py', d, '--all'])
+        assert_(r.returncode == 2 and '未找到任何 .md' in r.stdout,
+                '目录里没有 .md 时未说清"一份都没扫到"这条成因', r)
+        r = run([PY, f'{S}/check_design_completion.py', os.path.join(d, '不存在.md')])
+        assert_(r.returncode == 2 and '不存在.md' in r.stdout and '既不是文件也不是目录' in r.stdout,
+                '路径不存在未说清成因并 fail-closed', r)
+    print('PASS check_design_completion（K1–K5 各成对 + 触发式未判 + 三条适用域轴 + rc=2）')
 
 
 def test_verify_search_report():
@@ -1246,25 +1433,90 @@ def test_verify_search_report():
     if orig_fetch('https://api.crossref.org/works/10.1038/nature14539')[0] == 'unreachable':
         print('     SKIP 检索报告 live 档：本机网络到不了核验源，不把"没跑"说成"跑过"')
     else:
-        assert_(vsr.verify_online('doi', '10.1038/nature14539') == 'ok',
-                '真 DOI 被源判为不存在', None)
-        assert_(vsr.verify_online('doi', '10.1038/definitely-not-a-real-doi-99999') == 'absent',
-                '假 DOI 未被源判为不存在', None)
-        assert_(vsr.verify_online('arxiv', '1706.03762') == 'ok',
-                '真 arXiv id 被源判为不存在', None)
-        # 控制探针：arXiv 无查询词的列表页一定返回条目。它返回 0 条说明这一侧的
-        # "0 entry = 查无此项"读法此刻不可信（服务错误页/限流也长这样），
-        # 只能跳过假 id 那一判，不能让它把服务异常报成"引用造假"。
+        # 每个源都先立一根控制探针，再把正反两判一起挂在它下面：
+        # 服务限流/错误页与"查无此项"在返回体上同形，没有控制时"真 id 被判不存在"
+        # 这种红分不清是判据坏了还是网络坏了（第 16 轮在临时副本里实测到 arXiv 限流）。
+        ctl_doi = vsr.verify_online('doi', '10.1038/nature14539')
+        if ctl_doi != 'ok':
+            print(f'     SKIP live 档 DOI 两判：真 DOI 本次读到 {ctl_doi}，'
+                  '源侧读数此刻不可信，不把服务异常说成引用造假（SKIP 不计入通过）')
+        else:
+            assert_(vsr.verify_online('doi', '10.1038/definitely-not-a-real-doi-99999') == 'absent',
+                    '假 DOI 未被源判为不存在（控制探针本次正常，判定可信）', None)
+        # arXiv 的控制探针：无查询词的列表页一定返回条目；返回 0 条即"0 entry"
+        # 这种读法此刻不可信，两判一起跳过。
         ctl = vsr.fetch_json('https://export.arxiv.org/api/query?max_results=1')
         if ctl[0] != 'ok' or b'<entry' not in (ctl[1] or b''):
-            print('     SKIP live 档的假 id 一判：arXiv 控制探针本次没返回任何条目，'
-                  '无从区分"查无此项"与"服务异常"')
+            print('     SKIP live 档 arXiv 两判：控制探针本次没返回任何条目，'
+                  '无从区分"查无此项"与"服务异常"（SKIP 不计入通过）')
         else:
+            assert_(vsr.verify_online('arxiv', '1706.03762') == 'ok',
+                    '真 arXiv id 被源判为不存在（控制探针本次正常，判定可信）', None)
             assert_(vsr.verify_online('arxiv', '9999.99999') == 'absent',
                     '假 arXiv id 未被源判为不存在（控制探针本次正常，判定可信）', None)
         assert_(vsr.verify_online('patent', 'CN110404188A') == 'unreachable',
                 '专利公开号在无源可用时被当成了"核过"', None)
-        print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 四判）')
+        print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 档两源各配控制探针）')
+
+
+def test_battery_needle_census():
+    """变异电池自己的牙：每条 needle 必须在其目标脚本里恰好命中一次。
+
+    命中 0 次＝脚本改了而电池没同步，那一支变异要等整档跑完十几分钟才以 PROBE-FAIL 现身；
+    命中 >1 次＝`replace(old, new, 1)` 会打到**第一个**同形片段，未必是被指控的那段代码
+    （第 16 轮实测：C3 与 C4 各有一段一模一样的 docx 循环，锚点歧义到体检这一步才暴露）。
+    电池 baseline 会先跑本套件，所以这条断言等于给整支电池加了"落锤前体检"。
+
+    跑批时的例外：电池每次只换掉一条 needle，那一条（以及共用同一 (脚本, needle) 的兄弟）
+    当然"找不到"——所以它认 PP_MUTATING（`组/标签`，由 suite() 传入），跳过正在生效的那一支
+    以及** needle 与被改写片段有包含关系的姐妹条目**：fig 档有两支变异打在同一条 `if` 上，
+    一支只看这行、另一支连着下一行，needle 互为前缀，动其中一支另一支就"找不到"。
+    baseline 不带这个变量，体检仍是全量。
+    """
+    import importlib.util as ilu
+    spec = ilu.spec_from_file_location('mb_needle_census',
+                                       os.path.join(ROOT, 'tests', 'mutation_battery.py'))
+    mb = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mb)
+    # 只挡"电池此刻正在改写的那一片"：同脚本内 needle 相等、互为包含的都算被波及
+    # （一次 replace 会让它们同时看不见锚点，报失配是体检在诬告变异）
+    mutating = os.environ.get('PP_MUTATING', '').strip()
+    applied = []
+    if mutating:
+        for group, entries in mb.MUTS.items():
+            for label, rel, old, new, expect in entries:
+                if f'{group}/{label}' == mutating:
+                    applied.append((rel, old))
+        assert applied, f'PP_MUTATING={mutating!r} 在 MUTS 里找不到，电池与套件对不上号'
+
+    def covered(rel, old):
+        return any(arel == rel and (aold == old or aold in old or old in aold)
+                   for arel, aold in applied)
+    texts, miss, dup, total, skipped = {}, [], [], 0, 0
+    for group, entries in mb.MUTS.items():
+        assert entries, f'{group} 档是空的，电池在冒充有多档'
+        for label, rel, old, new, expect in entries:
+            if mutating and covered(rel, old):
+                skipped += 1
+                continue
+            total += 1
+            if rel not in texts:
+                p = os.path.join(ROOT, rel)
+                texts[rel] = open(p, encoding='utf8').read() if os.path.isfile(p) else None
+            src = texts[rel]
+            n = 0 if src is None else src.count(old)
+            if n == 0:
+                miss.append(f'{group}/{label} → {rel}')
+            elif n > 1:
+                dup.append(f'{group}/{label} → {rel} 命中 {n} 次')
+    assert_(len(texts) >= 6 and total >= 100,
+            f'分母异常（{total} 条变异 / {len(texts)} 个目标脚本），本检查空转', None)
+    assert_(not mutating or skipped >= 1, f'跳过分母为 0，PP_MUTATING 没起作用: {mutating}', None)
+    assert_(not miss, f'这些 needle 在目标脚本里找不到，跑批只会整条 PROBE-FAIL: {miss}', None)
+    assert_(not dup, f'这些 needle 命中多次，变异会打到同形的另一处: {dup}', None)
+    tail = f'，另跳过电池正在生效的 {skipped} 条' if skipped else ''
+    print(f'PASS 变异电池锚点体检（{total} 条 needle × {len(texts)} 个脚本，'
+          f'全部恰好命中一次{tail}）')
 
 
 def test_patent_figure():
@@ -1405,7 +1657,8 @@ if __name__ == '__main__':
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
              test_new_product_package, test_rebuild_package, test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
-             test_check_evt, test_check_regulatory, test_verify_search_report,
+             test_check_evt, test_check_regulatory, test_check_design_completion,
+             test_verify_search_report, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

@@ -111,13 +111,14 @@
 以 `python3 tests/test_scripts.py` 收尾行"脚本 N 个"的现算读数为准：
 
 ```bash
-python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 五段骨架 + 检索/EVT/法规三份底稿
+python3 scripts/new_product_package.py <产品代号> <输出父目录>   # 五段骨架 + 检索/EVT/法规/补全四份底稿
 python3 scripts/patent_figure.py --check <figures 目录> [--parts parts.json]  # 出图期约束 F1–F4
 python3 scripts/check_iron_rules.py <文书.md|.docx ...> [--search-report 检索报告.md]  # 铁律门禁 R1–R8
 python3 scripts/check_iron_rules.py <交付包目录> --all             # 递归检整个包下所有 .md
 python3 scripts/verify_search_report.py <检索报告.md|包目录> [--offline] [--require-online]  # 检索报告 V1–V3
 python3 scripts/check_evt.py <交付包目录> --all                    # EVT 诚实性 E1–E4（域外文书自动走未判）
 python3 scripts/check_regulatory.py <交付包目录> --all             # 法规与裁决 G1–G5（域外文书自动走未判）
+python3 scripts/check_design_completion.py <交付包目录> --all      # 设计补全 K1–K5（域外文书自动走未判）
 python3 scripts/check_figures.py <申请文件目录>                  # 附图：C1 彩色=0 / C2 非空白 / C3 图数一致 / C4 docx 内嵌图同判
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/regen_docx.py <根目录> --check                # 只列待重转（md 比 docx 新）的成对文书，不需要 pandoc
@@ -128,7 +129,7 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
 - `patent_figure.py`：既可当绘图库用（`Figure(...).save()` 保存即自检，**自检不过会删掉该图并退出**，防止违规图被打包带走），也可离线核对已出图；F1 几何（dpi≥200、图宽 14–16cm）、F2 图内不嵌图题 + 过 C1/C2、F3 标记编号跨图同号同件、F4 框内文字 ≤12 字。PNG 无 dpi 元数据时 F1 报"未核"，不拿假定 dpi 反推的数字误判；带 dpi 元数据时 `--check` 会真按 PNG 自带 dpi 换算图宽判 F1。重画包内单图时把本案登记表传进去（`Figure(..., parts=json.load(open('parts.json'))[...])`），同号异件在出图当场即拒，不必等离线核对。
 - `check_iron_rules.py`：R1 绝对化措辞、R2 占位符格式（R2a 裸 TODO/FIXME/XXX、R2b 方括号须为 待*/占位 标记、R2c 【待设计方确认：…】须三字段）、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告、R6 本案型号/商标（须 `--brand-terms X,Y` 给出清单，不给报"未核"——自动猜会把 IP67/M5/45#钢 这类标准规格写法判红）、R7 发明名称 ≤25 字、R8 EVT/投产文书缺逐字投产总则。**适用域是交付包内的文书**（S5/S7 跑的那批 .md），不是本 skill 自己的规则文档。拿仓库根跑 `--all .` 会把 git 跟踪的 .md 一起扫进来，逐条读下来全部是"规则文档引用了自己禁止的写法"——禁用词清单、占位式样示例，以及 master-execution 里讨论投产判定的那一节；这不是判据错，也不为此加豁免分支。注意该读数会随 `.codebuddy/` 本地日志入扫而变（那份日志不参与 git 跟踪），要复算请按上面那份文件清单来。另：R8 的适用域已按"路径 or 正文节标题"分轴——正文里列出 `04_EVT验证/` 目录名不再被当成 EVT 文书，否则 `new_product_package.py` 生成的包 README 自己就过不了门禁（这条是本轮由"新包开箱应零违规"的常驻断言抓出来的）。按交付包目录跑即为设计用途。 **`--all` 现在同时收 .md 与 .docx**：交付物是 Word 件，铁律不能只检 md——「md 改干净了、docx 里还留着禁用词」正是本仓库记录在案的事故形状。docx 正文用 stdlib zip+XML 抽取（不引 python-docx），节标题按 `w:pStyle` 还原成井号好让 R3/R4/R7 同样适用；认不出标题样式时报「R3/R4 未核」而不是零违规，含 `DOCTYPE/ENTITY` 声明或解压尺寸超限的 docx 直接拒绝解析并走 rc=2（docx 可能是外部落件，默认 ET 解析器不防实体展开与压缩炸弹）。
 - `verify_search_report.py`：V1 每条已核验条目须带可机检标识（公开号/DOI/arXiv id，公开号形状与 R5 同一处定义）、V2 关键字段填齐（关键日期/核验出处/核验日期）、V3 在线存在性（DOI 走 Crossref、arXiv id 走 arXiv 官方 API，都无需密钥）。`--offline` 跳过 V3 一律报未核；`--require-online` 在一条在线核对都没做成时给 rc=2（说"本次判定不成立"，既不判绿也不判红）。**专利公开号一律"存在性未核"**——本机实测 google patents 两端点 75s 无响应、patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、Patentscope 只有 JSF 表单，所以专利存在性仍是 S1 的线下逐条人工核对项；源不可达判"未核"三态，绝不把网络故障折算成"引用造假"。
-- `new_product_package.py` 生成的两份底稿都要能被对应门禁**开箱真判一次**：`检索_<产品>.md` 过 V1–V3（空表合法、并报"条目 0 条"），`04_EVT验证/EVT_<产品>.md` 过 E1–E4（判定表在场，判"实核 EVT 文书 1 份"）；其投产总则是从 `check_iron_rules.PRODUCTION_CLAUSE` import 的同一份串，不是重抄——重抄的那份会和判据漂移，常驻测试用一条变异盯住这件事。
+- `new_product_package.py` 生成的四份底稿都要能被对应门禁**开箱真判一次**：`检索_<产品>.md` 过 V1–V3（空表合法、并报"条目 0 条"），`04_EVT验证/EVT_<产品>.md` 过 E1–E4（判定表在场，判"实核 EVT 文书 1 份"），`05_法规与裁决/法规_<产品>.md` 过 G1–G5，`03_设计补全/补全_<产品>.md` 过 K1–K5。投产总则是 import 来的同一份串；补全底稿的四张表头由判据侧的 `check_design_completion.SPECS` 生成。手抄的那份迟早和判据漂移，所以常驻测试对每份底稿都留一条"抹掉一列必须当场判红"的断言——空表也不例外（缺列是结构问题，排在"空表未判"之前判）。
 - `check_evt.py`：E1 判定必须落 ✅/⚠️/❌ 恰一个（「基本通过」这种无符号措辞、或两个符号并存都判红）；E2 非 ✅ 必须带下一步（⚠️ 要同时出现「缺口」与「关闭判据」，❌ 要给「改法」）；E3 物理实测列出现**量值**（数字带单位，或"测得/实测/结果"紧跟数字）却没有「待物理实测/Not Run/预测值」字样即判红——刻意不写"任意数字"，这样标准号 GB/T 31701-2015、条款号"第 4.3 条"、IPC 码 A42B3/00 天然不在其列，不必维护一张永远缺一种写法的引用号豁免表（正反两向都钉在常驻测试里）；E4 同一行同时给出设计值与复算值且相对偏差>10% 而未标「偏差/原因」即判红，只给一侧走三态不判红。投产总则逐字仍归 R8，这里不重复一条。E1–E3 的载体是模板 §5 第 1 项的「验证总表」：**04_EVT 目录内的交付物缺这张判定表直接判红**（散文写的 EVT 报告不能白白通过），只是正文提到「投产判定」的规则类文档缺表则报未判。
 - **若目录里没有一份落在 EVT 适用域内，rc=2 说明「未做任何判定」，不折成「已通过**。本仓库自己的规则文档不是 EVT 交付物：对仓库根跑 `--all .` 时它们一律走未判注记（具体条数随树变，复算以命令为准，不在此写死）。
 - `check_figures.py`：C1、C2、C3、C4 都计入退出码，图数不一致不再只打印放行。C4 是「交付物是 docx」的必然推论——只查 `figures/` 时，在 Word 里把一张图换成彩色件而不动 `figures/`，C1/C2 与图数比对全都看不见；C4 把 `word/media/` 解出来复用同一个 `verdict()`（不重抄像素判据）。有损格式（JPEG 等）走「C4 未核」而不是判红：黑白线稿存 JPEG 本身就会带色度噪声；外观设计与渲染图目录整档跳过；内嵌件解不开则判红并说成因——那是交付件本身坏了，不是「看不见」。
@@ -140,8 +141,10 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
   当成已判（常驻测试正反两向钉住）。表头整列缺失只报一条不逐行放大；行列数与表头不符的行不按位取列、
   报未判（按位读会静默把"依据"当"约束"）；只有表头没有行的表报未判不判红。适用域同 R8/E 分轴：
   路径含 `05_法规与裁决` 或正文出现五张表的表名，域外一律未判；域内一份都没有则 rc=2。
-- `scripts/mdtable.py`：markdown 表格读取的唯一实现（`split_row`/`is_separator`/`col`/`cols`/`table_blocks`/`heading_line`），
-  由 `check_evt.py`、`check_regulatory.py`、`verify_search_report.py` 共用。为什么不引 markdown-it-py：
+- `check_design_completion.py`：K1 缺失机构补全登记表的类型裁定必须命中 设计补全 / 保留占位-第三方确认 恰一个（写"补全""待定"＝没裁定，两类并列＝自相打架；这两类名字互不包含，故不必像 G1 那样做整词边界），且裁定依据与状态非空；K2 设计决策卡六列逐格必填，且「可选方案」须 ≥2 个候选（按分隔符 、；/｜ 现算，只有一个候选就不叫选型；数法偏保守，宁可漏报不误伤）；K3 冲突记录七字段（编号/事项/冻结值/设计值/冲突理由/建议处置/状态）；K4 接口定义七必备字段（名称/方向/类型/额定值/极限值/失效模式/验证方法）；K5 触发式——某节以代理指标为目标（对称性指数/准确率/覆盖率/目标函数…）时该节须有守护项或退化解审查记录，没触发报"未判"而不是"没问题"。
+  适用域三条轴：路径含 `03_设计补全`、正文出现这四类表名、或正文里真有一张被分类器认出的表（第三条让"写了表却没提名字"的文书也进域——判据对象由分类器说了算，不再维护第二份关键词表）。与 05 段不同，这里**不设"零表即判红"**：design-completion §4 的设计文档本就是九节散文+计算过程。
+- `scripts/mdtable.py`：markdown 表格读取的唯一实现（`split_row`/`is_separator`/`col`/`cols`/`table_blocks`/`heading_line`/`sections`），
+  由 `check_evt.py`、`check_regulatory.py`、`check_design_completion.py`、`verify_search_report.py` 共用。为什么不引 markdown-it-py：
   它要求 Python ≥3.10（本机默认 `/usr/bin/python3` 实测 3.9.6，装不上），而判据脚本必须在审计环境裸跑；
   markdown2 出的是 HTML，还得再引一层解析器。三个脚本各写一份分行/取列迟早漂移，漂移的症状是同一张表
   在一边合规、在另一边判红。

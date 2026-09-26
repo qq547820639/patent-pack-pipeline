@@ -39,6 +39,7 @@ V = 'scripts/verify_search_report.py'
 NP = 'scripts/new_product_package.py'
 CE = 'scripts/check_evt.py'
 CR = 'scripts/check_regulatory.py'
+CD = 'scripts/check_design_completion.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 
@@ -122,7 +123,9 @@ MUTS = {
          '        total_bad += len(check_docx_media(d))', '        _printed_only = check_docx_media(d)',
          'docx 丢图未计入退出码'),
         ('C3 只查目录里第一份 docx（历史缺陷）', CF,
+         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith('.png')])\n"
          "    for f in sorted(os.listdir(d)):\n        if not f.endswith('.docx'):",
+         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith('.png')])\n"
          "    for f in [x for x in sorted(os.listdir(d)) if x.endswith('.docx')][:1]:\n        if False:",
          '同目录第二份 docx 丢图未被逐个核对'),
         ('C3 丢图判据关闭', CF, '        else:\n            print(f"  FAIL {f}: media=',
@@ -346,31 +349,31 @@ MUTS = {
          "                if J['basis'] is not None and not cell(cells, J['basis']).strip():",
          '                if False:', 'G1 未恰好开火一条'),
         ('G1 缺「依据」列整表不报（读者以为已判）', CR,
-         "            if J['basis'] is None:", '            if False:',
-         '缺列被放大成逐条或没报'),
+         "        if 'G1' in tags and J['basis'] is None:", '        if False:',
+         ('缺列被放大成逐条或没报', '法规底稿表头少一列却未判红')),
         ('G2 逐条映射结论不核三态', CR, "        if 'G2' in tags:", "        if False and tags:",
          ('G2 两条未各自开火，或被 G1 抢判', '五条判据未全部真判')),
         ('G3 缺口的关闭路径不核', CR,
-         "                    if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
-         '                    if False:', 'G3 未开火或放大'),
+         "                if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
+         '                if False:', 'G3 未开火或放大'),
         ('G3 恒判红（给了修订建议也咬）', CR,
-         "                    if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
-         '                    if True:', ('合规法规文书被判红', '只给修订建议的缺口被判红')),
+         "                if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():",
+         '                if True:', ('合规法规文书被判红', '只给修订建议的缺口被判红')),
         ('G3 缺列抑制失效（整表一条被逐行放大）', CR,
-         "            if J['fix'] is None and J['test'] is None:", '            if False:',
+         "        if 'G3' in tags and J['fix'] is None and J['test'] is None:", '        if False:',
          '缺口清单缺列被放大成逐条或没报'),
         ('G4 四要素减成两要素', CR,
-         "                                    ('约束', J['constraint']), ('生效范围', J['scope'])):",
-         "                                    ('约束', J['constraint'])):",
+         "                                ('约束', J['constraint']), ('生效范围', J['scope'])):",
+         "                                ('约束', J['constraint'])):",
          'G4 两半未各自开火'),
         ('G4 裁决依据不要求 EVT 证据', CR,
-         '                    if basis.strip() and not (EVT_EVIDENCE.search(basis) or DEFER.search(basis)):',
-         '                    if False:', 'G4 两半未各自开火'),
+         '                if basis.strip() and not (EVT_EVIDENCE.search(basis) or DEFER.search(basis)):',
+         '                if False:', 'G4 两半未各自开火'),
         ('G4 证据集合把"会议纪要"也算证据', CR,
          "EVT_EVIDENCE = re.compile(r'复算|仿真|FMEA|公差分析|实测|EVT')",
          "EVT_EVIDENCE = re.compile(r'复算|仿真|FMEA|公差分析|实测|EVT|会议')",
          'G4 两半未各自开火'),
-        ('G4 缺列抑制失效', CR, '            if missing_cols:', '            if False:',
+        ('G4 缺列抑制失效', CR, '        if g4_missing:', '        if False:',
          ('裁决缺列被放大成逐条或没报', 'G4 两半未各自开火')),
         ('G5 费用数字不带口径也放行', CR,
          '                    if NUM.search(v) and not ESTIMATE.search(v):',
@@ -408,10 +411,88 @@ MUTS = {
           '骨架上的法规底稿未通过 G1–G5')),
         ('共用读取器的列名匹配收窄成精确相等', MT,
          '        if any(k in h for k in keys):', '        if h in keys:',
-         ('五条判据未全部真判', '同义列名未认，G1 空转', '编造的实测值未被 E3 抓到')),
+         ('五条判据未全部真判', '同义列名未认，G1 空转', '编造的实测值未被 E3 抓到',
+          '法规底稿表头少一列却未判红')),
+    ],
+    # dc 档：设计补全门禁。四类表的分类器、逐格必填与"必须"列集合、触发式的 K5、
+    # 三条适用域轴、以及"底稿表头由判据生成"这条同源关系各配反向对照。
+    'dc': [
+        ('K1 未落两类不判红（半截裁定当已判）', CD, '                if not hit:',
+         '                if False:', 'K1 未恰好开火一条'),
+        ('K1 恒判红（合规的"设计补全"也咬）', CD, '                if not hit:',
+         '                if True:', '合规设计补全文书被判红'),
+        ('K1 两类并列不再判红', CD, '                elif len(hit) > 1:',
+         '                elif False:', 'K1 未恰好开火一条'),
+        ('K1 整类被跳过（登记表不参与判定）', CD, '        if tag is None:',
+         "        if tag == 'K1':", ('K1 未恰好开火一条', '五条判据未全部真判')),
+        ('逐格必填判据关闭（空格也放行）', CD,
+         '                if not cell(cs, cols[name]).strip():', '                if False:',
+         ('状态空着未报 K1', '决策卡约束条件空着未报', '冲突记录无建议处置未报 K3',
+          '接口极限值空着未报 K4')),
+        ("必填集合从 must 扩到整表列（把合法空格判红）", CD,
+         "            for name in SPECS[tag]['must']:", "            for name in SPECS[tag]['cols']:",
+         '合规设计补全文书被判红'),
+        ('K2 候选数不核（单候选也能过）', CD,
+         '                if len(CAND_SEP.findall(v)) + 1 < 2:', '                if False:',
+         '单候选选型未被 K2 抓到'),
+        ('K2 候选恒判红（多候选也咬）', CD,
+         '                if len(CAND_SEP.findall(v)) + 1 < 2:', '                if True:',
+         '合规设计补全文书被判红'),
+        ('候选分隔符只认斜杠（顿号不算）', CD,
+         "CAND_SEP = re.compile(r'[、;；/|｜]|<br')",
+         "CAND_SEP = re.compile(r'/')", '合规设计补全文书被判红'),
+        ('表类识别放宽成任一命中（只有一根识别列也算这张表）', CD,
+         "        if all(_t.col(header, key) is not None for key in spec['by']):",
+         "        if any(_t.col(header, key) is not None for key in spec['by']):",
+         ('合规设计补全文书被判红', '只凭一根识别列就被当成登记表')),
+        ('表类识别整体失效', CD,
+         "    for tag, spec in SPECS.items():", "    for tag, spec in []:",
+         ('五条判据未全部真判', '骨架上的设计补全底稿未通过 K1–K5')),
+        ('缺列不报（结构错了也没人喊）', CD, '        if missing:', '        if False:',
+         ('K1 缺列被放大成逐行或没报', '底稿表头被改坏后 K2 未判红')),
+        ('缺列判定排在空表之后（骨架掉列永远不出声）', CD, '        if missing:',
+         '        if missing and rows:',
+         ('底稿表头被改坏后 K2 未判红', 'K1 缺列被放大成逐行或没报')),
+        ('空表分支吞掉整张表（连行列一起不看）', CD, '        if not rows:', '        if True:',
+         '五条判据未全部真判'),
+        ('K5 不核守护记录（代理指标裸奔）', CD, '            if not GUARD.search(body):',
+         '            if False:', '代理指标无守护记录未被 K5 抓到'),
+        ('K5 恒判红（有守护记录也咬）', CD, '            if not GUARD.search(body):',
+         '            if True:', '合规设计补全文书被判红'),
+        ('K5 触发不记账（实判读数虚低）', CD, "            seen.add('K5')", '            pass',
+         '五条判据未全部真判'),
+        ('适用域第三条轴失效（写了表没提名字就躲过）', CD,
+         '    return any(table_kind(h) for h, _ in _t.table_blocks(text))', '    return False',
+         '按表类认域这条轴没生效'),
+        ('适用域第二条轴漏掉「接口定义」（只认其余表名）', CD,
+         "DC_SCOPE = re.compile(r'决策卡|补全登记表|缺失机构补全|冲突记录|接口定义')",
+         "DC_SCOPE = re.compile(r'决策卡|补全登记表|缺失机构补全|冲突记录')",
+         '正文出现节名却没被认成域内文书'),
+        ('域内文书为零时不再 rc=2', CD, '    if judged == 0:', '    if False:',
+         '域内文书为零时被当成"已通过"'),
+        ('目录里一份 .md 都没有却被当成已判空', CD, '    if not paths:', '    if False:',
+         '目录里没有 .md 时未说清"一份都没扫到"这条成因'),
+        ('输入不存在被当成零违规放行', CD,
+         "            print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')\n            sys.exit(2)",
+         '            continue', '路径不存在未说清成因并 fail-closed'),
+        ('骨架不再生成设计补全底稿（K 门禁没有载体）', NP,
+         "    with open(os.path.join(dc_dir, f'补全_{name}.md'), 'w', encoding='utf8') as f:\n"
+         '        f.write(design_doc(name))', '    pass', '缺设计补全底稿'),
+        ('底稿表头改成手抄一份（脱离判据 SPECS）', NP,
+         r"        parts.append(f'## {title}\n{_dc.header_row(tag)}\n{_dc.separator_row(tag)}\n')",
+         r"        parts.append(f'## {title}\n| 决策项 | 可选方案 | 选定方案 | 依据 | 风险与回退 |"
+         r"\n|---|---|---|---|---|\n')",
+         ('底稿表头与判据 SPECS 不同源', '骨架上的设计补全底稿未通过 K1–K5')),
+        # 共用件与 G 档反向对照
+        ('切节失效：K5 的粒度从"节"退成"整篇"（跨节遮挡）', MT,
+         '        if heading_line(ln):', '        if False:',
+         'K5 被另一节的守护记录遮挡'),
+        ('G 缺「依据」列的判定挪到空表之后（骨架掉列静默）', CR,
+         "        if 'G1' in tags and J['basis'] is None:",
+         "        if J['basis'] is None and rows:",
+         ('法规底稿表头少一列却未判红', '缺列被放大成逐条或没报')),
     ],
 }
-
 
 def make_work():
     work = tempfile.mkdtemp(prefix='mutbat_')
@@ -424,10 +505,16 @@ def make_work():
     return work
 
 
-def suite(work):
-    """跑常驻套件。默认把网络放进死代理：V 的 live 档自己 SKIP，其余各档不依赖网络。"""
+def suite(work, mutating=None):
+    """跑常驻套件。默认把网络放进死代理：V 的 live 档自己 SKIP，其余各档不依赖网络。
+
+    mutating 传「组/标签」：套件里有一档专管电池锚点体检（每条 needle 须恰好命中一次），
+    而变异本身就是把那条 needle 从文件里换掉——不告诉它"现在动的是谁"，
+    体检就会把当前变异报成失配，把 13 条 fig 变异读成 MISRED（第 16 轮实测）。
+    baseline 那趟不传 ⇒ 体检全量跑，陈旧锚点仍然在落锤前就被拦住。"""
     env = dict(os.environ, https_proxy='http://127.0.0.1:9/', http_proxy='http://127.0.0.1:9/',
-               HTTPS_PROXY='http://127.0.0.1:9/', HTTP_PROXY='http://127.0.0.1:9/')
+               HTTPS_PROXY='http://127.0.0.1:9/', HTTP_PROXY='http://127.0.0.1:9/',
+               PP_MUTATING=mutating or '')
     r = subprocess.run([PY, 'tests/test_scripts.py'], cwd=work, capture_output=True,
                        text=True, env=env)
     return r.returncode, r.stdout + r.stderr
@@ -456,7 +543,7 @@ def run_arm(name, work, verbose=False):
             broken += 1
             open(path, 'w', encoding='utf8').write(orig)
             continue
-        rc, out = suite(work)
+        rc, out = suite(work, f'{name}/{label}')
         open(path, 'w', encoding='utf8').write(orig)
         wants = expect if isinstance(expect, tuple) else [expect]
         if rc == 0:

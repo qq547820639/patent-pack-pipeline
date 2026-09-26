@@ -1,18 +1,27 @@
 #!/usr/bin/env python3
-"""生成新产品专利交付包骨架（五段子目录 + 包 README + 三份底稿）。
+"""生成新产品专利交付包骨架（五段子目录 + 包 README + 四份底稿）。
 用法: python3 new_product_package.py <产品代号> <输出父目录>
 · 检索_<产品>.md：文件名带"检索"，verify_search_report.py 传包目录即可自动挑到（V1–V3）。
 · 04_EVT验证/EVT_<产品>.md：E1–E4 的载体，投产总则从 check_iron_rules import 同一份常量，
   不在这里重抄一遍——重抄的那份迟早和判据漂移。
 · 05_法规与裁决/法规_<产品>.md：G1–G5 的载体（适用性判定/逐条映射/缺口/送检/裁决五张表）。
+· 03_设计补全/补全_<产品>.md：K1–K4 的载体，四张表的表头由 check_design_completion.SPECS 生成。
 """
 import importlib.util as _ilu
 import os, sys
 
-_s = _ilu.spec_from_file_location('cir', os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                                     'check_iron_rules.py'))
-_c = _ilu.module_from_spec(_s)
-_s.loader.exec_module(_c)
+_S = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load(name):
+    spec = _ilu.spec_from_file_location(name, os.path.join(_S, name + '.py'))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_c = _load('check_iron_rules')
+_dc = _load('check_design_completion')
 PRODUCTION_CLAUSE = _c.PRODUCTION_CLAUSE
 
 README = """# {name} 专利交付包
@@ -102,6 +111,16 @@ REG = """# {name} 法规适用性与冲突裁决
 """
 
 
+def design_doc(name):
+    """03_设计补全 底稿：四张表的表头逐字取自 check_design_completion.SPECS。
+    在这里重抄一遍列名，就等于给"模板改了、判据没改"留一条活路——K 门禁会照常绿。"""
+    parts = [f'# {name} 缺失机构补全登记与设计决策\n',
+             '（骨架期四张表都只有表头：K1–K4 报"未判"而不是判红，填了行才会被判。）\n']
+    for title, tag in _dc.DOC_SECTIONS:
+        parts.append(f'## {title}\n{_dc.header_row(tag)}\n{_dc.separator_row(tag)}\n')
+    return '\n'.join(parts)
+
+
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
     for d in ['01_交底书','02_申请文件','03_设计补全','04_EVT验证','05_法规与裁决']:
@@ -116,6 +135,9 @@ def main(name, parent):
     reg_dir = os.path.join(root, '05_法规与裁决')
     with open(os.path.join(reg_dir, f'法规_{name}.md'), 'w', encoding='utf8') as f:
         f.write(REG.format(name=name))
+    dc_dir = os.path.join(root, '03_设计补全')
+    with open(os.path.join(dc_dir, f'补全_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(design_doc(name))
     print('created', root)
 
 if __name__ == '__main__':

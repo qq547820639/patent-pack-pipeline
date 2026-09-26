@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""markdown 表格读取的唯一实现。三个判据脚本（check_evt / check_regulatory / verify_search_report）都要按列读表，
-两处各写一份 split_row/col 迟早漂移——漂移的表现是同一个表在一边合规、在另一边判红。
+"""markdown 表格读取的唯一实现。四把判据尺子（check_evt / check_regulatory /
+check_design_completion / verify_search_report）都要按列读表，两处各写一份
+split_row/col 迟早漂移——漂移的表现是同一个表在一边合规、在另一边判红。
 """
 import re
 
@@ -57,3 +58,20 @@ def tables(text, *header_keys):
 
 def heading_line(line):
     return bool(re.match(r'^#{1,6}\s', line))
+
+
+def sections(text):
+    """按 markdown 标题切节，产出 (节标题行, 该节正文)。标题前的引言归在空标题下。
+
+    节级判据（如 K5"某节里提到代理指标就要有审查记录"）必须知道一行属于哪一节，
+    而表格切分看不见标题——两套切分各自实现就会在边界上打架（同一行两边都算自己的）。
+    """
+    out, title, body = [], '', []
+    for ln in text.splitlines():
+        if heading_line(ln):
+            out.append((title, '\n'.join(body)))
+            title, body = ln.strip(), []
+        else:
+            body.append(ln)
+    out.append((title, '\n'.join(body)))
+    return out

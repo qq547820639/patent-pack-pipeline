@@ -14,7 +14,8 @@
      （复算 / 仿真 / FMEA / 公差分析 / 实测），或按规程明写"维持冻结值，转 EVT 实测裁决"。
   G5 送检清单的费用与周期须带"公开…估算"口径——数字不带口径就像承诺过的报价。
 
-表头整列缺失只报一条（缺列），不逐行放大成 N 条；行列数与表头不符时不按位取值，
+表头整列缺失只报一条（缺列），不逐行放大成 N 条；缺列属结构问题，**空表也照报**
+（骨架底稿只有表头，若"没行就不看列"，表头掉一列永远不会出声）。行列数与表头不符时不按位取值，
 报格式错（按位读会把"依据"当成"约束"，静默读错列比报一条格式错更糟）。
 只有表头没有数据行的表、以及文书里根本没有的表，一律报"未判"而不是判红——缺席的表
 可能是这份文书本就不含（裁决书没有送检清单很正常）。唯一例外：05_法规与裁决/ 目录内
@@ -161,6 +162,18 @@ def check_text(path, text):
         if ragged:
             notes.append(f'{where_t} 第{"、".join(map(str, ragged))}行列数与表头 '
                          f'{len(header)} 列不符，不按位取列 → 这些行未判')
+        # 结构性缺列先判，且排在"空表未判"之前：骨架底稿只有表头没有行，若先看行数，
+        # "表头掉了一列"就永远不出声——那正是骨架与判据漂移的形状。
+        g4_missing = ([n for n, j in (('依据', J['basis']), ('约束', J['constraint']),
+                                      ('生效范围', J['scope'])) if j is None]
+                      if 'G4' in tags else [])
+        if 'G1' in tags and J['basis'] is None:
+            bad.append(f'{where_t} 适用性判定表缺「依据」列 → G1（整表报一条，不逐行放大）')
+        if 'G3' in tags and J['fix'] is None and J['test'] is None:
+            bad.append(f'{where_t} 缺口清单既无「修订建议」也无「实测规程」列 → G3')
+        if g4_missing:
+            bad.append(f'{where_t} 裁决表缺列 {g4_missing} → G4'
+                       f'（结论+依据+约束+生效范围是四要素）')
         if not rows:
             # 有表头没行＝架子搭了、一条没判。判红会和"这份文书本来不含该类表"混成
             # 同一种读数，所以报未判并点名命中了哪些判据，交人核。
@@ -174,8 +187,6 @@ def check_text(path, text):
         good_rows = [(k, rows[k - 1]) for k in good]
 
         if 'G1' in tags:
-            if J['basis'] is None:
-                bad.append(f'{where_t} 适用性判定表缺「依据」列 → G1（整表报一条，不逐行放大）')
             for rno, cells in good_rows:
                 where = f'{where_t} 第{rno}行'
                 _tri(cell(cells, J['ap']), APPLIC_NAMES, '判定', where, 'G1', bad)
@@ -185,30 +196,21 @@ def check_text(path, text):
             for rno, cells in good_rows:
                 _tri(cell(cells, J['concl']), MAP_NAMES, '结论',
                      f'{where_t} 第{rno}行', 'G2', bad)
-        if 'G3' in tags:
-            if J['fix'] is None and J['test'] is None:
-                bad.append(f'{where_t} 缺口清单既无「修订建议」也无「实测规程」列 → G3')
-            else:
-                for rno, cells in good_rows:
-                    if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():
-                        bad.append(f'{where_t} 第{rno}行 缺口既无修订建议也无实测规程 → G3')
-        if 'G4' in tags:
-            missing_cols = [n for n, j in (('依据', J['basis']), ('约束', J['constraint']),
-                                           ('生效范围', J['scope'])) if j is None]
-            if missing_cols:
-                bad.append(f'{where_t} 裁决表缺列 {missing_cols} → G4'
-                           f'（结论+依据+约束+生效范围是四要素）')
-            else:
-                for rno, cells in good_rows:
-                    where = f'{where_t} 第{rno}行'
-                    for name, j in (('结论', J['concl']), ('依据', J['basis']),
-                                    ('约束', J['constraint']), ('生效范围', J['scope'])):
-                        if not cell(cells, j).strip():
-                            bad.append(f'{where} 裁决缺「{name}」 → G4')
-                    basis = cell(cells, J['basis'])
-                    if basis.strip() and not (EVT_EVIDENCE.search(basis) or DEFER.search(basis)):
-                        bad.append(f'{where} 裁决依据既未引 EVT 侧证据也未写"转实测裁决"：'
-                                   f'{basis[:24]} → G4')
+        if 'G3' in tags and (J['fix'] is not None or J['test'] is not None):
+            for rno, cells in good_rows:
+                if not cell(cells, J['fix']).strip() and not cell(cells, J['test']).strip():
+                    bad.append(f'{where_t} 第{rno}行 缺口既无修订建议也无实测规程 → G3')
+        if 'G4' in tags and not g4_missing:
+            for rno, cells in good_rows:
+                where = f'{where_t} 第{rno}行'
+                for name, j in (('结论', J['concl']), ('依据', J['basis']),
+                                ('约束', J['constraint']), ('生效范围', J['scope'])):
+                    if not cell(cells, j).strip():
+                        bad.append(f'{where} 裁决缺「{name}」 → G4')
+                basis = cell(cells, J['basis'])
+                if basis.strip() and not (EVT_EVIDENCE.search(basis) or DEFER.search(basis)):
+                    bad.append(f'{where} 裁决依据既未引 EVT 侧证据也未写"转实测裁决"：'
+                               f'{basis[:24]} → G4')
         if 'G5' in tags:
             for rno, cells in good_rows:
                 for j in J['cost']:
