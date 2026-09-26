@@ -4,7 +4,7 @@
 同时兼作环境自检：打印各依赖是否就绪、缺失影响哪个环节。
 """
 import importlib.util
-import os, re, sys, tempfile, subprocess, zipfile, stat
+import os, re, shutil, sys, tempfile, subprocess, zipfile, stat
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = os.path.join(ROOT, 'scripts')
 PY = sys.executable
 SKIPPED = []   # 整档未跑的测试记这里，收尾行不得把它们算成 PASS
-TOTAL_TESTS = 10
+TOTAL_TESTS = 11
 
 # 直接复用被测脚本自己的判据，避免测试里手抄一份会漂移的判定
 _spec = importlib.util.spec_from_file_location('regen_docx', os.path.join(S, 'regen_docx.py'))
@@ -316,6 +316,26 @@ def test_check_figures_media_count():
         assert_(r4.returncode == 1 and 'b_缺图' in r4.stdout and 'C3' in r4.stdout,
                 '同目录第二份 docx 丢图未被逐个核对', r4)
 
+        # 必红：打不开的 .docx 要计入违规——只打印"无法按 zip 打开"却不计数，
+        # 等于给损坏交付件开绿灯。必须另起一个"其余全合规"的目录：
+        # 上一版把坏件丢进还有 b_缺图 的目录，rc=1 由别的条款贡献，删掉计数的变异照样全绿。
+        with tempfile.TemporaryDirectory() as d3:
+            fd3 = os.path.join(d3, 'figures'); os.makedirs(fd3)
+            for i in (1, 2):
+                _line_figure(os.path.join(fd3, f'图{i}.png'), elements=i)
+            dd3 = Document(); dd3.add_heading('说明书附图', level=1)
+            for i in (1, 2):
+                dd3.add_picture(os.path.join(fd3, f'图{i}.png'))
+            dd3.save(os.path.join(d3, '齐全.docx'))
+            open(os.path.join(d3, '坏件.docx'), 'wb').write(b'not a zip at all')
+            r5 = run([PY, f'{S}/check_figures.py', d3])
+            assert_(r5.returncode == 1 and '坏件.docx' in r5.stdout
+                    and '无法按 zip' in r5.stdout,
+                    '打不开的 docx 未计入违规或未说清成因', r5)
+            os.remove(os.path.join(d3, '坏件.docx'))
+            r6 = run([PY, f'{S}/check_figures.py', d3])
+            assert_(r6.returncode == 0, '坏件移除后该目录仍未放行（前提不成立）', r6)
+
         # 必绿：全合规样本必须整条门禁放行（C1/C2/C3 同时满足）
         os.remove(os.path.join(d, 'b_缺图.docx'))
         build(os.path.join(d, '齐全.docx'), 2)
@@ -351,6 +371,107 @@ IRON_OK_ABSTRACT = '本发明公开一种腰部助力外骨骼装置，涉及可
 
 def _iron(bg=IRON_OK_BG, claims='', abstract=IRON_OK_ABSTRACT):
     return IRON_TMPL.format(bg=bg, claims=claims, abstract=abstract)
+
+
+def test_check_iron_rules_docx():
+    """交付物是 .docx：铁律必须也能读 docx 正文，并对读不出的情形说不。"""
+    try:
+        import docx  # noqa: F401  python-docx
+    except ImportError:
+        SKIPPED.append('check_iron_rules_docx')
+        print('SKIP check_iron_rules_docx（本机无 python-docx，造不出 docx 夹具）')
+        return
+    import zipfile
+    from docx import Document
+    _sp = importlib.util.spec_from_file_location('cir_docx',
+                                 os.path.join(S, 'check_iron_rules.py'))
+    _cir_mod = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(_cir_mod)
+
+    with tempfile.TemporaryDirectory() as d:
+        clean = os.path.join(d, '实用新型.docx')
+        doc = Document()
+        doc.add_heading('说明书摘要', level=2)
+        doc.add_paragraph('本实用新型公开了一种脚手架减振节点，包括上夹板、下夹板与阻尼件。')
+        doc.add_heading('具体实施方式', level=2)
+        doc.add_paragraph('阻尼件采用橡胶层，硬度为邵氏 60A。')
+        doc.save(clean)
+        r = run([PY, f'{S}/check_iron_rules.py', clean])
+        assert_(r.returncode == 0, f'合规 docx 被铁律判红: {show(r)}', r)
+
+        bad = os.path.join(d, '带违规.docx')
+        doc = Document()
+        doc.add_heading('说明书摘要', level=2)
+        doc.add_paragraph('本方案为业界首创。')
+        doc.add_paragraph('阻尼件硬度 TODO 待定。')
+        doc.save(bad)
+        r = run([PY, f'{S}/check_iron_rules.py', bad])
+        assert_(r.returncode == 1 and 'FAIL R1' in r.stdout,
+                f'docx 内的禁用词未被 R1 抓到（说明根本没读进正文）: {show(r)}', r)
+        assert_('FAIL R2a' in r.stdout, f'docx 内的裸 TODO 未被 R2a 抓到: {show(r)}', r)
+
+        # 节标题还原必须是"有用的"：超 300 字摘要写进 docx，R4 要能按节判红。
+        # 若 pStyle 映射失效，R4 只会因为找不到节而静默通过。
+        over = os.path.join(d, '超长摘要.docx')
+        doc = Document()
+        doc.add_heading('说明书摘要', level=2)
+        doc.add_paragraph('本实用新型公开了一种节点。' * 24)
+        doc.save(over)
+        r = run([PY, f'{S}/check_iron_rules.py', over])
+        assert_(r.returncode == 1 and 'FAIL R4' in r.stdout,
+                f'docx 的超 300 字摘要未被 R4 抓到（pStyle 还原没吃上力）: {show(r)}', r)
+
+        # 三态：没有标题样式的 docx 找不到节 → 必须说"未核"，不能拿"违规 0"冒充核过
+        naked = os.path.join(d, '无节标题.docx')
+        doc = Document()
+        doc.add_paragraph('本实用新型公开了一种节点，摘要字数无从判断。' * 20)
+        doc.save(naked)
+        r = run([PY, f'{S}/check_iron_rules.py', naked])
+        assert_(r.returncode == 0 and '未识别到节标题样式' in r.stdout,
+                f'无节标题的 docx 未报三态: {show(r)}', r)
+
+        # 损坏 docx 与带 DTD 的 document.xml 都必须 rc=2 说清成因，不折成"零违规"
+        broken = os.path.join(d, '坏件.docx')
+        with zipfile.ZipFile(broken, 'w') as z:
+            z.writestr('[Content_Types].xml', '<Types/>')
+        r = run([PY, f'{S}/check_iron_rules.py', broken])
+        assert_(r.returncode == 2 and '未做任何判定' in r.stdout,
+                f'缺 document.xml 的 docx 未 fail-closed: {show(r)}', r)
+        evil = os.path.join(d, '带DTD.docx')
+        with zipfile.ZipFile(evil, 'w') as z:
+            z.writestr('word/document.xml',
+                       '<?xml version="1.0"?><!DOCTYPE w:document '
+                       '[<!ENTITY a "首创">]>'
+                       '<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                       'wordprocessingml/2006/main"><w:p><w:r><w:t>&a;</w:t></w:r></w:p>'
+                       '</w:document>')
+        r = run([PY, f'{S}/check_iron_rules.py', evil])
+        assert_(r.returncode == 2 and '拒绝解析' in r.stdout,
+                f'含 DOCTYPE/ENTITY 声明的 document.xml 未被拒绝: {show(r)}', r)
+
+        # --all 现在连 docx 一起收：整包复检不能只看 md。
+        # 另起一个干净目录——上面那两个"故意坏"的 docx 会让门禁正确地 fail-closed，
+        # 混在一起测就分不清是没收 docx 还是被坏件挡住了。
+        # zip 炸弹闸：把上限临时收紧到 8 字节，正常小文件也必须被拒——
+        # 不这么测的话，那道闸在这套夹具里从来没被真正走到过。
+        saved = _cir_mod.MAX_XML_BYTES
+        try:
+            _cir_mod.MAX_XML_BYTES = 8
+            try:
+                _cir_mod.docx_text(clean)
+                raise AssertionError('上限被越过却没有拒绝（闸失效）')
+            except ValueError as e:
+                assert_('压缩炸弹' in str(e), f'拒绝原因不对: {e}', None)
+        finally:
+            _cir_mod.MAX_XML_BYTES = saved
+
+        with tempfile.TemporaryDirectory() as d2:
+            shutil.copy(clean, os.path.join(d2, '实用新型.docx'))
+            shutil.copy(bad, os.path.join(d2, '带违规.docx'))
+            r = run([PY, f'{S}/check_iron_rules.py', d2, '--all'])
+            assert_(r.returncode == 1 and '实用新型.docx' in r.stdout and '带违规.docx' in r.stdout,
+                    f'--all 未递归收 docx: {show(r)}', r)
+    print('PASS check_iron_rules_docx（docx 正文可读 + 节还原有牙 + 三种未判/拒绝路径）')
 
 
 def test_check_iron_rules():
@@ -826,8 +947,16 @@ def test_verify_search_report():
                 '假 DOI 未被源判为不存在', None)
         assert_(vsr.verify_online('arxiv', '1706.03762') == 'ok',
                 '真 arXiv id 被源判为不存在', None)
-        assert_(vsr.verify_online('arxiv', '9999.99999') == 'absent',
-                '假 arXiv id 未被源判为不存在', None)
+        # 控制探针：arXiv 无查询词的列表页一定返回条目。它返回 0 条说明这一侧的
+        # "0 entry = 查无此项"读法此刻不可信（服务错误页/限流也长这样），
+        # 只能跳过假 id 那一判，不能让它把服务异常报成"引用造假"。
+        ctl = vsr.fetch_json('https://export.arxiv.org/api/query?max_results=1')
+        if ctl[0] != 'ok' or b'<entry' not in (ctl[1] or b''):
+            print('     SKIP live 档的假 id 一判：arXiv 控制探针本次没返回任何条目，'
+                  '无从区分"查无此项"与"服务异常"')
+        else:
+            assert_(vsr.verify_online('arxiv', '9999.99999') == 'absent',
+                    '假 arXiv id 未被源判为不存在（控制探针本次正常，判定可信）', None)
         assert_(vsr.verify_online('patent', 'CN110404188A') == 'unreachable',
                 '专利公开号在无源可用时被当成了"核过"', None)
         print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 四判）')
@@ -970,7 +1099,7 @@ if __name__ == '__main__':
     missing = probe_env()
     test_check_figures(); test_check_figures_media_count()
     test_new_product_package(); test_rebuild_package(); test_regen_docx()
-    test_check_iron_rules(); test_check_evt(); test_verify_search_report()
+    test_check_iron_rules(); test_check_iron_rules_docx(); test_check_evt(); test_verify_search_report()
     test_patent_figure()
     test_docs_scripts_contract()
     ran = TOTAL_TESTS - len(SKIPPED)

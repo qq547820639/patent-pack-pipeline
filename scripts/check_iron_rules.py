@@ -188,13 +188,63 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
     return findings, notes
 
 
+MAX_XML_BYTES = 32 * 1024 * 1024   # 单份 document.xml 的解压上限，常驻测试把它调小来验这道闸
+
+
+def docx_text(path):
+    """抽取 .docx 正文（只用 stdlib）。交付物是 docx，铁律不能只检 md——
+    "md 改干净了、docx 还留着禁用词"正是本仓库记录在案的事故形状。
+
+    段落标题按 w:pStyle 还原成 markdown 井号，让 R3/R4/R7 这类按节判的判据
+    在 pandoc 产物上同样可用；非 pandoc 风格命名（标题样式对不上）时相应节
+    找不到，会走各自的"未核"三态而不是判绿。"""
+    import xml.etree.ElementTree as ET
+    import zipfile
+    # docx 可能是外部交付件，ET 的默认解析器不防实体展开（十亿 laugh）与 zip 炸弹。
+    # 这里用两条前置拒绝代替引第三方库：document.xml 合法内容里不该有 DTD/ENTITY 声明，
+    # 也不该有几十 MB 的解压尺寸。拒绝时说清成因并走 rc=2，不静默判绿。
+    with zipfile.ZipFile(path) as z:
+        info = z.getinfo('word/document.xml')
+        if info.file_size > MAX_XML_BYTES:
+            raise ValueError(f'document.xml 解压尺寸 {info.file_size} > {MAX_XML_BYTES}，疑为压缩炸弹')
+        blob = z.read('word/document.xml')
+    head = blob[:65536]
+    for marker in (b'<!DOCTYPE', b'<!ENTITY'):
+        if marker in head:
+            raise ValueError(f'document.xml 含 {marker.decode()} 声明，拒绝解析（防实体展开）')
+    root = ET.fromstring(blob)
+    out = []
+    for p in root.iter():
+        if not p.tag.endswith('}p'):
+            continue
+        style = ''
+        for el in p.iter():
+            if el.tag.endswith('}pStyle'):
+                style = el.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '')
+        m = re.search(r'(?:Heading|标题|title)[\s_-]*(\d)', style, re.I)
+        if style.lower().startswith('title'):
+            out.append('# ')
+        elif m:
+            out.append('#' * int(m.group(1)) + ' ')
+        out.append(''.join((t.text or '') for t in p.iter() if t.tag.endswith('}t')))
+        out.append('\n')
+    return ''.join(out)
+
+
+def read_text(path):
+    """按扩展名分派读文本。docx 打不开/无 document.xml 时抛异常，由调用方转 rc=2。"""
+    if path.lower().endswith('.docx'):
+        return docx_text(path)
+    return open(path, encoding='utf8').read()
+
+
 def gather_files(args):
     if args.all:
         root = args.targets[0]
         out = []
         for dp, _, fs in os.walk(root):
             for f in sorted(fs):
-                if f.lower().endswith('.md'):
+                if f.lower().endswith(('.md', '.docx')):
                     out.append(os.path.join(dp, f))
         return out
     return args.targets
@@ -202,8 +252,8 @@ def gather_files(args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('targets', nargs='+', help='待检 .md 文件，或配合 --all 传交付包目录')
-    ap.add_argument('--all', action='store_true', help='递归检查目录下所有 .md')
+    ap.add_argument('targets', nargs='+', help='待检 .md 或 .docx 文件，或配合 --all 传交付包目录')
+    ap.add_argument('--all', action='store_true', help='递归检查目录下所有 .md 与 .docx')
     ap.add_argument('--search-report', help='检索报告 .md：提供 R5 的已核验公开号集合')
     ap.add_argument('--brand-terms', help='逗号分隔的本案型号/商标清单（R6）；不给则 R6 报未核')
     args = ap.parse_args()
@@ -217,7 +267,7 @@ def main():
         print('输入不可用，未做任何判定: ' + ', '.join(bad))
         sys.exit(2)
     if not paths:
-        print(f'未找到待检文件（--all 目录下无 .md？）: {args.targets[0]}（未做任何判定）')
+        print(f'未找到待检文件（--all 目录下无 .md/.docx？）: {args.targets[0]}（未做任何判定）')
         sys.exit(2)
 
     allowed = None
@@ -226,7 +276,7 @@ def main():
             print(f'检索报告不存在: {args.search_report}')
             sys.exit(2)
         allowed = set(re.sub(r'\s', '', x).upper()
-                      for x in PUB_NO.findall(open(args.search_report, encoding='utf8').read()))
+                      for x in PUB_NO.findall(read_text(args.search_report)))
         print(f'检索报告已核验公开号 {len(allowed)} 个')
 
     brands = None
@@ -236,7 +286,16 @@ def main():
 
     total = 0
     for p in paths:
-        text = open(p, encoding='utf8').read()
+        try:
+            text = read_text(p)
+        except Exception as e:
+            # 抽不出正文就谈不上判定：说清成因并 rc=2，不折成"这份文书没有违规"
+            print(f'输入不可用，未做任何判定: {p}（{type(e).__name__}: {e}）')
+            sys.exit(2)
+        if p.lower().endswith('.docx') and not re.search(r'^#{1,6}\s', text, re.M):
+            # 节标题靠 w:pStyle 还原；样式名对不上（非 pandoc 产物）时 R3/R4 根本找不到节，
+            # 这时"违规 0"不等于核过，必须说明未核。
+            print(f'  note {p}: 未识别到节标题样式 → R3/R4（按节判的判据）未核')
         findings, notes = check_text(p, text, allowed, brands)
         for note in notes:
             print(f'  note {p}: {note}')
