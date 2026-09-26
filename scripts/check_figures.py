@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""专利线条图合规检查（三条判据，违规行标明触发的是哪条）:
+"""专利线条图合规检查（四条判据 C1–C4，违规行标明触发的是哪条）:
   C1 彩色像素必须为 0（外观设计与渲染图除外）
   C2 不得为空白图：全图非白像素数为 0 判违规
   C3 目录内每个 docx 嵌入的 media 图片数必须等于 figures 目录图片数
@@ -7,12 +7,26 @@
 判据 C1/C2 刻意用像素内容而非文件字节数——白底线条图 PNG 压缩后仅数 KB，
 按字节设阈值会把合法的稀疏框图误判为违规（实测读数见 references/tooling-pitfalls.md §2）。
 用法: python3 check_figures.py <申请文件目录或figures目录> [...]（递归是默认行为，没有 --all）
-退出码: 0 合规 / 1 存在违规（C1/C2/C3/C4 任一触发均为 1）
+      -h/--help 是本门禁唯一的 flag 出口：打印用法后退 0，其余 - 开头的参数一律 rc=2。
+退出码: 0 合规或未判 / 1 存在违规（C1/C2/C3/C4 任一触发均为 1）
         2 未接目录、参数不是目录或混进未知 flag —— 环境不可用，未做任何判定，不算通过
 """
 import os, sys, zipfile
 from PIL import Image
 import numpy as np
+
+# 真会打印的用法，不是 docstring 的复读：docstring 写给读源码的人，
+# 这份写给在终端敲错命令的人（退码三档含义必须在他眼前，否则 rc=2 只有一句"不认 flag"）。
+USAGE = """用法: python3 check_figures.py <申请文件目录或figures目录> [...]
+  递归扫描目录是默认行为：本门禁只接目录，除 -h/--help 外不认任何其它 flag（没有 --all）。
+判据（违规行会标明触发的是哪条）:
+  C1 彩色像素必须为 0（外观设计与渲染图目录整档跳过）
+  C2 不得为空白图：全图非白像素数为 0 判违规
+  C3 目录内每个 docx 嵌入的 media 图片数必须等于 figures 目录图片数
+  C4 每个 docx 内嵌的无损位图同样过 C1/C2（交付物是 docx，图就活在 docx 里）
+退出码: 0 合规或未判 / 1 真存在违规（C1–C4 任一触发）
+        2 输入不可用（零参数、未知 flag、参数不是目录）—— 未做任何判定，不算通过
+"""
 
 
 def pixel_stats(path):
@@ -137,9 +151,18 @@ def main():
     这里曾经是 `for d in sys.argv[1:]` 直接把每个实参喂给 os.listdir：
     打错的 flag（如 `<dir> --all`）会以 FileNotFoundError 崩在 C4，退码 1
     ——把"没做判定"报成"存在违规"，方向上等于给一次环境错误发了张放行条。
+
+    --help/-h 是这条守卫上唯一的豁免：九把门禁里曾只有这一把没有用法出口
+    （其余八把走 argparse 的自带 -h/--help），敲 `--help` 的人拿到的是一句"不认 flag"
+    而不是用法。豁免只给这两个名字，且放在输入档之前——
+    零参数与其余未知 flag 仍一律 rc=2，退码契约不动（本门禁不用 argparse，
+    所以用法串与这条豁免都是手写的，别指望 add_argument 顺带宽容解析）。
     """
     import tempfile
     args = sys.argv[1:]
+    if any(a in ('-h', '--help') for a in args):
+        print(USAGE)
+        sys.exit(0)
     if not args:
         print('用法: python3 check_figures.py <目录> [...]，一个目录都没接 → 未做任何判定')
         sys.exit(2)

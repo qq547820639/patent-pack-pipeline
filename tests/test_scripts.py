@@ -2373,6 +2373,10 @@ def test_check_figures_input_guard():
     `<目录> --all` 以 FileNotFoundError 崩在 C4 并退 1，而退码 1 在本仓专属"存在违规"，
     等于给一次环境错误发了张违规单；零参数则 total_bad=0 静默退 0，把"没判"报成"通过"。
     两个方向都在撒谎，所以三档各钉一条，并留一档合规侧防止输入档过严误伤真目录。
+
+    --help/-h 是这条输入档上唯一的豁免（九把门禁里曾只有这一把没有用法出口，
+    其余八把靠 argparse 自带 -h/--help），豁免必须只给这两个名字：
+    所以正向钉"打了用法且退 0"，反向钉"--al/--foo 仍 rc=2"。
     """
     with tempfile.TemporaryDirectory() as d:
         r = run([PY, f'{S}/check_figures.py', d, '--all'])
@@ -2388,7 +2392,26 @@ def test_check_figures_input_guard():
         r = run([PY, f'{S}/check_figures.py', d])
         assert_(r.returncode == 0 and '0 幅图' in r.stdout,
                 f'合规空目录被输入档误伤: {show(r)}', r)
-    print('PASS check_figures 输入档（未知 flag / 不存在路径 / 零参数三档 rc=2 + 空目录不误伤）')
+        # 正向：--help / -h 必须真的打印用法并退 0（用法串逐字取自 scripts/check_figures.py 的 USAGE）
+        for flag in ('--help', '-h'):
+            r = run([PY, f'{S}/check_figures.py', flag])
+            assert_(r.returncode == 0
+                    and '用法: python3 check_figures.py' in r.stdout
+                    and '除 -h/--help 外不认任何其它 flag' in r.stdout
+                    and 'C3 目录内每个 docx 嵌入的 media 图片数' in r.stdout
+                    and '退出码: 0 合规或未判' in r.stdout
+                    and 'Traceback' not in r.stdout + r.stderr,
+                    f'{flag} 出口未打印用法并退 0（被输入档当成未知 flag 吞掉）: {show(r)}', r)
+        # 反向：豁免只给 --help/-h，其余 - 开头的参数一律继续 rc=2，不许顺手宽容解析
+        for flag in ('--al', '--foo'):
+            r = run([PY, f'{S}/check_figures.py', flag])
+            assert_(r.returncode == 2 and '不认 flag' in r.stdout
+                    and '用法: python3 check_figures.py <申请文件目录' not in r.stdout
+                    and 'Traceback' not in r.stdout + r.stderr,
+                    f'{flag} 被 --help 豁免连带宽容掉了（退码契约要求未知 flag 仍 rc=2）: '
+                    f'{show(r)}', r)
+    print('PASS check_figures 输入档（未知 flag / 不存在路径 / 零参数三档 rc=2 + 空目录不误伤 '
+          '+ --help/-h 打印用法退 0 + --al/--foo 仍 rc=2）')
 
 
 def test_battery_needle_census():

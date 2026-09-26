@@ -1,3 +1,6 @@
 .codebuddy/
 __pycache__/
 *.pyc
+
+# 会话派生的 worktree 与探针产物，不进仓库
+.qoder/
