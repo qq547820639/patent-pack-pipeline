@@ -1,7 +1,7 @@
 # 工具与环境陷阱（血泪教训固化）
 
 ## 目录
-pandoc 中文路径与 locale｜图片像素扫描｜zip 同步核验｜脆文件系统对策｜图片型 PDF｜matplotlib 字体
+pandoc 中文路径与 locale｜图片像素扫描｜zip 同步核验｜脆文件系统对策｜图片型 PDF｜matplotlib 字体｜图内文字留底选型
 
 ---
 
@@ -46,6 +46,29 @@ pandoc 中文路径与 locale｜图片像素扫描｜zip 同步核验｜脆文�
 ## 6. matplotlib 中文字体
 - 环境已配好中文字体；**禁止**改 rcParams 的 font.family/font.sans-serif/axes.unicode_minus。
 - 个别环境需逐文本 FontProperties 指定 Noto Sans CJK——先试默认，缺字形再局部指定。
+
+## 7. 图内文字留底：为什么是 sidecar 清单而不是 OCR／内嵌元数据（第 20 轮选型）
+要判「图中数值与文书逐字一致」「图上不得出现文书没有的部件」，先得有一份**图上到底写了什么**的记录。
+用 `parts.json` 那种手抄登记件不行：它在本仓只有读者没有生产者，拿手抄件与文书互比只能证明两份抄得像。
+四条候选路（GitHub 读数为 2026-09-26 当日 API 取值；matplotlib 3.11.2 / Pillow 12.3.0 为本机版本）：
+
+| 候选 | 功能匹配度 | License | 维护活跃度 | 安全风险 | 代码质量／适配成本 |
+|---|---|---|---|---|---|
+| A 出图时写 `<图名>.manifest.json`（选定） | marks 是出图会话的状态（编号→部件、引线锚点），本来就只在画图那一步齐全 | 无新依赖 | — | 只写本地小 JSON，不引入任何解析器与外部输入面 | 约 30 行，写盘被"自检通过"这道门控住／零 |
+| B `savefig(metadata=…)` 塞进 PNG tEXt | 装得下文本，装不下"这条引线指哪个部件"的语义 | 随 matplotlib | 随 matplotlib | 无 | 官方机制／低 |
+| C 检查时 OCR | 只解决"读回文字"，且是事后猜测而非留底 | pytesseract、PaddleOCR、tesseract 均 Apache-2.0 | pytesseract 6,392★（推送 2026-07-13）、PaddleOCR 90,238★（2026-09-16）、tesseract 76,697★（2026-09-11） | 引入外部二进制与模型权重，交付线多一个安装前置与攻击面 | 成熟／高：中文细线稿字号小、引线穿字，误读率不可控 |
+| D 解析 SVG 的 `<text>` | 默认拿不到：官方 customizing 文档写明 `svg.fonttype` 默认 `path`（字形转路径），要留 `<text>` 须设 `none` | 随 matplotlib | 随 matplotlib | 要动 rcParams（本仓纪律禁改字体类 rcParams） | 官方机制／高：交付物是 PNG 与 docx，得同时维护一份非交付格式 |
+
+B 的可用性由**本机实测**确认（不引文档页：那次 WebFetch 返回截断内容且混入模型自述，不足为证）——
+`savefig(p, metadata={'Description': <json>, 'Software': 'probe'})` 后
+`PIL.Image.open(p).text` 读到 `['Description', 'Software']`，中文 JSON 原样回读。
+
+选 A 的三条理由：① **可观察性**——sidecar 缺席是包级可见的事实，门禁能分辨"这图不是本库画的"；
+元数据被中途剥掉后 PNG 外表毫无变化，"手画图"与"转过一道手的本库图"无法区分。
+（本仓未装 pandoc，"重转会不会剥掉 tEXt"**未实测**，此条只作设计理由记录，不当已验证结论。）
+② **语义**——对照表要的是 编号→部件，塞进图内部的自由文本块等于再造一份要人读的格式。
+③ **可核**——纯文本能 diff、能 grep，也能被文档↔脚本契约直接吃进去。
+C／D 留作补救路径：真要判外部画来的位图时，OCR 只能当提示，判红仍须落到能自证的出处。
 
 ## 平台级执行新增陷阱（步行康复平台项目实测）
 

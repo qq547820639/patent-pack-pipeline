@@ -6,8 +6,9 @@
   C4 每个 docx 内嵌的无损位图也要过 C1/C2（交付物是 docx，图就活在 docx 里）
 判据 C1/C2 刻意用像素内容而非文件字节数——白底线条图 PNG 压缩后仅数 KB，
 按字节设阈值会把合法的稀疏框图误判为违规（实测读数见 references/tooling-pitfalls.md §2）。
-用法: python3 check_figures.py <申请文件目录或figures目录> [...]
+用法: python3 check_figures.py <申请文件目录或figures目录> [...]（递归是默认行为，没有 --all）
 退出码: 0 合规 / 1 存在违规（C1/C2/C3/C4 任一触发均为 1）
+        2 未接目录、参数不是目录或混进未知 flag —— 环境不可用，未做任何判定，不算通过
 """
 import os, sys, zipfile
 from PIL import Image
@@ -131,9 +132,26 @@ def check_docx_embedded(d, tmp):
 
 
 def main():
+    """参数一律当目录处理（递归本就是默认行为，没有 --all）。
+
+    这里曾经是 `for d in sys.argv[1:]` 直接把每个实参喂给 os.listdir：
+    打错的 flag（如 `<dir> --all`）会以 FileNotFoundError 崩在 C4，退码 1
+    ——把"没做判定"报成"存在违规"，方向上等于给一次环境错误发了张放行条。
+    """
     import tempfile
+    args = sys.argv[1:]
+    if not args:
+        print('用法: python3 check_figures.py <目录> [...]，一个目录都没接 → 未做任何判定')
+        sys.exit(2)
+    for d in args:
+        if d.startswith('-'):
+            print(f'输入不可用，未做任何判定: {d}（本门禁只接目录，不认 flag；递归是默认行为）')
+            sys.exit(2)
+        if not os.path.isdir(d):
+            print(f'输入不可用，未做任何判定: {d}（不是目录）')
+            sys.exit(2)
     total_bad = 0
-    for d in sys.argv[1:]:
+    for d in args:
         total_bad += check_dir(d)
         total_bad += len(check_docx_media(d))
         with tempfile.TemporaryDirectory() as tmp:

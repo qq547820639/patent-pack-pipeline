@@ -66,6 +66,11 @@ class Figure:
         self.dpi = dpi
         self.parts = dict(parts or {})
         self._pending_labels = []
+        # 图上真画出来的每一段文字都要留底：F4 量完字数就丢，事后没人知道图上写了什么，
+        # "图中数值与文书逐字一致"就只能靠人眼。留底由画图这段代码自己产出，
+        # 不是手抄第二份登记表——抄件互比只能证明两份抄得像。
+        self._texts = []
+        self._marks_seen = {}
         self.fig = self._plt.figure(
             figsize=(fig_w_cm / 2.54, fig_h_cm / 2.54), dpi=dpi, facecolor='white')
         self.ax = self.fig.add_axes([0.04, 0.04, 0.92, 0.92])
@@ -83,6 +88,7 @@ class Figure:
         if text:
             self.ax.text(x + w / 2, y + h / 2, text, ha='center', va='center',
                          fontsize=9, color='black')
+            self._texts.append(text)
         return (x + w, y + h / 2)
 
     def line(self, pts, width=0.8):
@@ -112,7 +118,11 @@ class Figure:
         if bad:
             os.remove(path)
             raise SystemExit(f'{self.name}: 出图自检未过，已删除 {path}\n  ' + '\n  '.join(bad))
+        self.write_manifest(path)
         return path
+
+    def write_manifest(self, png_path):
+        return write_manifest(png_path, self._marks_seen, self._texts)
 
     def verify_saved(self, path):
         """回读像素与几何，跑 F1/F2(C1/C2)。返回违规列表。"""
@@ -132,11 +142,26 @@ class Figure:
             if prev is not None and prev != part:
                 bad.append(f'F3 编号 {num} 在本图内指向不一致：{prev} / {part}')
             seen[num] = part
+            self._marks_seen = seen
             hist = self.parts.get(num)
             if hist is not None and hist != part:
                 bad.append(f'F3 编号 {num} 与已登记部件不一致：{hist} / {part}')
         self.parts.update(seen)
         return bad
+
+
+def write_manifest(png_path, marks, texts):
+    """与 PNG 并排写 <图名>.manifest.json：图上画的标记号→部件，以及每一段框内文字。
+    自检不过的图不写（那会儿 PNG 已被删，留一份清单就成了无图之账）。
+    做成模块级函数是为了让"清单里到底写了什么"能在不装 matplotlib 的环境下被测——
+    否则这条断言会随解释器环境一起 SKIP，判据的牙就只剩一半。"""
+    manifest = {'figure': os.path.basename(png_path),
+                'marks': {str(k): marks[k] for k in sorted(marks, key=str)},
+                'texts': list(dict.fromkeys(texts))}
+    dst = os.path.splitext(png_path)[0] + '.manifest.json'
+    with open(dst, 'w', encoding='utf8') as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=1, sort_keys=True)
+    return dst
 
 
 def check_cross_figure(parts_by_fig):

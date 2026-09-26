@@ -50,10 +50,22 @@ def doc_pairs(root):
 def find_stale(root):
     """md 比同名 docx 新 = 改过文书忘了重转。刻意不需要 pandoc：这是只读检查，
     缺 pandoc 的机器也要能问"我落后了几份"。同一秒内写完用 1 秒容差免假阳；
-    全新 git 检出后 mtime 是检出时刻，那种场合先真实转一遍再拿本判据复核。"""
+    全新 git 检出后 mtime 是检出时刻，那种场合先真实转一遍再拿本判据复核。
+
+    双胞胎的 mtime 读不到时按"待重转"算：doc_pairs 列过目录之后再 stat，中间文件被
+    移走是会发生的（打包脚本、并发重转），那种场合证明不了 docx 是新的。
+    让它抛 FileNotFoundError 更糟——本仓退码 1 专属"存在违规"，一次读不到会被发成假违规单。
+    """
     pairs = doc_pairs(root)
-    stale = [(md, d) for md, d in pairs
-             if os.path.getmtime(md) > os.path.getmtime(d) + 1]
+    stale = []
+    for md, d in pairs:
+        try:
+            dm = os.path.getmtime(d)
+        except OSError:
+            stale.append((md, d))
+            continue
+        if os.path.getmtime(md) > dm + 1:
+            stale.append((md, d))
     return sorted(stale), len(pairs)
 
 

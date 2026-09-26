@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|doc|dc|evt|fig|iron|lab|reg|vsr）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|doc|dc|evt|fig|iron|lab|reg|text|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -17,7 +17,13 @@
 
 自带的卫生规矩（都是踩过的坑）:
   · 变异必须写成 plausible 的错误实现。把判据改成让它抛异常，套件也会"红"，
-    但那不是覆盖——所以分类器先认 CRASH-KILL。
+    但那不是覆盖——所以分类器先认 CRASH-KILL。认它就得说清崩在哪：suite_tb() 只认
+    **帧里出现套件文件名的那一段 Traceback**（不是"最后一段"，也不是全文搜词——
+    断言消息里拼进来的子进程 Traceback 会冒充崩溃现场），crash_notes() 把帧与异常行
+    随读数一起打出来。
+    另：一档共用一份 work copy，且 suite() 里带 PYTHONDONTWRITEBYTECODE=1——还原后
+    同尺寸的 .pyc 会按 mtime 秒级失效，让下一臂跑到上一臂的代码（第 20 轮一条只在跑批里
+    出现、单臂与整档复算都不复现的 CRASH-KILL 读不到归因，这条是当时的唯一可加固面）。
   · 每支 arm 结束必须打一行「汇总」；缺行按 arm 崩溃处理（批跑时把日志 grep
     成只剩关键词，曾把一支电池 import 期的 SyntaxError 整个吞掉）。
   · fig 档需要 matplotlib；没有就如实 SKIP 并把退出码判 2，不折成"通过"。
@@ -28,6 +34,7 @@
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,6 +52,7 @@ CE = 'scripts/check_evt.py'
 CR = 'scripts/check_regulatory.py'
 CD = 'scripts/check_design_completion.py'
 CN = 'scripts/check_figure_labels.py'
+CT = 'scripts/check_figure_text.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 
@@ -206,6 +214,16 @@ MUTS = {
          "            print(f'  note {p}: PNG 无 dpi 元数据，F1 几何未核（不折成违规也不折成合规）')\n"
          '            probs = []',
          'F1 三态把该图的像素判据一起免检了'),
+        # C 门禁的输入档（第 20 轮端到端跑出来的：`<目录> --all` 以 FileNotFoundError
+        # 崩进 C4 并退 1，而 1 专属"存在违规"；零参数则静默退 0）。三档各一条注入。
+        ('未知 flag 又被当成目录喂进 os.listdir', CF,
+         "        if d.startswith('-'):", '        if False:',
+         '未知 flag 被当成目录喂进 C 门禁'),
+        ('不存在的路径不再 fail-closed（崩一次发一张假违规单）', CF,
+         '        if not os.path.isdir(d):', '        if False:',
+         '路径不存在未说清成因并 fail-closed'),
+        ('零参数被当成"已判过且合规"', CF, '    if not args:', '    if False:',
+         '一个目录都没接却被当成已通过'),
     ],
     'vsr': [
         ('V1 放过无可机检标识的条目', V, '        if kind is None:', '        if False:',
@@ -283,12 +301,15 @@ MUTS = {
     ],
     'doc': [
         ('陈旧判据彻底关闭（永不判陈旧）', RG,
-         '            if os.path.getmtime(md) > os.path.getmtime(d) + 1]',
-         '            if False]', 'md 比 docx 新却未判陈旧'),
-        ('容差被放大到一年（正常流程里常年假绿）', RG,
-         '            if os.path.getmtime(md) > os.path.getmtime(d) + 1]',
-         '            if os.path.getmtime(md) > os.path.getmtime(d) + 31536000]',
+         '        if os.path.getmtime(md) > dm + 1:', '        if False:',
          'md 比 docx 新却未判陈旧'),
+        ('容差被放大到一年（正常流程里常年假绿）', RG,
+         '        if os.path.getmtime(md) > dm + 1:',
+         '        if os.path.getmtime(md) > dm + 31536000:',
+         'md 比 docx 新却未判陈旧'),
+        ('孪生 mtime 读不到时不再兜住（崩给调用方看，退码 1 冒充发现违规）', RG,
+         '        except OSError:', '        except ImportError:',
+         '孪生 docx 读不到 mtime 时未 fail-closed'),
         ('陈旧只打印不计入退出码', RG,
          '        sys.exit(1 if stale else 0)', '        sys.exit(0)',
          'md 比 docx 新却未判陈旧'),
@@ -546,6 +567,53 @@ MUTS = {
          "f.lower().endswith(('.md', '.docx'))", "f.lower().endswith('.md')",
          '补全门禁未能在 docx 上真判（表格没吃到或 --all 收集漏了 .docx）'),
     ],
+    'text': [
+        ('T1 部件名核对关掉（图上有文书没有的部件看不见）', CT,
+         '            if norm(part) not in pool:', '            if False:',
+         '图上标号与对照表名称不一致未按预期开火'),
+        ('T1 框内文字核对关掉', CT, '                if t not in pool:', '                if False:',
+         '图上有文书没有的部件未按预期开火'),
+        ('T2 量值核对关掉（图中数值与文书不一致看不见）', CT,
+         '                if tok not in pool:', '                if False:',
+         '图中数值差一个数字未按预期开火'),
+        ('归一化放宽成"去掉所有空白"（部件名塞空格就蒙混）', CT,
+         "    return SPACE_AROUND_SIGN.sub(r'\\1', txt)", "    return re.sub(r'\\s+', '', txt)",
+         '部件名中间塞空格就蒙混过关（归一过头）'),
+        ('归一化彻底不做（符号后一个空格就判红）', CT,
+         "    return SPACE_AROUND_SIGN.sub(r'\\1', txt)", '    return txt',
+         '符号后空白被当成不一致（该归一的不归一）'),
+        ('有 PNG 无清单不再 fail-closed（把「看不见」折成「核过了」）', CT,
+         '        if orphan:', '        if False:',
+         ('有 PNG 无 manifest 被当成"核过了"或"发现违规"', '部分图没有清单被当成核过了')),
+        # 上面那支 `if False` 先把"全孤儿"那档打红；"混合档"要靠下面这条只关掉
+        # 混合路径的注入才量得到（第 20 轮端到端实测：旧写法把看孤儿关在 `if not mans`
+        # 里，12 张图混 1 张手画 PNG 读成"实判 3 条/违规 0"）。一档一处第一红。
+        ('看孤儿只在一张清单都没有时才判（混合档漏掉）', CT,
+         '    fatal = None\n    if orphan:', '    fatal = None\n    if orphan and not mans:',
+         '部分图没有清单被当成核过了'),
+        ('清单配对改回 splitext（双后缀切错，合规包被读成缺清单）', CT,
+         '        have = {f[:-len(suffix)] for f in fs if f.endswith(suffix)}',
+         '        have = {os.path.splitext(f)[0] for f in fs if f.endswith(suffix)}',
+         ('双后缀被 splitext 切错', '图与文书逐字一致却被判红')),
+        ('T 档读不动的 docx 不再兜异常（崩一次就是一张假违规单）', CT,
+         "    except Exception as e:\n        print(f'输入不可用，未做任何判定: {path}（{type(e).__name__}: {e}）')",
+         "    except ImportError as e:\n        print(f'输入不可用，未做任何判定: {path}（{type(e).__name__}: {e}）')",
+         '读不动的 docx 未走 rc=2'),
+        ('对账不完整时把真判出的违规降级成环境档', CT,
+         '    if total:', '    if total and not fatal_all:',
+         '判出的违规被'),
+        ('没有图的包被硬判', CT,
+         "        notes.append(f'{root}: 没有 figures 目录，也没有任何图 ↔ 文书的对账对象 → T1–T3 未判')",
+         "        bad.append(f'{root}: 没有图 → T1 违规')",
+         ('没有图的包被硬判', '新生成的包在图↔文书对账上未走')),
+        ('T3 判到却不记（三条判据少一条也报全判到）', CT,
+         "        seen.add('T3')", '        pass', '合规案没把三条判据都判到'),
+        ('清单不再去重（同一句话留两份底）', PF,
+         "                'texts': list(dict.fromkeys(texts))}",
+         "                'texts': list(texts)}",
+         '框内文字要按绘制顺序去重留出底'),
+    ],
+
     'lab': [
         ('N1 有附图说明节却无表这条判红整个关掉', CN,
          "        if has_fig_section and (FIG_DIR.search(path) or FIG_WORD.search(text)):",
@@ -634,11 +702,60 @@ def suite(work, mutating=None):
     baseline 那趟不传 ⇒ 体检全量跑，陈旧锚点仍然在落锤前就被拦住。"""
     env = dict(os.environ, https_proxy='http://127.0.0.1:9/', http_proxy='http://127.0.0.1:9/',
                HTTPS_PROXY='http://127.0.0.1:9/', HTTP_PROXY='http://127.0.0.1:9/',
+               PYTHONDONTWRITEBYTECODE='1',
                PP_MUTATING=mutating or '')
     r = subprocess.run([PY, 'tests/test_scripts.py'], cwd=work, capture_output=True,
                        text=True, env=env)
     return r.returncode, r.stdout + r.stderr
 
+
+def fatal_exception(out):
+    """返回"让套件退出的那一次异常"的类型名；输出里没有属于套件的 Traceback 则返回 None。
+
+    两个方向都实测踩过（第 20 轮，2026-09-26）：
+      · 旧判法 `'Traceback' in out and 'AssertionError' not in out` 只会说"崩了"，
+        说不出崩在哪个测试，一次只在跑批里出现的读数既不能复算也不能归因；
+        而崩溃消息里只要抄进一段带 AssertionError 字样的子进程输出，它就把崩溃读成抓红。
+      · 改成"取最后一段 Traceback"又反向错一次：assert_ 会把子进程输出整段拼进断言消息，
+        门禁一崩，输出末尾是**子进程**的 Traceback ⇒ doc/vsr 两条正常抓红被读成 CRASH-KILL。
+    现在的判据是"帧里出现套件文件名的那一段"（见 suite_tb），两种误读各留一条常驻控制。
+    """
+    head, _ = suite_tb(out)
+    if not head:
+        return None
+    m = re.match(r'([A-Za-z_][\w.]*\.)?([A-Za-z_][\w]*(?:Error|Exception|Exit|Interrupt))\b', head)
+    return m.group(2) if m else (head.split(':')[0][:40] or 'Traceback')
+
+
+def suite_tb(out, runner='test_scripts.py'):
+    """取"套件自己死掉的那一段 Traceback"（异常行 + 帧）；找不到返回 (None, None)。
+
+    判据是"帧里出现 runner 文件名"，不是"取最后一段"。本仓的 assert_ 会把子进程输出整段
+    拼进断言消息，被测门禁一崩，输出的**末尾**就是那份子进程 Traceback（帧全在 scripts/ 下），
+    取最后一段会把一次正常抓红读成崩溃——第 20 轮 doc 与 vsr 两条变异就是这么被误判的，
+    而同一对变异在旧"全文搜词"判法下读的是抓红：两趟读数互相矛盾，才把这把新尺子的缺陷暴露出来。
+    """
+    for blk in reversed(out.split('Traceback (most recent call last):')[1:]):
+        lines, frames, i = blk.splitlines(), [], 0
+        while i < len(lines):
+            ln = lines[i]
+            if not ln.strip() or ln[:1] in (' ', chr(9)):
+                frames.append(ln.strip())
+                i += 1
+                continue
+            break
+        head = lines[i].strip() if i < len(lines) else ''
+        if any(runner in f for f in frames):
+            return head, frames
+    return None, None
+
+
+def crash_notes(out, n=6):
+    """崩溃那一段的帧与异常行——没有它，CRASH-KILL 只是一句"不算覆盖"。"""
+    head, frames = suite_tb(out)
+    if not head:
+        return []
+    return [f.strip() for f in frames if f.strip()][-n:] + [head]
 
 def run_arm(name, work, verbose=False):
     killed = misred = surv = broken = crash = 0
@@ -666,11 +783,14 @@ def run_arm(name, work, verbose=False):
         rc, out = suite(work, f'{name}/{label}')
         open(path, 'w', encoding='utf8').write(orig)
         wants = expect if isinstance(expect, tuple) else [expect]
+        exc = fatal_exception(out)
         if rc == 0:
             print(f'  [SURVIVED ]  {label}')
             surv += 1
-        elif 'Traceback' in out and 'AssertionError' not in out:
-            print(f'  [CRASH-KILL] {label} —— 崩溃致红，不算覆盖')
+        elif exc not in (None, 'AssertionError'):
+            print(f'  [CRASH-KILL] {label} —— 崩溃致红（{exc}），不算覆盖')
+            for ln in crash_notes(out):
+                print('      | ' + ln[:140])
             crash += 1
         elif any(w in out for w in wants):
             got = next(w for w in wants if w in out)

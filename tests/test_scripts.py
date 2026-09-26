@@ -307,6 +307,11 @@ def test_new_product_package():
         rn3 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
         assert_(rn3.returncode == 1 and '却没有图中标记说明对照表' in rn3.stdout,
                 '有附图说明节却无对照表未判红', rn3)
+        # 图↔文书对账在骨架期必须"看得见但没有对象"：没有 figures 目录只报未判，
+        # 既不判红也不装作核过（这条集成断言专抓适用域误伤，人工跑一遍很容易漏）
+        rt = run([PY, f'{S}/check_figure_text.py', os.path.join(d, 'TESTX_专利交付包')])
+        assert_(rt.returncode == 0 and 'T1–T3 未判' in rt.stdout,
+                '新生成的包在图↔文书对账上未走"未判"三态（判据把骨架误伤或误判成核过）', rt)
         os.remove(sp_path)
         rn4 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
         assert_(rn4.returncode == 2 and '没有一份落在附图标记适用域内' in rn4.stdout,
@@ -871,7 +876,38 @@ def test_regen_docx_stale():
             r6 = check(e)
             assert_(r6.returncode == 0 and '无从判陈旧' in r6.stdout,
                     f'无成对文件时读数不对: {show(r6)}', r6)
-    print('PASS regen_docx --check（陈旧必红/新转必绿/无孪生不算/不需 pandoc/rc=2）')
+    # 双胞胎在列完目录之后、stat 之前消失（打包脚本与重转并发是真实场景）：
+    # 读不到 mtime 必须按"待重转"收，不许把 FileNotFoundError 抛给调用方——
+    # 那会让 --check 以退码 1 崩掉，而本仓的 1 专属"存在违规"，等于发一张假违规单。
+    with tempfile.TemporaryDirectory() as d:
+        md = os.path.join(d, 'a.md')
+        dx = os.path.join(d, 'a.docx')
+        open(md, 'w', encoding='utf8').write('# a\n')
+        open(dx, 'wb').write(b'PK\x03\x04')
+        t0 = time.time()
+        os.utime(md, (t0 - 30, t0 - 30))
+        os.utime(dx, (t0, t0))
+        real = os.path.getmtime
+
+        def blind(p):
+            if str(p) == dx:
+                raise FileNotFoundError(f'No such file or directory: {p}')
+            return real(p)
+
+        _regen.os.path.getmtime = blind
+        try:
+            stale, n = _regen.find_stale(d)
+        except Exception as e:
+            stale, n = None, f'{type(e).__name__}'
+        finally:
+            _regen.os.path.getmtime = real
+        assert_(n == 1 and stale == [(md, dx)],
+                f'孪生 docx 读不到 mtime 时未 fail-closed 成"待重转"（实得 {stale}/{n}）', None)
+        # 对照组：不注入时同一对必须判"不陈旧"，否则上面那档是恒红
+        stale2, n2 = _regen.find_stale(d)
+        assert_(n2 == 1 and stale2 == [],
+                f'对照组不成立（未注入却已判陈旧）: {stale2}', None)
+    print('PASS regen_docx --check（陈旧必红/新转必绿/无孪生不算/不需 pandoc/rc=2/孪生读不到按待重转）')
 
 
 def test_check_iron_rules():
@@ -1049,6 +1085,51 @@ def test_check_iron_rules():
           f'摘要 {n_ok}/{n_over} 字）')
 
 
+def test_battery_crash_attribution():
+    """电池分类器自身的六条控制：崩溃与断言红不许互相冒充，且崩溃要能报出落点。
+
+    第 20 轮实测一条正常 KILL 被旧的"全文搜 AssertionError"判法读成 CRASH-KILL，
+    读数里没有任何落点信息，导致复算时既无法复现也无法归因——这把尺子量别人之前，
+    得先量得准自己。
+    """
+    import importlib.util as ilu
+    sp = ilu.spec_from_file_location('mb_attr', os.path.join(ROOT, 'tests/mutation_battery.py'))
+    mb = ilu.module_from_spec(sp)
+    sp.loader.exec_module(mb)
+
+    def tb(t, msg=''):
+        return ('Traceback (most recent call last):\n'
+                '  File "/x/tests/test_scripts.py", line 2274, in <module>\n'
+                '    t()\n'
+                '  File "/x/tests/test_scripts.py", line 35, in assert_\n'
+                f'    raise {t}(...)\n'
+                f'{t}: {msg}\n')
+
+    assert_(mb.fatal_exception(tb('AssertionError', '正文出现节名却没被认成域内文书'))
+            == 'AssertionError', '真断言红被读成崩溃（KILL 记成 CRASH-KILL）', None)
+    assert_(mb.fatal_exception(tb('OSError', 'Too many open files')) == 'OSError',
+            '资源型崩溃没被认出来（会被记成抓红）', None)
+    # 关键一案：崩溃消息里恰好抄进一段含 AssertionError 字样的子进程输出
+    crashed = tb('OSError', 'rc=1\n--stdout--\nAssertionError: 别的档先红\n--stderr--\n')
+    assert_(mb.fatal_exception(crashed) == 'OSError',
+            '按整段子串判崩溃/断言：消息里出现该字样就翻档（旧判法的失效形状）', None)
+    assert_(mb.fatal_exception('全部 PASS\n') is None, '没有 Traceback 时被折成某种异常', None)
+    # 最阴的一案：抓红本身没错，但断言消息里嵌了一份**子进程**的 Traceback。
+    # "取最后一段 Traceback"的写法会把它当成崩溃现场，把一次正常抓红读成 CRASH-KILL
+    # （第 20 轮 doc 与 vsr 两条实测各错一次，两趟读数互相矛盾才暴露）。
+    embedded = tb('AssertionError', 'rc=1\n--stdout--\n合规\n--stderr--\n'
+                  + 'Traceback (most recent call last):\n'
+                    '  File "/work/scripts/regen_docx.py", line 56, in find_stale\n'
+                    '    os.path.getmtime(d)\n'
+                    "FileNotFoundError: No such file or directory: '/tmp/x/README.docx'\n")
+    assert_(mb.fatal_exception(embedded) == 'AssertionError',
+            '断言消息里嵌着子进程 Traceback 时被读成崩溃（正常抓红记成 CRASH-KILL）', None)
+    notes = mb.crash_notes(tb('OSError', 'Too many open files'))
+    assert_(any('test_scripts.py' in n for n in notes) and any(n.startswith('OSError') for n in notes),
+            f'崩溃归因打不出落点: {notes}', None)
+    print('PASS 电池崩溃归因（断言红/资源崩溃/消息内含该字样/消息嵌子进程 Traceback/无 Traceback 五案 + 落点可打印）')
+
+
 def test_docs_scripts_contract():
     """文档↔脚本双向契约：文档不得虚指不存在的判据/脚本/参数，脚本新加的判据与参数也不许漏写文档。
     单向检查会假绿——只核"文档引用都存在"时，脚本新增一条无人引用的判据照样绿。"""
@@ -1068,14 +1149,14 @@ def test_docs_scripts_contract():
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKN]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEGKN]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([NVEGK]\d)', s)))
+        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNT]\d)", s))
+                 | set(re.findall(r'^\s+([RCFVEGKNT]\d)\s', s, re.M))
+                 | set(re.findall(r'\u2192 ([NVEGKT]\d)', s)))
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEGKN][1-9])\b', doctxt))
+    doc_rules = set(re.findall(r'\b([RCFVEGKNT][1-9])\b', doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -1925,6 +2006,212 @@ def test_search_report_docx_channel():
     print('PASS search_report_docx_channel（Word 报告真判 + V1/V2 开火 + 成对挑 md + 两档 fail-closed）')
 
 
+def test_figure_text_channel():
+    """图↔文书对账 T1–T3：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
+
+    两半都要验：① `write_manifest` 写了什么（不依赖 matplotlib，否则这条断言会随环境
+    一起 SKIP，判据只剩消费侧有牙）；② 门禁对真包开不开火、三态走不走得对。"""
+    import json
+    _sp = importlib.util.spec_from_file_location('pf_tt', f'{S}/patent_figure.py')
+    pf = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(pf)
+
+    with tempfile.TemporaryDirectory() as d:
+        mp = pf.write_manifest(os.path.join(d, '图1.png'),
+                               {13: '支架', 12: '底座'},
+                               ['躯干框架', '躯干框架', '横移速度 ≤25mm/s'])
+        man = json.load(open(mp, encoding='utf8'))
+        assert_(sorted(man) == ['figure', 'marks', 'texts'],
+                f'清单键不对，读者无从按形状取用: {sorted(man)}', None)
+        assert_(man['figure'] == '图1.png' and man['marks'] == {'12': '底座', '13': '支架'},
+                f'figure/marks 内容不对: {man}', None)
+        assert_(man['texts'] == ['躯干框架', '横移速度 ≤25mm/s'],
+                f'框内文字要按绘制顺序去重留出底，实得: {man["texts"]}', None)
+        assert_(mp.endswith('图1.manifest.json') and os.path.isfile(mp),
+                f'清单没有与 PNG 并排落盘: {mp}', None)
+
+    DOCS = ('# 说明书\n## 附图说明\n图 1 为整体示意。\n'
+            '## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
+            '| 12 | 底座 | 1 |\n| 13 | 支架 | 1 |\n'
+            '## 具体实施方式\n横移速度 ≤25mm/s；躯干框架由铝合金制成。\n')
+    MAN = '{"figure": "图1.png", "marks": {"12": "底座", "13": "支架"}, ' \
+          '"texts": ["躯干框架", "横移速度 ≤25mm/s"]}'
+
+    def make(root, man=MAN, docs=DOCS, png_only=False):
+        os.makedirs(os.path.join(root, '02_申请文件', 'figures'), exist_ok=True)
+        os.makedirs(os.path.join(root, '01_交底书'), exist_ok=True)
+        open(os.path.join(root, '01_交底书', '交底书.md'), 'w', encoding='utf8').write(docs)
+        fig = os.path.join(root, '02_申请文件', 'figures', '图1.png')
+        open(fig, 'wb').write(b'\x89PNG\r\n\x1a\n' + b'0' * 40)
+        if not png_only:
+            open(os.path.splitext(fig)[0] + '.manifest.json', 'w', encoding='utf8').write(man)
+
+    def fire(out):
+        return sorted({t for t in ('T1', 'T2', 'T3')
+                       for ln in out.splitlines()
+                       if ln.startswith('  ') and not ln.startswith('  note ')
+                       and f'→ {t}' in ln and '未判' not in ln})
+
+    with tempfile.TemporaryDirectory() as d:
+        ok = os.path.join(d, 'ok')
+        make(ok)
+        r = run([PY, f'{S}/check_figure_text.py', ok])
+        assert_(r.returncode == 0 and not fire(r.stdout),
+                f'图与文书逐字一致却被判红: {show(r)}', r)
+        # 配对靠的是去掉 '.manifest.json' 这个双后缀，不是 splitext：用 splitext 得到
+        # '图1.manifest'，与 '图1.png' 的 stem 配不上，合规包会被读成"有 PNG 没有清单"。
+        assert_('没有配套 manifest' not in r.stdout,
+                f'并排的 <图名>.manifest.json 没配上 <图名>.png（双后缀被 splitext 切错）: {show(r)}', r)
+        assert_('实判判据 3 条' in r.stdout, f'合规案没把三条判据都判到: {show(r)}', r)
+
+        # 五档必红各写一条独立断言（不写成循环）：断言消息要留字面量，
+        # 电池的 expect 才核得动——f-string 里插 label 会让"哪一档"只剩在运行时。
+        def neg(tag, man, want, msg):
+            p = os.path.join(d, 'n' + tag)
+            make(p, man=man)
+            r = run([PY, f'{S}/check_figure_text.py', p])
+            assert_(r.returncode == 1 and fire(r.stdout) == want, msg + ': ' + show(r), None)
+
+        neg('1', MAN.replace('"躯干框架"', '"碳纤维摇臂"'), ['T1'],
+            '图上有文书没有的部件未按预期开火')
+        neg('2', MAN.replace('≤25mm/s', '≤35mm/s'), ['T2'],
+            '图中数值差一个数字未按预期开火')
+        neg('3', MAN.replace('≤25mm/s', '≤25mm/min'), ['T2'],
+            '图中单位写法不同未按预期开火')
+        neg('4', MAN.replace('"13": "支架"', '"13": "卡箍"'), ['T1', 'T3'],
+            '图上标号与对照表名称不一致未按预期开火')
+        neg('5', MAN.replace('{"12"', '{"21": "销轴", "12"'), ['T1', 'T3'],
+            '图上标号在对照表里不存在未按预期开火')
+
+        # 只归一"符号与数字之间的空白"，别的一个字都不许放过
+        p = os.path.join(d, 'space')
+        make(p, man=MAN.replace('≤25mm/s', '≤ 25mm/s'))
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 0, f'符号后空白被当成不一致（该归一的不归一）: {show(r)}', r)
+        p = os.path.join(d, 'digit')
+        make(p, man=MAN.replace('躯干框架', '躯干 框架'))
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 1 and '→ T1' in r.stdout,
+                f'部件名中间塞空格就蒙混过关（归一过头）: {show(r)}', r)
+
+        # 三态三档
+        p = os.path.join(d, 'notext')
+        make(p, man=MAN.replace(', "texts": ["躯干框架", "横移速度 ≤25mm/s"]',
+                               ', "texts": ["躯干框架"]'))
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 0 and 'T2 未判' in r.stdout,
+                f'图上无数值被折成合规或违规: {show(r)}', r)
+        p = os.path.join(d, 'badman')
+        make(p, man='{"figure": "图1.png", "marks": {}}')
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 1 and '清单缺键' in r.stdout and 'texts' in r.stdout,
+                f'清单形状不对却没点名成因（或崩在 KeyError 上）: {show(r)}', r)
+        p = os.path.join(d, 'orphan')
+        make(p, png_only=True)
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 2 and '无从查证' in r.stdout,
+                f'有 PNG 无 manifest 被当成"核过了"或"发现违规": {show(r)}', r)
+        # 混合档：一张有清单、一张手画 PNG。旧写法把"看孤儿"关在 `if not mans` 里，
+        # 于是"12 张图混 1 张手画"这个最像真相的形态被读成"实判 3 条 / 违规 0"。
+        p = os.path.join(d, 'mixed')
+        make(p)
+        open(os.path.join(p, '02_申请文件', 'figures', '图2.png'), 'wb').write(b'\x89PNG\r\n\x1a\n')
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 2 and '图2.png' in r.stdout and '实判判据 3 条' in r.stdout,
+                f'部分图没有清单被当成核过了（判到多少报多少，但包级不完整要说清是谁）: {show(r)}', r)
+        # 优先级：真判出的违规不许被"对账不完整"降级成环境档
+        p = os.path.join(d, 'mixedbad')
+        make(p, man=MAN.replace('≤25mm/s', '≤35mm/s'))
+        open(os.path.join(p, '02_申请文件', 'figures', '图2.png'), 'wb').write(b'\x89PNG\r\n\x1a\n')
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 1 and fire(r.stdout) == ['T2'] and '另有:' in r.stdout,
+                f'判出的违规被"对账不完整"盖掉: {show(r)}', r)
+        p = os.path.join(d, 'nofig')
+        os.makedirs(os.path.join(p, '01_交底书'))
+        open(os.path.join(p, '01_交底书', '交底书.md'), 'w', encoding='utf8').write('# 交底书\n无图。\n')
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 0 and 'T1–T3 未判' in r.stdout,
+                f'没有图的包被硬判: {show(r)}', r)
+        p = os.path.join(d, '不存在')
+        r = run([PY, f'{S}/check_figure_text.py', p])
+        assert_(r.returncode == 2 and '不是目录' in r.stdout,
+                f'路径不可用未说成因并 fail-closed: {show(r)}', r)
+        # ---- docx 通道：交付物只有 Word 件时 T 必须照判 ----
+        # 上一轮给 E/G/K/N/V 四把表门禁都接了 docx 通道，T 是本轮新立的，
+        # 若不接就出现"文书池只认 md"：真交付件（Word）里的对照表与数值读不到，
+        # 图上每个部件名都会被判成"文书里没有"——假红成串，且没有一条用例会喊。
+        try:
+            import docx  # noqa: F401
+        except ImportError:
+            print('  note T 档的 docx 通道未跑（本机无 python-docx，造不出带表格的 Word 夹具）')
+        else:
+            from docx import Document
+            def wordpkg(root, speed='≤25mm/s', name12='底座'):
+                os.makedirs(os.path.join(root, '02_申请文件', 'figures'), exist_ok=True)
+                fig = os.path.join(root, '02_申请文件', 'figures', '图1.png')
+                open(fig, 'wb').write(b'\x89PNG\r\n\x1a\n' + b'0' * 40)
+                open(os.path.splitext(fig)[0] + '.manifest.json', 'w', encoding='utf8').write(MAN)
+                doc = Document()
+                doc.add_heading('附图说明', level=2)
+                doc.add_paragraph('图 1 为整体示意图。躯干框架由铝合金制成。')
+                doc.add_heading('具体实施方式', level=2)
+                doc.add_paragraph(f'横移速度 {speed}。')
+                doc.add_heading('图中标记说明', level=2)
+                rows = [['标记', '名称', '所在图号'], ['12', name12, '1'], ['13', '支架', '1']]
+                t = doc.add_table(rows=len(rows), cols=3)
+                for i, row in enumerate(rows):
+                    for j, v in enumerate(row):
+                        t.cell(i, j).text = v
+                doc.save(os.path.join(root, '说明书.docx'))
+            w_ok = os.path.join(d, 'word_ok')
+            wordpkg(w_ok)
+            rw = run([PY, f'{S}/check_figure_text.py', w_ok])
+            assert_(rw.returncode == 0 and '实判判据 3 条' in rw.stdout,
+                    f'Word-only 交付包未被 T 真判（文书池只认 md 的话这里会成串假红）: {show(rw)}', rw)
+            w_bad = os.path.join(d, 'word_bad')
+            wordpkg(w_bad, speed='≤35mm/s')
+            rw2 = run([PY, f'{S}/check_figure_text.py', w_bad])
+            assert_(rw2.returncode == 1 and '量值「≤25mm/s」' in rw2.stdout and '→ T2' in rw2.stdout,
+                    f'Word 件里的数值改了而图未改，T2 未开火: {show(rw2)}', rw2)
+            w_t3 = os.path.join(d, 'word_t3')
+            wordpkg(w_t3, name12='卡箍')
+            rw3 = run([PY, f'{S}/check_figure_text.py', w_t3])
+            assert_(rw3.returncode == 1 and '→ T3' in rw3.stdout and '12=底座' in rw3.stdout,
+                    f'Word 对照表同号异名未被 T3 抓到（表没被还原成可取列的行）: {show(rw3)}', rw3)
+            w_evil = os.path.join(d, 'word_evil')
+            wordpkg(w_evil)
+            open(os.path.join(w_evil, '说明书.docx'), 'wb').write(b'PK\x03\x04' + b'not a real zip')
+            rw4 = run([PY, f'{S}/check_figure_text.py', w_evil])
+            assert_(rw4.returncode == 2 and 'Traceback' not in rw4.stdout + rw4.stderr,
+                    f'读不动的 docx 未走 rc=2（或未把 traceback 当违规）: {show(rw4)}', rw4)
+    print('PASS check_figure_text（清单形状 + T1–T3 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
+
+
+def test_check_figures_input_guard():
+    """C 门禁的输入档：未知 flag / 不存在的路径 / 零参数一律 rc=2 说成因，空目录不误伤。
+
+    这里曾经是 `for d in sys.argv[1:]` 把每个实参直接喂给 os.listdir：
+    `<目录> --all` 以 FileNotFoundError 崩在 C4 并退 1，而退码 1 在本仓专属"存在违规"，
+    等于给一次环境错误发了张违规单；零参数则 total_bad=0 静默退 0，把"没判"报成"通过"。
+    两个方向都在撒谎，所以三档各钉一条，并留一档合规侧防止输入档过严误伤真目录。
+    """
+    with tempfile.TemporaryDirectory() as d:
+        r = run([PY, f'{S}/check_figures.py', d, '--all'])
+        assert_(r.returncode == 2 and '不认 flag' in r.stdout
+                and 'Traceback' not in r.stdout + r.stderr,
+                f'未知 flag 被当成目录喂进 C 门禁（崩一次就是一张假违规单）: {show(r)}', r)
+        r = run([PY, f'{S}/check_figures.py', os.path.join(d, '不存在')])
+        assert_(r.returncode == 2 and '不是目录' in r.stdout,
+                f'路径不存在未说清成因并 fail-closed: {show(r)}', r)
+        r = run([PY, f'{S}/check_figures.py'])
+        assert_(r.returncode == 2 and '未做任何判定' in r.stdout,
+                f'一个目录都没接却被当成已通过: {show(r)}', r)
+        r = run([PY, f'{S}/check_figures.py', d])
+        assert_(r.returncode == 0 and '0 幅图' in r.stdout,
+                f'合规空目录被输入档误伤: {show(r)}', r)
+    print('PASS check_figures 输入档（未知 flag / 不存在路径 / 零参数三档 rc=2 + 空目录不误伤）')
+
+
 def test_battery_needle_census():
     """变异电池自己的牙：每条 needle 必须在其目标脚本里恰好命中一次。
 
@@ -2143,8 +2430,9 @@ if __name__ == '__main__':
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
-             test_search_report_docx_channel, test_battery_needle_census,
-             test_patent_figure, test_docs_scripts_contract]
+             test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
+             test_patent_figure, test_docs_scripts_contract,
+             test_battery_crash_attribution, test_check_figures_input_guard]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}
