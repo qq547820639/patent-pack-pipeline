@@ -2007,7 +2007,7 @@ def test_search_report_docx_channel():
 
 
 def test_figure_text_channel():
-    """图↔文书对账 T1–T6：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
+    """图↔文书对账 T1–T7：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
 
     两半都要验：① `write_manifest` 写了什么（不依赖 matplotlib，否则这条断言会随环境
     一起 SKIP，判据只剩消费侧有牙）；② 门禁对真包开不开火、三态走不走得对。"""
@@ -2064,7 +2064,7 @@ def test_figure_text_channel():
         # '图1.manifest'，与 '图1.png' 的 stem 配不上，合规包会被读成"有 PNG 没有清单"。
         assert_('没有配套 manifest' not in r.stdout,
                 f'并排的 <图名>.manifest.json 没配上 <图名>.png（双后缀被 splitext 切错）: {show(r)}', r)
-        assert_('实判判据 6 条' in r.stdout, f'合规案没把六条判据都判到: {show(r)}', r)
+        assert_('实判判据 7 条' in r.stdout, f'合规案没把七条判据都判到: {show(r)}', r)
 
         # 五档必红各写一条独立断言（不写成循环）：断言消息要留字面量，
         # 电池的 expect 才核得动——f-string 里插 label 会让"哪一档"只剩在运行时。
@@ -2122,7 +2122,7 @@ def test_figure_text_channel():
         # 注意：这张没人引用的 图2.png 既是"缺清单"（→ 不完整）也是 T5 的真违规，
         # 所以退码按"判出的违规优先"落 1；"不完整"那半句仍要打出来。
         assert_(r.returncode == 1 and '图2.png' in r.stdout and '实判判据 6 条' in r.stdout
-                and '→ T5' in r.stdout and '另有:' in r.stdout,
+                and '→ T5' in r.stdout and '另有:' in r.stdout and 'T7 未判' in r.stdout,
                 f'部分图没有清单被当成核过了（判到多少报多少，但包级不完整要说清是谁）: {show(r)}', r)
         # 优先级：真判出的违规不许被"对账不完整"降级成环境档
         p = os.path.join(d, 'mixedbad')
@@ -2167,6 +2167,28 @@ def test_figure_text_channel():
         assert_('声明了 图2' in r.stdout and '→ T4' in r.stdout and '→ T5' in r.stdout,
                 f'同一夹具里缺图/未引用两条没同时报出: {show(r)}', r)
 
+        d7 = os.path.join(d, 't7')
+        make(d7, docs=DOCS.replace('| 13 | 支架 | 1 |\n', '| 13 | 支架 | 1 |\n| 14 | 缓冲垫 | 1 |\n'))
+        r = run([PY, f'{S}/check_figure_text.py', d7])
+        assert_(r.returncode == 1 and '14=缓冲垫' in r.stdout and '→ T7' in r.stdout,
+                f'表里多写一个图上没有的标记号未被 T7 抓到: {show(r)}', r)
+        # T7 的方向必须是"表有而图无"：图有的号表里必须有，那一向是 T3 的地盘，
+        # 这里若把夹具改成"图上多个号"就会撞进 T3，两支判据到底谁在咬就读不出来了。
+        assert_('→ T3' not in r.stdout, f'同一夹具同时点亮 T3，T7 的开火无法归因: {show(r)}', r)
+
+        d7u = os.path.join(d, 't7_orphan')
+        make(d7u, docs=DOCS.replace('图 1 为整体示意。', '图 1 为整体示意，图 2 为局部放大。')
+             .replace('| 13 | 支架 | 1 |\n', '| 13 | 支架 | 1 |\n| 14 | 缓冲垫 | 1 |\n'),
+             pngs=('图1', '图2'), manifest_for='图1')
+        r = run([PY, f'{S}/check_figure_text.py', d7u])
+        # 包里有手画无留底的 PNG 时，表里那个号也许正画在它上面——看不见不许折成违规。
+        # 这层守卫被摘掉时本档会翻成 rc=1 并打出违规句，两支断言同时看见。
+        # 注意缺席断言取的是违规原话，不是 '→ T7'：未判那句自述里就写着「→ T7 未判」，
+        # 拿前缀当 needle 会命中自己的说明文字，断言永远为假。
+        assert_(r.returncode == 2 and 'T7 未判' in r.stdout
+                and '但没有任何一张图真的标着' not in r.stdout,
+                f'有手画无留底图时表里的号被硬判成 T7 违规（看不见≠违规）: {show(r)}', r)
+
         d_un = os.path.join(d, 't_unjudged')
         make(d_un, docs=DOCS.replace('图 1 为整体示意。', '整体示意见附件。'),
              pngs=('主视图',), manifest_for='主视图')
@@ -2204,7 +2226,7 @@ def test_figure_text_channel():
             w_ok = os.path.join(d, 'word_ok')
             wordpkg(w_ok)
             rw = run([PY, f'{S}/check_figure_text.py', w_ok])
-            assert_(rw.returncode == 0 and '实判判据 6 条' in rw.stdout,
+            assert_(rw.returncode == 0 and '实判判据 7 条' in rw.stdout,
                     f'Word-only 交付包未被 T 真判（文书池只认 md 的话这里会成串假红）: {show(rw)}', rw)
             w_bad = os.path.join(d, 'word_bad')
             wordpkg(w_bad, speed='≤35mm/s')
@@ -2222,7 +2244,7 @@ def test_figure_text_channel():
             rw4 = run([PY, f'{S}/check_figure_text.py', w_evil])
             assert_(rw4.returncode == 2 and 'Traceback' not in rw4.stdout + rw4.stderr,
                     f'读不动的 docx 未走 rc=2（或未把 traceback 当违规）: {show(rw4)}', rw4)
-    print('PASS check_figure_text（清单形状 + T1–T6 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
+    print('PASS check_figure_text（清单形状 + T1–T7 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
 
 
 def test_check_figures_input_guard():

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""图↔文书对账 T1–T6：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
+"""图↔文书对账 T1–T7：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
 「图中数值与文书逐字一致」「不得出现交底书没有的部件/参数」——
-外加《专利法实施细则》点名却全仓无人核的图号三对账（T4 缺图 / T5 图未被引用 / T6 跳号）。
+外加《专利法实施细则》点名却全仓无人核的图号对账（T4 缺图 / T5 图未被引用 / T6 跳号 / T7 标记号反向）。
 
 为什么要有 manifest：PNG 是像素，事后没有任何东西记录图上画了什么字（F4 量完字数就丢），
 而 parts.json 在本仓**只有读者没有生产者**——由代理手抄。拿手抄件去和文书互比，
@@ -24,11 +24,19 @@
      出处：hard-rules §5 / pipeline-stages「每图被附图说明与实施方式引用」。
   T6 包里实存的图号必须是从 1 起的连续号，不得跳号（正文声明只参与 T4，不参与 T6 的分母）。
      出处：《专利法实施细则》第二十一条（几幅附图应当按照"图1，图2，……"顺序编号排列）。
+  T7 那张对照表里写的每个标记号，必须真出现在至少一张有留底的图上。T3 只管"图有的号表里必须有"
+     这一向，反着来没人管：表里凭空多写一行 15=缓冲垫 而任何图都没标 15，N2/N3 只核表内自洽、
+     T3 也不回头看，整包照样绿。
+     出处：《专利法实施细则》第二十一条（附图中未出现的附图标记不得在说明书文字部分中提及）。
+     文书侧号集合只取对照表的标记列，不取正文里"名称+数字"的自由数字——那支抽取（N3 用的 NUM_RUN）
+     会把"拉脱力 90N"的 90 当标记号，误伤面不可控；N3 敢用它是因为那里有表名做锚。
 
-三态：没有 figures 目录 ⇒ 未判（有的交付形态本就没有图）；      图文件名认不出图号（主视图.png 之类）⇒ T4–T6 未判，不去猜号——猜错会把缺号判成不缺；
+三态：没有 figures 目录 ⇒ 未判（有的交付形态本就没有图）；
+      图文件名认不出图号（主视图.png 之类）⇒ T4–T6 未判，不去猜号——猜错会把缺号判成不缺；
       figures 里有 PNG 却没有 manifest ⇒ rc=2 说"图不是本库出的，无从对账"——
       这不是违规，但绝不是"核过了"。这一条与"有没有别的图带着清单"无关：
       12 张图里混 1 张手画 PNG，那张图上写着什么同样没人核过，包级对账就不完整。
+      有这种手画图时 T7 走未判：表里那个号也许正画在那张没留底的图上，"看不见"不许折成违规。
 
 退出码: 0 合规或未判 / 1 存在违规（判出的违规优先于"不完整"上报）/
         2 输入不可用，或有 PNG 无清单可做对账（无论其余图是否已判）。
@@ -261,10 +269,12 @@ def check_package(root, docs=None):
     table, table_found = label_table_map(docs)
     if table_found and table:
         seen.add('T3')
+        fig_marks = set()
         for mp in mans:
             man, err = load_manifest(mp)
             if err:
                 continue
+            fig_marks |= set(man['marks'])
             for num, part in sorted(man['marks'].items(), key=lambda kv: str(kv[0])):
                 if num not in table:
                     bad.append(f'{mp}（{man["figure"]}）: 图上标了 {num}={part}，'
@@ -272,6 +282,21 @@ def check_package(root, docs=None):
                 elif table[num] != part:
                     bad.append(f'{mp}（{man["figure"]}）: 图上 {num}={part}，'
                                f'对照表里 {num}={table[num]} → T3（同号异名，图与表各说各话）')
+        # T7：第二十一条"附图中未出现的附图标记不得在说明书文字部分中提及"——反向那一头。
+        # T3 只从图上往外走（图有的号表里必须有），反着来没人管：表里凭空多写一行 15=缓冲垫，
+        # 而任何一张图都没画过 15，N2/N3 只会核"表内自洽"，T3 也不会回头看，整包照样绿。
+        # 文书侧号集合刻意只取对照表的标记列，不取正文里"名称+数字"的自由数字：
+        # NUM_RUN 那支抽取会把"拉脱力 90N"的 90 也当成标记号，误伤面不可控（N3 用它是因为那里有表名当锚）。
+        if not orphan:
+            seen.add('T7')
+            for num in sorted(table, key=int):
+                if num not in fig_marks:
+                    bad.append(f'{root}: 对照表写了 {num}={table[num]}，'
+                               f'但没有任何一张图真的标着 {num} → T7'
+                               f'（说明书文字里提及了附图里没有的附图标记，实施细则第二十一条）')
+        else:
+            notes.append(f'{root}: 有 {len(orphan)} 张手画 PNG 没有留底，表里的号也许正画在它上面 '
+                         f'→ T7 未判（"看不见"不许折成违规）')
     elif table_found:
         notes.append(f'{root}: 文书里有标记表但一行可用对应都没有 → T3 未判')
     else:
@@ -283,7 +308,7 @@ def check_package(root, docs=None):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T6')
+    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T7')
     ap.add_argument('targets', nargs='+', help='交付包目录（含 figures/ 与 01/02 段文书）')
     args = ap.parse_args()
 
@@ -310,7 +335,7 @@ def main():
         total += len(bad)
         fatal_all = fatal_all or fatal
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 T1–T6，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 T1–T7，判据见脚本 docstring）；实判 {judged} 个包')
     if total:
         # 真找到的违规不许被"对账不完整"降级成环境档：先报违规，再补一句不完整在哪
         if fatal_all:
