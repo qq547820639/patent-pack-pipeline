@@ -1834,6 +1834,97 @@ def test_verify_search_report():
         print('PASS verify_search_report（V1–V3 成对 + 三态 + 死代理 rc=2 + live 档两源各配控制探针）')
 
 
+def test_search_report_docx_channel():
+    """检索报告的 docx 通道：V 读的是权威引用清单，交付场景里它就是一份 Word 报告。
+    上一轮给四把表门禁接 docx 时 V 被留在外面——同一份 read_text，两套读法。"""
+    try:
+        import docx  # noqa: F401  python-docx
+    except ImportError:
+        SKIPPED.append('search_report_docx_channel')
+        print('SKIP search_report_docx_channel（本机无 python-docx，造不出 Word 检索报告）')
+        return
+    from docx import Document
+    import shutil
+    import zipfile
+
+    H = ['#', '类型', '标识符', '标题', '关键日期', '核验出处', '核验日期']
+
+    def rep(path, rows):
+        doc = Document()
+        doc.add_heading('2. 已核验条目', level=2)
+        t = doc.add_table(rows=len(rows), cols=len(rows[0]))
+        for i, row in enumerate(rows):
+            for j, v in enumerate(row):
+                t.cell(i, j).text = v
+        doc.save(path)
+
+    with tempfile.TemporaryDirectory() as d:
+        ok = os.path.join(d, '检索_报告.docx')
+        rep(ok, [H, ['1', '专利', 'CN220572449U', '一种脚手架减振节点',
+                     '2024-03-15', 'CNIPA 著录', '2026-09-20']])
+        r = run([PY, f'{S}/verify_search_report.py', ok, '--offline'])
+        assert_(r.returncode == 0 and '条目 1 条' in r.stdout,
+                f'Word 检索报告未被 V 真判（表格没吃到）: {show(r)}', r)
+
+        nodate = os.path.join(d, '检索_缺日期.docx')
+        rep(nodate, [H, ['1', '专利', 'CN220572449U', '一种节点',
+                         '2024-03-15', 'CNIPA 著录', '']])
+        r = run([PY, f'{S}/verify_search_report.py', nodate, '--offline'])
+        assert_(r.returncode == 1 and '未填核验日期 → V2' in r.stdout,
+                f'Word 报告里缺核验日期未判红: {show(r)}', r)
+
+        noid = os.path.join(d, '检索_无标识.docx')
+        rep(noid, [H, ['1', '论文', '见附件', '一种节点',
+                       '2024-03-15', 'Crossref', '2026-09-20']])
+        r = run([PY, f'{S}/verify_search_report.py', noid, '--offline'])
+        assert_(r.returncode == 1 and '无可机检标识' in r.stdout and '→ V1' in r.stdout,
+                f'Word 报告里"见附件"式标识未判红: {show(r)}', r)
+
+        # 目录模式：只有 Word 件时也必须挑得到（旧逻辑只收 .md，等于对 Word 包完全隐形）
+        only = os.path.join(d, '只有docx包')
+        os.makedirs(only)
+        shutil.copy(ok, os.path.join(only, '检索_Y.docx'))
+        r = run([PY, f'{S}/verify_search_report.py', only, '--offline'])
+        assert_(r.returncode == 0 and '条目 1 条' in r.stdout,
+                f'目录模式未收 .docx 检索报告: {show(r)}', r)
+
+        # 同名成对：挑可编辑源 .md，且必须说清"这份 docx 没参与判定"
+        pair = os.path.join(d, '成对包')
+        os.makedirs(pair)
+        shutil.copy(ok, os.path.join(pair, '检索_X.docx'))
+        # md 侧故意带一条 V1 违规：读到的红必须来自 md，而不是两份混在一起
+        open(os.path.join(pair, '检索_X.md'), 'w', encoding='utf8').write(
+            '# 检索报告\n## 2. 已核验条目\n'
+            '| ' + ' | '.join(H) + ' |\n|' + '---|' * len(H) + '\n'
+            '| 1 | 专利 | CN111 | 一种节点 | 2024-03-15 | CNIPA | 2026-09-20 |\n')
+        r = run([PY, f'{S}/verify_search_report.py', pair, '--offline'])
+        hits = [x for x in r.stdout.splitlines() if '→ V1' in x]
+        assert_(r.returncode == 1 and len(hits) == 1 and '检索_X.md' in hits[0],
+                f'成对时没挑 md（或两份都算进去了）: {show(r)}', r)
+        assert_('条目 1 条' in r.stdout and '与同名 .md 成对' in r.stdout,
+                f'成对挑选没说出被丢的那份，或条目数被翻倍: {show(r)}', r)
+
+        # fail-closed：恶意 Word 件必须 rc=2 说成因，不许 traceback 的退码 1 冒充违规
+        evil = os.path.join(d, '检索_恶意.docx')
+        with zipfile.ZipFile(ok) as src, zipfile.ZipFile(evil, 'w') as dst:
+            for n in src.namelist():
+                b = src.read(n)
+                if n == 'word/document.xml':
+                    b = b.replace(b'<w:document',
+                                  b'<!DOCTYPE w:document [<!ENTITY x "y">]>\n<w:document', 1)
+                dst.writestr(n, b)
+        r = run([PY, f'{S}/verify_search_report.py', evil])
+        assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'DOCTYPE' in r.stdout,
+                f'含 DTD 的 Word 检索报告未按要求拒绝并说成因: {show(r)}', r)
+
+        broken = os.path.join(d, '检索_坏件.docx')
+        open(broken, 'wb').write(b'not a zip')
+        r = run([PY, f'{S}/verify_search_report.py', broken])
+        assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
+                f'非 zip 的 .docx 抛裸异常或退码不是 2: {show(r)} / {r.stderr[-160:]}', r)
+    print('PASS search_report_docx_channel（Word 报告真判 + V1/V2 开火 + 成对挑 md + 两档 fail-closed）')
+
+
 def test_battery_needle_census():
     """变异电池自己的牙：每条 needle 必须在其目标脚本里恰好命中一次。
 
@@ -2051,7 +2142,8 @@ if __name__ == '__main__':
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
-             test_check_figure_labels, test_verify_search_report, test_battery_needle_census,
+             test_check_figure_labels, test_verify_search_report,
+             test_search_report_docx_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

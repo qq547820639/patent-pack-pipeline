@@ -14,6 +14,9 @@
 patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、patentscope 只有
 JSF 表单。宁可不判，也不拿一个没跑通的源假装"已核验"。
 
+读 md 与 docx 两个通道（docx 走 check_iron_rules 那份唯一抽取器，表格还原成管道行后按列读）；
+目录模式同时收 .md 与 .docx，同名成对时挑 .md 并把丢了的谁说出来。
+
 退出码: 0 全部通过（含"未核"不影响通过的情形） / 1 存在违规 /
         2 输入不可用，或在线核对一条都没做成且调用方要求必核（--require-online）。
 """
@@ -40,6 +43,35 @@ _t = _load('mdtable')
 # 复用铁律门禁里的公开号形状，避免两处各写一份正则而漂移
 _cir = _load('check_iron_rules')
 PUB_NO = _cir.PUB_NO
+
+def read_any(path):
+    """md 直读；docx 走 check_iron_rules 那份唯一实现（含 DTD/压缩炸弹拒绝与表格还原）。
+    铁律门禁那边早就用同一条路读检索报告（--search-report 传 docx 今天就吃得下），
+    V 却还 open() 硬读——同一份权威清单两套读法。把 .docx 当 md 读会抛
+    UnicodeDecodeError，而 traceback 的退码 1 在本仓契约里意思是"发现违规"。"""
+    try:
+        return _cir.read_text(path)
+    except Exception as e:
+        print(f'输入不可用，未做任何判定: {path}（{type(e).__name__}: {e}）')
+        sys.exit(2)
+
+
+def pick_reports(d):
+    """目录模式：收文件名含"检索"的 .md 与 .docx。
+
+    同名成对时只挑 md——md 是可编辑源、docx 是它的导出件，两份都收会把同一批条目
+    报两遍，而"违规 4 条"与"同一份报告违规 2 条"在退出码上完全同形。
+    丢件必须说出来：静默丢与静默不丢，读数一模一样。"""
+    found = [f for f in sorted(os.listdir(d))
+             if '检索' in f and f.lower().endswith(('.md', '.docx'))]
+    stems_md = {os.path.splitext(f)[0] for f in found if f.lower().endswith('.md')}
+    out, skipped = [], []
+    for f in found:
+        if f.lower().endswith('.docx') and os.path.splitext(f)[0] in stems_md:
+            skipped.append(f)
+            continue
+        out.append(os.path.join(d, f))
+    return out, skipped
 
 DOI_RE = re.compile(r'\b(10\.\d{4,9}/[^\s|，。；)】]+)', re.I)
 ARXIV_RE = re.compile(r'\barxiv[:：]\s*(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)', re.I)
@@ -189,7 +221,7 @@ def check_report(path, text, online=True):
 def main():
     import argparse
     ap = argparse.ArgumentParser(description='检索报告核验门禁 V1–V3')
-    ap.add_argument('report', nargs='+', help='检索报告 .md（可多份）')
+    ap.add_argument('report', nargs='+', help='检索报告 .md 或 .docx（可多份，也可直接传包目录）')
     ap.add_argument('--offline', action='store_true',
                     help='跳过在线核对（V1/V2 照判，V3 一律报未核）')
     ap.add_argument('--require-online', action='store_true',
@@ -199,20 +231,23 @@ def main():
     paths = []
     for p in args.report:
         if os.path.isdir(p):
-            paths += [os.path.join(p, f) for f in sorted(os.listdir(p))
-                      if f.endswith('.md') and '检索' in f]
+            got, skipped = pick_reports(p)
+            paths += got
+            for f in skipped:
+                print(f'  note {os.path.join(p, f)}: 与同名 .md 成对 → 按可编辑源挑 .md，'
+                      f'这份未参与判定（要单独核它就直接传路径）')
         elif os.path.isfile(p):
             paths.append(p)
         else:
             print(f'输入不可用，未做任何判定: {p}（既不是文件也不是目录）')
             sys.exit(2)
     if not paths:
-        print('输入不可用，未做任何判定: 未找到任何检索报告 .md')
+        print('输入不可用，未做任何判定: 未找到任何检索报告（.md 或 .docx）')
         sys.exit(2)
 
     total, online_ok, entries = 0, 0, 0
     for p in paths:
-        text = open(p, encoding='utf8').read()
+        text = read_any(p)
         bad, notes, checked, n_ent = check_report(p, text, online=not args.offline)
         if n_ent == 0:
             # 零条目在包骨架底稿期合法，但"一条都没核"与"核完且全部合规"在退出码上
