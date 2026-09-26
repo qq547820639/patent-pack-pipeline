@@ -43,7 +43,7 @@ DEPS = [
     ('numpy', 'numpy', '附图彩色像素扫描 scripts/check_figures.py'),
     ('Pillow', 'PIL', '附图读取 scripts/check_figures.py'),
     ('python-docx', 'docx', 'docx 转换后复核 scripts/regen_docx.py'),
-    ('matplotlib', 'matplotlib', '专利附图出图 scripts/patent_figure.py（F1–F4 与出图自检，SKILL 纪律 2）'),
+    ('matplotlib', 'matplotlib', '专利附图出图 scripts/patent_figure.py（F1–F5 与出图自检，SKILL 纪律 2）'),
     ('pypandoc(可选)', 'pypandoc', 'pandoc 不在 PATH 时的兜底定位路径'),
 ]
 
@@ -2617,7 +2617,7 @@ def test_battery_needle_census():
 
 
 def test_patent_figure():
-    """绘图期约束 F1–F4：几何/图题/标记/框内文字。缺 matplotlib 时如实 SKIP，不冒充跑过。"""
+    """绘图期约束 F1–F5：几何/图题/标记/框内文字/线宽。缺 matplotlib 时如实 SKIP，不冒充跑过。"""
     try:
         import matplotlib  # noqa: F401
     except ImportError:
@@ -2641,6 +2641,18 @@ def test_patent_figure():
         with __import__('PIL').Image.open(p) as im:
             w_px = im.size[0]
         assert_(abs(w_px / 200 * 2.54 - 15.0) < 0.1, f'实际图宽 {w_px}px@200dpi 不落在 15cm')
+
+        # F5：带宽判在入参侧。两向都要钉——出带必红，带边（0.8/1.5 闭区间）与
+        # 引出线 0.6pt（规则自己要求的细直线，显式豁免类）必不红。
+        for w, tag in ((0.5, 'F5'), (0.79, 'F5'), (1.51, 'F5'), (2.0, 'F5')):
+            bad = pf.Figure('图F5')
+            bad.line([(0, 0), (9, 9)], width=w)
+            assert_(any(tag in v for v in bad.violations), f'线宽 {w}pt 未被 F5 拦住: {bad.violations}')
+        for w in (0.8, 1.0, 1.5):
+            okfig = pf.Figure('图F5ok')
+            okfig.line([(0, 0), (9, 9)], width=w)
+            okfig.label(2, '部件', at=(4, 4), anchor=(6, 6))     # 引出线走 0.6pt 豁免
+            assert_(okfig.violations == [], f'带宽内的合法线宽被 F5 误伤（{w}pt）: {okfig.violations}')
 
         # F1 必红：dpi 不足 / 图宽越界
         for kw, tag in ((dict(dpi=100), 'F1'), (dict(fig_w_cm=20.0), 'F1')):
@@ -2746,7 +2758,7 @@ def test_patent_figure():
         with tempfile.TemporaryDirectory() as empty:
             r = run([PY, f'{S}/patent_figure.py', '--check', empty])
             assert_(r.returncode == 2 and '未找到 .png' in r.stdout, '--check 空目录未说明成因', r)
-    print('PASS patent_figure（F1–F4 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
+    print('PASS patent_figure（F1–F5 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
 
 
 if __name__ == '__main__':

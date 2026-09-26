@@ -13,6 +13,22 @@
   F2 图内不得嵌图题（图题只写 md 引用处）；且像素侧过 C1/C2
   F3 标记须有引线，且同一编号跨图必须指同一部件（读 parts 登记表）
   F4 框内文字 ≤12 字
+  F5 线宽落在 0.8–1.5pt（**房内口径，非法条**：《专利法实施细则》这页没有任何线宽数值，
+     官方出处未亲验——所以本条只约束走本库出图的线，不得冒充法定要求）
+
+F5 为什么判在**矢量侧**（入参），而不是回读像素量笔画：
+  像素量法在这台机器上连"带内/带外"都分不开，四条读数各足以否掉它（完整表与固定量法见
+  `references/tooling-pitfalls.md` §8；设定值 0.8/1.0/1.2/1.5pt 全部落在带内）：
+  · 带下沿自己被削到带外——0.8pt 的水平线（理想情形）在 dpi=200 与 300 都读 **0.72pt**；
+  · 带内两档并成一个读数——1.0pt 与 1.2pt @200 都读 **1.08pt**（1pt 只有 2.78 像素，
+    0.7pt 宽的带宽被栅格量化成两档）；
+  · 任意角度整体偏高——1.5pt 的 45° 斜线读 **1.916pt**，带上沿直接出带；
+    竖向游程中位数还非单调（0.8→1.08 与 1.0→1.08 同值）；
+  · 真图里框线、引出线、斜线粘成同一连通域——三张合法图按连通域量到 **1.26–6.26pt**（@200）。
+  任何像素阈值都会在合法图上假红；而"出图一律走本库"这条纪律已经保证入参就是唯一的现场，
+  矢量侧判它既准确又不会误伤。
+  引出线 0.6pt 是 §5「阿拉伯数字标记＋细直线引线」自己要求的细线，属规则内的显式豁免类，
+  不是绕开带宽（见 LEADER_W）。
 
 用法:
   from patent_figure import Figure          # 见 tests/test_scripts.py 的真实用例
@@ -25,6 +41,9 @@ import argparse, importlib.util, json, os, sys
 DPI_MIN = 200
 WIDTH_CM_RANGE = (14.0, 16.0)
 BOX_TEXT_MAX = 12
+LINE_W_RANGE = (0.8, 1.5)   # F5 带宽（房内口径）
+LEADER_W = 0.6              # 标记引出线：规则要求的"细直线"，F5 的显式豁免类
+BOX_W = 1.0                 # 框线，落在带宽内
 
 
 def _load_pixel_judge():
@@ -84,7 +103,7 @@ class Figure:
         if len(text) > BOX_TEXT_MAX:
             self.violations.append(f'F4 框内文字 {len(text)} 字 > {BOX_TEXT_MAX}：{text[:16]}')
         self.ax.add_patch(self._plt.Rectangle(
-            (x, y), w, h, fill=False, edgecolor='black', linewidth=1.0))
+            (x, y), w, h, fill=False, edgecolor='black', linewidth=BOX_W))
         if text:
             self.ax.text(x + w / 2, y + h / 2, text, ha='center', va='center',
                          fontsize=9, color='black')
@@ -92,13 +111,17 @@ class Figure:
         return (x + w, y + h / 2)
 
     def line(self, pts, width=0.8):
+        """F5：线宽出带即记违规（保存时会被拒），带宽是房内口径不是法条。"""
+        if not (LINE_W_RANGE[0] <= width <= LINE_W_RANGE[1]):
+            self.violations.append(
+                f'F5 线宽 {width}pt 不在 {LINE_W_RANGE[0]}–{LINE_W_RANGE[1]}pt 内')
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
         self.ax.plot(xs, ys, color='black', linewidth=width, solid_capstyle='butt')
 
     def label(self, num, part, at, anchor):
         """阿拉伯数字标记 + 细直线引线。同一 num 跨图必须指同一部件（F3）。"""
-        self.ax.plot([at[0], anchor[0]], [at[1], anchor[1]], color='black', linewidth=0.6)
+        self.ax.plot([at[0], anchor[0]], [at[1], anchor[1]], color='black', linewidth=LEADER_W)
         self.ax.text(at[0], at[1], str(num), ha='center', va='center',
                      fontsize=9, color='black',
                      bbox=dict(facecolor='white', edgecolor='none', pad=0.1))

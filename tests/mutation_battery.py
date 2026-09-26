@@ -217,6 +217,12 @@ MUTS = {
         ('文书读不动时不计数（未核这件事就不跟着 C1 出去）', CF,
          '                unreadable += 1', '                unreadable = 0',
          '没跟着真开火的 C1 一起出去'),
+        ('F5 线宽判据关掉', PF,
+         '        if not (LINE_W_RANGE[0] <= width <= LINE_W_RANGE[1]):', '        if False:',
+         '未被 F5 拦住'),
+        ('F5 带宽收成一个点（合法 1.0/1.5pt 全被判红）', PF,
+         'LINE_W_RANGE = (0.8, 1.5)', 'LINE_W_RANGE = (0.8, 0.8)',
+         '被 F5 误伤'),
         ('把 --help 豁免抹掉（用法出口退回"不认 flag"档）', CF,
          "    if any(a in ('-h', '--help') for a in args):", '    if False:',
          '出口未打印用法并退 0'),
@@ -913,7 +919,7 @@ def main():
 
     arms = sorted(MUTS) if args.arm == 'all' else [args.arm]
     if not have_mpl and 'fig' in arms:
-        print('fig 档需要 matplotlib（出图期 F1–F4 与真像素核对）→ 本次未判定，不是通过。'
+        print('fig 档需要 matplotlib（出图期 F1–F5 与真像素核对）→ 本次未判定，不是通过。'
               '装上后重跑，或 --arm iron/vsr 先跑其余两支。')
         arms = [a for a in arms if a != 'fig']
         if not arms:
