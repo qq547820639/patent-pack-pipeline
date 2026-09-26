@@ -37,6 +37,18 @@ def _load(name):
 
 _t = _load('mdtable')
 _cir = _load('check_iron_rules')
+
+def read_any(path):
+    """md 直读；docx 交给 check_iron_rules 那份唯一实现（DTD/压缩炸弹拒绝 + 表格还原成
+    markdown 管道行）。这里不另写第二份 docx 解析——两套读取迟早在一句话的两种写法上打架。
+    读不动必须报成因并 rc=2：把 .docx 当 md 读会抛 UnicodeDecodeError，而 traceback 的
+    退码 1 在门禁语境里等于宣布"发现违规"，那是最坏的假红。"""
+    try:
+        return _cir.read_text(path)
+    except Exception as e:
+        print(f'输入不可用，未做任何判定: {path}（{type(e).__name__}: {e}）')
+        sys.exit(2)
+_cir = _load('check_iron_rules')
 EVT_DIR, EVT_SCOPE = _cir.EVT_DIR, _cir.EVT_SCOPE
 
 VERDICTS = ('✅', '⚠️', '❌')
@@ -141,7 +153,7 @@ def main():
     for p in args.targets:
         if args.all and os.path.isdir(p):
             for dp, _, fs in os.walk(p):
-                paths += [os.path.join(dp, f) for f in sorted(fs) if f.lower().endswith('.md')]
+                paths += [os.path.join(dp, f) for f in sorted(fs) if f.lower().endswith(('.md', '.docx'))]
         elif os.path.isfile(p):
             paths.append(p)
         elif args.all:
@@ -156,7 +168,7 @@ def main():
 
     total = judged = 0
     for p in paths:
-        text = open(p, encoding='utf8').read()
+        text = read_any(p)
         bad, notes = check_text(p, text)
         for n in notes:
             print(f'  note {n}')

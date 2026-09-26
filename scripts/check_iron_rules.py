@@ -197,7 +197,13 @@ def docx_text(path):
 
     段落标题按 w:pStyle 还原成 markdown 井号，让 R3/R4/R7 这类按节判的判据
     在 pandoc 产物上同样可用；非 pandoc 风格命名（标题样式对不上）时相应节
-    找不到，会走各自的"未核"三态而不是判绿。"""
+    找不到，会走各自的"未核"三态而不是判绿。
+
+    表格按 w:tbl 还原成 markdown 管道行（表头后补一行 |---|）：Word 里的表格
+    单元格本身也是 w:p，逐段吐出来的话整张表就散成一串裸行——按列读的判据
+    （E/G/K/N 都靠 mdtable 认列）一律认不出这张表，症状是"交付件里有表却报无表"。
+    只补一行分隔符还有第二个理由：mdtable 要求连续两行才算一张表，
+    只有表头的 docx 表若不补分隔符就整张隐身，骨架期的"未判"会退化成"没有表"。"""
     import xml.etree.ElementTree as ET
     import zipfile
     # docx 可能是外部交付件，ET 的默认解析器不防实体展开（十亿 laugh）与 zip 炸弹。
@@ -213,8 +219,33 @@ def docx_text(path):
         if marker in head:
             raise ValueError(f'document.xml 含 {marker.decode()} 声明，拒绝解析（防实体展开）')
     root = ET.fromstring(blob)
+    # 表格内部的段落由表格分支统一按格取文，段落分支要跳过它们，
+    # 否则同一格文字既进 "| a | b |" 又进裸行，读起来像"表在、表内容也散在外面"。
+    inside = set()
+    for tbl in [e for e in root.iter() if e.tag.endswith('}tbl')]:
+        for el in tbl.iter():
+            inside.add(id(el))
+
+    def txt(el):
+        return ''.join((t.text or '') for t in el.iter() if t.tag.endswith('}t'))
+
     out = []
     for p in root.iter():
+        if p.tag.endswith('}tbl'):
+            rows = []
+            for tr in p:
+                if not tr.tag.endswith('}tr'):
+                    continue
+                cells = [txt(tc) for tc in tr if tc.tag.endswith('}tc')]
+                rows.append('| ' + ' | '.join(cells) + ' |')
+                if len(rows) == 1:
+                    rows.append('|' + '---|' * len(cells))
+            # 每行必须以换行收尾：mdtable 按行取列，四行连成一行的话整张表读不出来
+            if rows:
+                out.append('\n'.join(rows) + '\n')
+            continue
+        if id(p) in inside:
+            continue
         if not p.tag.endswith('}p'):
             continue
         style = ''
@@ -226,7 +257,7 @@ def docx_text(path):
             out.append('# ')
         elif m:
             out.append('#' * int(m.group(1)) + ' ')
-        out.append(''.join((t.text or '') for t in p.iter() if t.tag.endswith('}t')))
+        out.append(txt(p))
         out.append('\n')
     return ''.join(out)
 

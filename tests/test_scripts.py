@@ -633,6 +633,200 @@ def test_check_iron_rules_docx():
 
 
 
+def test_docx_table_channel():
+    """表格类门禁的 docx 通道：交付物是 Word 件，按列读的判据必须能在 .docx 上真判。
+
+    这一档存在的直接理由：docx 抽取原先只按 w:p 逐段吐文本，Word 表格的单元格本身
+    也是 w:p，于是整张对照表散成一串裸行——N1「有附图说明节却无表」会对每一份
+    真交付件误判红；而把 .docx 当 md 直读更糟，UnicodeDecodeError 的退码 1
+    在门禁语境里等于宣布"发现违规"。"""
+    try:
+        import docx  # noqa: F401  python-docx
+    except ImportError:
+        SKIPPED.append('docx_table_channel')
+        print('SKIP docx_table_channel（本机无 python-docx，造不出带表格的 docx 夹具）')
+        return
+    from docx import Document
+
+    def make(path, prose='所述底座 12 与支架 13 连接。', table=True, header_only=False,
+             heading=True, cells=None):
+        doc = Document()
+        if heading:
+            doc.add_heading('附图说明', level=2)
+            doc.add_paragraph('图 1 为整体示意图；图 2 为底座剖视图。')
+        doc.add_heading('具体实施方式', level=2)
+        doc.add_paragraph(prose)
+        doc.add_heading('图中标记说明', level=2)
+        if table:
+            rows = cells or [['标记', '名称', '所在图号'], ['12', '底座', '1、2'],
+                             ['13', '支架', '1']]
+            if header_only:
+                rows = rows[:1]
+            t = doc.add_table(rows=len(rows), cols=len(rows[0]))
+            for i, row in enumerate(rows):
+                for j, v in enumerate(row):
+                    t.cell(i, j).text = v
+        else:
+            doc.add_paragraph('（这里本该有一张三列对照表）')
+        doc.save(path)
+
+    with tempfile.TemporaryDirectory() as d:
+        ok = os.path.join(d, '说明书_包', '02_申请文件', '说明书.docx')
+        os.makedirs(os.path.dirname(ok))
+        make(ok)
+        r = run([PY, f'{S}/check_figure_labels.py', ok])
+        assert_(r.returncode == 0 and '实判判据 4 条' in r.stdout and '实核附图标记文书 1 份' in r.stdout,
+                f'合规 docx 未被 N 真判（表格没还原成可按下标取列的行）: {show(r)}', r)
+
+        # 单元格文字只许出现一次：既进管道行又散成裸行的话，正文对账会把自己和自己打架
+        _sp = importlib.util.spec_from_file_location('cir_chan', f'{S}/check_iron_rules.py')
+        _cir = importlib.util.module_from_spec(_sp)
+        _sp.loader.exec_module(_cir)
+        body = _cir.docx_text(ok)
+        assert_('\n底座\n' not in body,
+                f'表格单元格被重复吐成裸行（表格分支与段落分支没互斥）:\n{body}', None)
+        assert_(body.count('| 12 | 底座 |') == 1, f'管道行重复或丢失:\n{body}', None)
+
+        bad = os.path.join(d, 'bad.docx')
+        make(bad, prose='所述底座 13 与支架连接。')
+        r = run([PY, f'{S}/check_figure_labels.py', bad])
+        assert_(r.returncode == 1 and '→ N3' in r.stdout,
+                f'docx 里的标号错配未判红: {show(r)}', r)
+
+        # 跨通道同判据：同样的内容写成 md 与写成 docx，结论必须一模一样
+        md = os.path.join(d, 'same.md')
+        open(md, 'w', encoding='utf8').write(
+            '# 说明书\n## 附图说明\n图 1 为整体示意图；图 2 为底座剖视图。\n'
+            '## 具体实施方式\n所述底座 13 与支架连接。\n'
+            '## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
+            '| 12 | 底座 | 1、2 |\n| 13 | 支架 | 1 |\n')
+        rm = run([PY, f'{S}/check_figure_labels.py', md])
+        assert_(rm.returncode == r.returncode == 1,
+                f'同一内容两通道退码不一致（md={rm.returncode} docx={r.returncode}）', rm)
+        got_md = [x for x in rm.stdout.splitlines() if '→ N3' in x]
+        got_dx = [x for x in r.stdout.splitlines() if '→ N3' in x]
+        assert_(len(got_md) == len(got_dx) == 1
+                and got_md[0].split(':')[1].split('：', 1)[-1] == got_dx[0].split(':')[1].split('：', 1)[-1],
+                f'两通道读到的不是同一条指控: md={got_md} docx={got_dx}', None)
+
+        no_tbl = os.path.join(d, '无表.docx')
+        make(no_tbl, table=False)
+        r = run([PY, f'{S}/check_figure_labels.py', no_tbl])
+        assert_(r.returncode == 1 and '却没有图中标记说明对照表' in r.stdout,
+                f'docx 有附图说明节却无表未判红: {show(r)}', r)
+
+        # 只有表头的 docx 表：必须仍然"看得见这张表"并走未判，而不是退化成"没有表"
+        bare = os.path.join(d, '只有表头.docx')
+        make(bare, header_only=True)
+        r = run([PY, f'{S}/check_figure_labels.py', bare])
+        assert_(r.returncode == 0 and '只有表头没有数据行' in r.stdout,
+                f'单行 docx 表隐身成"无表"（分隔符没补上）: {show(r)}', r)
+
+        # 整包 --all 也要收 docx：交付件通常 md+docx 成对，只扫 md 等于没扫交付物
+        pkg = os.path.join(d, '说明书_包')
+        r = run([PY, f'{S}/check_figure_labels.py', pkg, '--all'])
+        assert_(r.returncode == 0 and '实核附图标记文书 1 份' in r.stdout,
+                f'--all 未把 .docx 收进待检清单: {show(r)}', r)
+        # 成对交付物里只有一侧脏：干净那侧不许洗绿，且红因必须按路径点名脏的那个文件
+        dirty = os.path.join(pkg, '02_申请文件', '说明书_旧版.docx')
+        make(dirty, prose='所述底座 13 与支架连接。')
+        twin = os.path.join(pkg, '02_申请文件', '说明书.md')
+        open(twin, 'w', encoding='utf8').write(
+            '# 说明书\n## 附图说明\n图 1 为整体示意图。\n## 图中标记说明\n'
+            '| 标记 | 名称 | 所在图号 |\n|---|---|---|\n| 12 | 底座 | 1 |\n')
+        r = run([PY, f'{S}/check_figure_labels.py', pkg, '--all'])
+        hits = [x for x in r.stdout.splitlines() if '→ N3' in x]
+        assert_(r.returncode == 1 and len(hits) == 1 and '旧版.docx' in hits[0]
+                and '实核附图标记文书 3 份' in r.stdout,
+                f'成对交付物里 docx 侧的违规被 md 侧掩盖，或红因归错了文件: {show(r)}', r)
+
+        # fail-closed 三档：外部落件（DTD/ENTITY）、坏 zip、超大解压 —— 全部 rc=2 说成因，
+        # 绝不让 traceback 的退码 1 冒充"发现违规"
+        evil = os.path.join(d, '恶意.docx')
+        import shutil
+        import zipfile
+        shutil.copy(ok, evil)
+        with zipfile.ZipFile(ok) as src, zipfile.ZipFile(evil, 'w') as dst:
+            for n in src.namelist():
+                b = src.read(n)
+                if n == 'word/document.xml':
+                    b = b.replace(b'<w:document', b'<!DOCTYPE w:document [<!ENTITY x "y">]>\n<w:document', 1)
+                dst.writestr(n, b)
+        r = run([PY, f'{S}/check_figure_labels.py', evil])
+        assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'DOCTYPE' in r.stdout,
+                f'含 DTD 声明的 docx 未按要求拒绝并说成因: {show(r)}', r)
+
+        broken = os.path.join(d, '坏件.docx')
+        open(broken, 'wb').write(b'not a zip at all')
+        r = run([PY, f'{S}/check_figure_labels.py', broken])
+        assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
+                f'非 zip 的 .docx 抛出裸异常或退码不是 2: {show(r)} / {r.stderr[-200:]}', r)
+
+        # 同样四把门里再验一把按表判的（G）：证明接线不是 N 独享
+        greg = os.path.join(d, '法规_包', '05_法规与裁决', '裁决.docx')
+        os.makedirs(os.path.dirname(greg))
+        g = Document()
+        g.add_heading('裁决总表', level=2)
+        t = g.add_table(rows=2, cols=5)
+        for i, row in enumerate([['冲突项', '结论', '依据', '约束', '生效范围'],
+                                 ['表带厚度', '维持 2.4mm', 'EVT 复算 2.31mm', '投产后不得回退', '全部 SKU']]):
+            for j, v in enumerate(row):
+                t.cell(i, j).text = v
+        g.save(greg)
+        r = run([PY, f'{S}/check_regulatory.py', os.path.join(d, '法规_包'), '--all'])
+        assert_(r.returncode == 0 and '实核法规文书 1 份' in r.stdout,
+                f'G 门禁未能在 docx 裁决书上真判: {show(r)}', r)
+        t2 = Document()
+        t2.add_heading('裁决总表', level=2)
+        t2b = t2.add_table(rows=2, cols=4)
+        for i, row in enumerate([['冲突项', '结论', '依据', '约束'],
+                                 ['表带厚度', '维持 2.4mm', 'EVT 复算 2.31mm', '投产后不得回退']]):
+            for j, v in enumerate(row):
+                t2b.cell(i, j).text = v
+        t2.save(greg)
+        r = run([PY, f'{S}/check_regulatory.py', os.path.join(d, '法规_包'), '--all'])
+        assert_(r.returncode == 1 and '缺列' in r.stdout and '生效范围' in r.stdout,
+                f'docx 裁决表掉一列却未判红: {show(r)}', r)
+
+        # 四把按表判的门禁都要真吃到 docx：接线是同一处改动，但只测两把就当四把都通
+        # 是不成立的推断——每一把的 --all 收集与读函数各自才说了算。
+        # E 与 K 各写一条独立断言（不写成循环）：断言消息必须是字面量。
+        # 常驻的 expect 存在性体检只能对着源文本核，f-string 里插 gate 会把
+        # "哪把门禁没吃到 docx"这件事只剩在运行时，电池那条 expect 就成了查无实据的断言。
+        efp = os.path.join(d, 'EVT_包', '04_EVT验证', '登记.docx')
+        os.makedirs(os.path.dirname(efp), exist_ok=True)
+        doc = Document()
+        doc.add_heading('验证总表', level=2)
+        rows = [['#', '设计项', '验证方法', '分析结论', '物理实测项', '判定'],
+                ['1', '阻尼节点', '解析计算', '满足', '待物理实测', '✅']]
+        te = doc.add_table(rows=len(rows), cols=len(rows[0]))
+        for ra, row in enumerate(rows):
+            for cb, v in enumerate(row):
+                te.cell(ra, cb).text = v
+        doc.save(efp)
+        r = run([PY, f'{S}/check_evt.py', os.path.dirname(os.path.dirname(efp)), '--all'])
+        assert_(r.returncode == 0 and '实核 EVT 文书 1 份' in r.stdout,
+                'EVT 门禁未能在 docx 上真判（表格没吃到或 --all 收集漏了 .docx）', r)
+
+        kfp = os.path.join(d, '补全_包', '03_设计补全', '登记.docx')
+        os.makedirs(os.path.dirname(kfp), exist_ok=True)
+        doc = Document()
+        doc.add_heading('设计决策卡', level=2)
+        rows = [['决策项', '可选方案', '选定方案', '依据', '约束条件', '风险与回退'],
+                ['节点材料', '硅胶、TPE', '硅胶', '邵氏 60A 设计计算值', '成本上限', '回退 TPE']]
+        tk = doc.add_table(rows=len(rows), cols=len(rows[0]))
+        for ra2, row in enumerate(rows):
+            for cb2, v in enumerate(row):
+                tk.cell(ra2, cb2).text = v
+        doc.save(kfp)
+        r = run([PY, f'{S}/check_design_completion.py',
+                 os.path.dirname(os.path.dirname(kfp)), '--all'])
+        assert_(r.returncode == 0 and '实核设计补全文书 1 份' in r.stdout,
+                '补全门禁未能在 docx 上真判（表格没吃到或 --all 收集漏了 .docx）', r)
+
+    print('PASS docx_table_channel（表格还原 + 跨通道同判据 + 成对不互相洗绿 + 三档 fail-closed）')
+
+
 def test_regen_docx_stale():
     """--check 陈旧检测：改过 md 忘了重转 must 红，且不需要 pandoc 就能问这一句。"""
     with tempfile.TemporaryDirectory() as d:
@@ -1703,6 +1897,16 @@ def test_battery_needle_census():
     want = sorted(mb.MUTS)
     assert_(got == want, f'电池 docstring 的 arm 清单与 MUTS 键不对齐: {got} vs {want}', None)
 
+    # 每条 expect 必须是测试文件里真存在的断言消息（否则那一支变异翻红时无人点名它，
+    # 读成 MISRED 却是 expect 自己在撒谎）。两处归一化：折叠跨行隐式拼接的字面量接缝，
+    # 以及抹掉 f-string 的 {表达式}——消息在运行时才拼出来的部分不该要求源文本逐字含有。
+    tsrc = open(os.path.join(ROOT, 'tests', 'test_scripts.py'), encoding='utf8').read()
+    flat = re.sub(r"\{[^{}]*\}", '', re.sub(r"'\s*\n\s*'", '', tsrc))
+    dead = [f'{g}/{label} → {w}' for g, entries in mb.MUTS.items()
+            for label, rel, _o, _n, exp in entries
+            for w in ([exp] if isinstance(exp, str) else list(exp)) if w not in flat]
+    assert_([d for d in dead] == [], f'电池里有 expect 在测试文件里找不到对应断言: {dead}', None)
+
     print(f'PASS 变异电池锚点体检（{total} 条 needle × {len(texts)} 个脚本 / {len(want)} 档，'
           f'全部恰好命中一次{tail}）')
 
@@ -1846,6 +2050,7 @@ if __name__ == '__main__':
              test_new_product_package, test_rebuild_package, test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_check_evt, test_check_regulatory, test_check_design_completion,
+             test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报

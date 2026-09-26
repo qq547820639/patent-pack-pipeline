@@ -39,6 +39,18 @@ def _load(name):
 
 
 _t = _load('mdtable')
+_cir = _load('check_iron_rules')
+
+def read_any(path):
+    """md 直读；docx 交给 check_iron_rules 那份唯一实现（DTD/压缩炸弹拒绝 + 表格还原成
+    markdown 管道行）。这里不另写第二份 docx 解析——两套读取迟早在一句话的两种写法上打架。
+    读不动必须报成因并 rc=2：把 .docx 当 md 读会抛 UnicodeDecodeError，而 traceback 的
+    退码 1 在门禁语境里等于宣布"发现违规"，那是最坏的假红。"""
+    try:
+        return _cir.read_text(path)
+    except Exception as e:
+        print(f'输入不可用，未做任何判定: {path}（{type(e).__name__}: {e}）')
+        sys.exit(2)
 
 REG_DIR = re.compile(r'05_法规与裁决')
 REG_SCOPE = re.compile(r'适用性判定|逐条映射|合规缺口|裁决总表|送检包清单')
@@ -231,14 +243,14 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description='法规与裁决文书门禁 G1–G5')
     ap.add_argument('targets', nargs='+', help='法规/裁决文书 .md，或配合 --all 传交付包目录')
-    ap.add_argument('--all', action='store_true', help='递归目录下所有 .md（域外自动走未判）')
+    ap.add_argument('--all', action='store_true', help='递归目录下所有 .md 与 .docx（域外自动走未判）')
     args = ap.parse_args()
 
     paths = []
     for p in args.targets:
         if args.all and os.path.isdir(p):
             for dp, _, fs in os.walk(p):
-                paths += [os.path.join(dp, f) for f in sorted(fs) if f.lower().endswith('.md')]
+                paths += [os.path.join(dp, f) for f in sorted(fs) if f.lower().endswith(('.md', '.docx'))]
         elif os.path.isfile(p):
             paths.append(p)
         elif args.all:
@@ -253,7 +265,7 @@ def main():
 
     total = judged = 0
     for p in paths:
-        text = open(p, encoding='utf8').read()
+        text = read_any(p)
         res = check_text(p, text)
         bad, notes, judged_tags = res[0], res[1], res[2]
         for n in notes:
