@@ -2422,6 +2422,75 @@ def test_figure_text_channel():
     print('PASS check_figure_text（清单形状 + T1–T7 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
 
 
+def test_check_figures_colour():
+    """C5 与色彩豁免轴（《专利法实施细则》第三十条）：豁免看文书声明，不看目录名。
+
+    这条轴补的是以前的假红面：彩色申请只要没把图放进 views/外观设计 目录，C1 就把合法件判违规；
+    反方向也钉住——写了"请求保护色彩"却交一套黑白件，那是第三十条要求的反面。
+    """
+    from PIL import Image
+
+    def build(root, doc_text, colour=True, blank=False):
+        figs = os.path.join(root, '02_申请文件', 'figures')
+        os.makedirs(figs, exist_ok=True)
+        img = Image.new('RGB', (80, 80), (255, 0, 0) if colour else 'white')
+        if not colour and not blank:            # 黑白但非空白：画条黑线，免得撞 C2
+            for x in range(10, 70):
+                img.putpixel((x, 40), (0, 0, 0))
+        img.save(os.path.join(figs, '图1.png'))
+        open(os.path.join(root, '02_申请文件', '说明书.md'), 'w',
+             encoding='utf8').write(doc_text)
+        return root
+
+    DECL = '# 说明书\n简要说明：申请人请求保护色彩。\n'
+    NONE = '# 说明书\n简要说明：本外观设计不请求保护色彩。\n'
+    with tempfile.TemporaryDirectory() as d:
+        ok = build(os.path.join(d, 'declared'), DECL)
+        r = run([PY, f'{S}/check_figures.py', ok])
+        assert_(r.returncode == 0 and '请求保护色彩' in r.stdout
+                and 'C1 彩色像素' not in r.stdout and '说明书.md:2' in r.stdout,
+                f'声明了请求保护色彩的彩色件仍被 C1 误伤，或豁免没说出依据在哪: {show(r)}', r)
+
+        bw = build(os.path.join(d, 'declared_bw'), DECL, colour=False)
+        r = run([PY, f'{S}/check_figures.py', bw])
+        assert_(r.returncode == 1 and '-> C5' in r.stdout,
+                f'写了请求保护色彩却交一套黑白件，没被 C5 抓到: {show(r)}', r)
+
+        undecl = build(os.path.join(d, 'undeclared'), NONE, colour=False)
+        r = run([PY, f'{S}/check_figures.py', undecl])
+        assert_(r.returncode == 0 and 'C5' not in r.stdout,
+                f'没声明色彩保护却被 C5 判红（第三十条只约束声明过的申请）: {show(r)}', r)
+
+        nodir = build(os.path.join(d, 'undeclared_colour'), NONE)
+        r = run([PY, f'{S}/check_figures.py', nodir])
+        assert_(r.returncode == 1 and 'C1 彩色像素' in r.stdout,
+                f'未声明的彩色件不再被 C1 判红（豁免轴串到了不该豁免的一侧）: {show(r)}', r)
+
+        empty = os.path.join(d, 'noimg', '02_申请文件')
+        os.makedirs(empty)
+        open(os.path.join(empty, '说明书.md'), 'w', encoding='utf8').write(DECL)
+        r = run([PY, f'{S}/check_figures.py', os.path.join(d, 'noimg')])
+        assert_(r.returncode == 0 and 'C5 未判' in r.stdout,
+                f'声明了但扫不到图时被硬判成 C5 违规（应是未判）: {show(r)}', r)
+
+        # 读不动的文书既不能当"没声明"（否则后面那份真声明会被丢掉→合法彩色件被误伤），
+        # 也不能悄悄当"已声明"。两向各一档：
+        unread = build(os.path.join(d, 'unreadable'), DECL)
+        open(os.path.join(unread, '01_坏件.docx'), 'wb').write(b'not a zip')
+        r = run([PY, f'{S}/check_figures.py', unread])
+        assert_('未全核' in r.stdout and r.returncode == 0 and 'C1 彩色像素' not in r.stdout,
+                f'一份文书读不动就把后面的声明也丢了（豁免轴提前退出）: {show(r)}', r)
+
+        un2 = build(os.path.join(d, 'unreadable_nodecl'), NONE)
+        open(os.path.join(un2, '01_坏件.docx'), 'wb').write(b'not a zip')
+        r = run([PY, f'{S}/check_figures.py', un2])
+        # 断言取的是 C1 行上那句"1 份文书读不动"——扫描时的 note 里也有"未全核"，
+        # 拿它当 needle 的话，把计数归零的变异照样过，等于没钉。
+        assert_(r.returncode == 1 and 'C1 彩色像素' in r.stdout and '1 份文书读不动' in r.stdout,
+                f'未核这件事没跟着真开火的 C1 一起出去（只沉在开头 note 里＝等于没说）: {show(r)}', r)
+    print('PASS check_figures_colour（声明豁免带出处 / C5 开火 / 未声明不误伤 / 无图未判 / 读不动未核）')
+
+
 def test_check_figures_input_guard():
     """C 门禁的输入档：未知 flag / 不存在的路径 / 零参数一律 rc=2 说成因，空目录不误伤。
 
@@ -2684,6 +2753,7 @@ if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
              test_new_product_package, test_rebuild_package, test_check_claims,
+             test_check_figures_colour,
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_check_evt, test_check_regulatory, test_check_design_completion,
