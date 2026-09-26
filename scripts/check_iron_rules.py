@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """专利文书铁律门禁：把 SKILL.md 铁律与 references/hard-rules.md 中**可机械判定**的部分实跑成
-红/绿判据，逐条报出 file:line 与触发规则号。不可判定的部分（是否"作新颖性声明"的语义、
-数值是否有出处）仍归独立审查轮，本脚本不冒充。
+红/绿判据，逐条报出 file:line 与触发规则号。不可判定的部分（那句查新声明**是否属实**、
+数值是否有出处）仍归独立审查轮，本脚本不冒充——R9 判的是那句话在不在，不是它说得对不对。
 
 用法:
   python3 check_iron_rules.py <交底书或申请文件.md ...> [--search-report 检索报告.md]
@@ -17,6 +17,8 @@
      不自动猜型号——IP67/M5/45#钢 这类标准与规格写法会被模式匹配误伤）
   R7 发明名称超 25 字（templates §0）
   R8 EVT/投产文书缺逐字投产总则（铁律 5）
+  R9 背景技术节缺逐字查新声明句（hard-rules §2 第三条，templates §1 要求置于本节末尾；
+     判"在本节内"而不是"在全文某处"——那句话是给本节兜底的，写在别的节不算兑现）
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -60,6 +62,10 @@ EVT_DIR = re.compile(r'04_EVT')
 EVT_SCOPE = re.compile(r'投产判定|投产总则')
 # 逐字规范串：以 templates §5 / evt-and-regulatory / README §4 三处一致写法为准（句号在引号内）
 PRODUCTION_CLAUSE = '任何设计内容在对应物理实测全部通过前不得进入投产阶段；分析验证结论不构成投产依据。'
+# R9 的逐字串（hard-rules §2 第三条）。比较前只剥空白：作者软换行/pandoc 折行不是改措辞，
+# 但汉字、标点、数字一个都不许差——与 check_figure_text T2 的归一口径同一档。
+NOVELTY_CLAUSE = '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。'
+NOVELTY_FLAT = re.sub(r'\s+', '', NOVELTY_CLAUSE)
 
 
 class Finding:
@@ -185,6 +191,23 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
             findings.append(Finding(
                 'R8 投产总则', path, 1,
                 'EVT/投产文书缺逐字投产总则：' + PRODUCTION_CLAUSE[:24] + '…'))
+
+    # R9 背景技术节的逐字查新声明（hard-rules §2 / templates §1「末尾统一查新声明句」）。
+    # 只判本节：这句话是给"背景技术只引了初步检索"这件事兜底的，全文别处出现不算兑现；
+    # 反过来，本节都没有（骨架底稿就只有附图说明＋标记说明两节）时报未判，不折成违规。
+    bg_start, bg_body = section_body(lines, BACKGROUND_HEAD)
+    if bg_start is None:
+        notes.append('背景技术节未找到，R9 未判（不折成违规也不折成合规）')
+    else:
+        flat = re.sub(r'\s+', '', '\n'.join(bg_body))
+        if NOVELTY_FLAT not in flat:
+            findings.append(Finding(
+                'R9 查新声明', path, bg_start,
+                '背景技术节缺逐字查新声明：' + NOVELTY_CLAUSE[:20] + '…'))
+        else:
+            nonblank = [l.strip() for l in bg_body if l.strip()]
+            if nonblank and NOVELTY_FLAT not in re.sub(r'\s+', '', nonblank[-1]):
+                notes.append('R9 声明句在本节内但不在末尾（templates §1 要求置于末尾）——只提示不判红')
     return findings, notes
 
 
@@ -334,7 +357,7 @@ def main():
             print(str(f))
         total += len(findings)
         print(f'{p}: 违规 {len(findings)}')
-    print(f'合计违规 {total}（规则 R1–R8，判据见脚本 docstring）')
+    print(f'合计违规 {total}（规则 R1–R9，判据见脚本 docstring）')
     sys.exit(1 if total else 0)
 
 

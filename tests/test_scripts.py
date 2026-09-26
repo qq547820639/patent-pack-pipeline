@@ -584,7 +584,10 @@ IRON_TMPL = """# 专利技术交底书
 ## 8. 检索关键词与 IPC 分类建议
 A61F5/00
 """
-IRON_OK_BG = '现有技术 CN110404188A 公开了一种髋关节助力结构，与本案的区别在于载荷传递路径。'
+IRON_OK_BG = ('现有技术 CN110404188A 公开了一种髋关节助力结构，与本案的区别在于载荷传递路径。\n'
+              # R9 的合规侧：逐字句在这里**硬编码**而不是从判据常量取——取了常量，
+              # 有人改判据串时合规夹具会跟着一起改，那条"改措辞即红"的断言就永远不红（R8 同例）。
+              '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。')
 IRON_OK_ABSTRACT = '本发明公开一种腰部助力外骨骼装置，涉及可穿戴设备技术领域，包括躯干框架与髋关节驱动单元。'
 
 
@@ -639,6 +642,22 @@ def test_check_iron_rules_docx():
         r = run([PY, f'{S}/check_iron_rules.py', over])
         assert_(r.returncode == 1 and 'FAIL R4' in r.stdout,
                 f'docx 的超 300 字摘要未被 R4 抓到（pStyle 还原没吃上力）: {show(r)}', r)
+
+        # R9 的第二消费者：交付物是 Word 件，逐字查新声明这条判据不能只在 md 上开火。
+        # 缺句必红、补上必绿——两头都测，否则"docx 里读不到节"也会让红那一档假绿。
+        bgdoc = os.path.join(d, '缺声明.docx')
+        doc = Document()
+        doc.add_heading('背景技术', level=2)
+        doc.add_paragraph('现有技术 CN110404188A 公开了一种减振节点。')
+        doc.save(bgdoc)
+        r = run([PY, f'{S}/check_iron_rules.py', bgdoc])
+        assert_(r.returncode == 1 and 'FAIL R9' in r.stdout,
+                f'docx 背景技术节缺逐字声明未被 R9 抓到: {show(r)}', r)
+        doc.add_paragraph('以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。')
+        doc.save(bgdoc)
+        r = run([PY, f'{S}/check_iron_rules.py', bgdoc])
+        assert_(r.returncode == 0 and 'FAIL R9' not in r.stdout and 'R9 未判' not in r.stdout,
+                f'docx 补上逐字声明后 R9 未判绿（"没读到节"与"核过了"必须分得开）: {show(r)}', r)
 
         # 三态：没有标题样式的 docx 找不到节 → 必须说"未核"，不能拿"违规 0"冒充核过
         naked = os.path.join(d, '无节标题.docx')
@@ -1090,6 +1109,44 @@ def test_check_iron_rules():
         assert_(r.returncode == 0, 'R8 误判已逐字写入投产总则的报告', r)
         r = gate(d)
         assert_('FAIL R8' not in r.stdout, '非 EVT 文书被 R8 误伤', r)
+
+        # R9 背景技术节的逐字查新声明（hard-rules §2 第三条，第 22 轮普查认定它是
+        # §1–§2 里唯一还剩下的"逐字承诺但无执行点"项，做法照 R8 的逐字串先例）。
+        # 五档缺一不可：缺句必红／写在别处必红（作用域）／软换行必绿（归一）／
+        # 没有本节必未判（骨架底稿那一档）／合规必绿由 IRON_OK_BG 那份夹具守。
+        NOVELTY = '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。'
+        write(d, bg='现有技术 CN110404188A 公开了一种髋关节助力结构，与本案的区别在于载荷传递路径。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'FAIL R9' in r.stdout, 'R9 未拦缺逐字查新声明的稿件', r)
+        # 只出现在别的节（这里塞进权利要求段）不算兑现——判据作用域必须是本节
+        write(d)
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md'),
+                 '--search-report', os.path.join(d, '检索报告.md')])
+        assert_(r.returncode == 0 and 'R9 未判' not in r.stdout,
+                f'合规底稿被 R9 误伤，或该档其实是"未判"冒充的绿: {show(r)}', r)
+        open(os.path.join(d, '别处.md'), 'w', encoding='utf8').write(
+            _iron(bg='现有技术 CN110404188A 公开了一种髋关节助力结构。', claims=NOVELTY + '\n1. 一种装置，包括躯干框架。'))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '别处.md')])
+        assert_(r.returncode == 1 and 'FAIL R9' in r.stdout,
+                '声明句只出现在权利要求段也被当成"背景技术已声明"（作用域丢了）', r)
+        # 软换行不是改措辞：把句子拆成两行仍须判绿
+        open(os.path.join(d, '折行.md'), 'w', encoding='utf8').write(
+            _iron(bg='现有技术 CN110404188A 公开了一种髋关节助力结构。\n'
+                     '以上为背景技术的初步检索结果，正式申请前建议由专利代理\n机构进行专业查新检索。'))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '折行.md')])
+        assert_(r.returncode == 0, f'被软换行折断的合规声明被 R9 误判: {show(r)}', r)
+        # 一个标点之差必须仍然红：归一只许剥空白，标点与汉字是措辞的一部分
+        open(os.path.join(d, '改标点.md'), 'w', encoding='utf8').write(
+            _iron(bg='现有技术 CN110404188A 公开了一种髋关节助力结构。\n'
+                     '以上为背景技术的初步检索结果、正式申请前建议由专利代理机构进行专业查新检索。'))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '改标点.md')])
+        assert_(r.returncode == 1 and 'FAIL R9' in r.stdout, '逗号改成顿号后 R9 放行（逐字判据丢了）', r)
+        # 没有背景技术节 ⇒ 未判，不折成违规也不折成合规（new_product_package 的说明书骨架就是这一档）
+        open(os.path.join(d, '无本节.md'), 'w', encoding='utf8').write(
+            '# 说明书\n\n## 附图说明\n\n图 1 为躯干框架结构示意图。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '无本节.md')])
+        assert_(r.returncode == 0 and 'R9 未判' in r.stdout,
+                '缺背景技术节时 R9 未报未判（未判不得折成合规）', r)
 
         # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
         # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）
