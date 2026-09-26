@@ -1310,17 +1310,46 @@ def test_docs_scripts_contract():
 
     doctxt = '\n'.join(open(p, encoding='utf8').read() for p in doc_paths)
 
+    # 取号模式：判据号 1–99。先自测提取器，再信它给出的集合。
+    # 原先四处都只认一位数字 → 任一族扩到第 10 条时：脚本侧把 R10 切成 R1（虚指一条不存在的判据）、
+    # docstring 行「  R10 …」与文档侧 [1-9] 干脆扫不到它——两头各自失效，而这个检查看起来仍是
+    # "双向对齐 PASS"。今天所有族都 ≤9，所以它是潜伏缺陷；潜伏缺陷的修法必须自带反证。
+    # 号一律从 1 起 ⇒ 首位排除 0：只放宽成 \d 的第一版当场把 P0（审查红线那一档）与 R0 读成判据号、
+    # 报出两条"文档虚指"——扩字符类前先在真语料上量假阳性，这一条又是它的一次实测。
+    SCRIPT_RES = (r"Finding\(\s*['\"]([RCFVEGKNQTP][1-9]\d?)(?!\d)",
+                  r'^\s+([RCFVEGKNQTP][1-9]\d?)\s',
+                  r'\u2192 ([NVEGKT][1-9]\d?)(?!\d)')
+    DOC_RE = r'\b([RCFVEGKNQTP][1-9]\d?)\b'
+
+    def _extract_scripts(src):
+        out = set()
+        # re.M 不可省：模式 2 的 ^\s+ 要靠行首锚定才认 docstring 里的判据行；少了它只匹配整个
+        # 字符串开头、一条也取不到——这条自测的第一版就是这么把我抓住的。
+        for pat in SCRIPT_RES:
+            out |= set(re.findall(pat, src, re.M))
+        return out
+
+    # 自测双向：两位数必须被看见；一位数不许被切成两位；0 号与普通文字不算判据号。
+    _probe = (r"Finding('R10 十号判据')" + '\n  R10 两位数行\n  R9 一位数行\n'
+              '  T3 单行\n→ V12\n→ V3\nR1 不该被上面任何一行造出来\n'
+              '  R0 与 P0 也不是判据号（P0 是审查红线那一档）\n')
+    _got = _extract_scripts(_probe)
+    assert_({'R9', 'R10', 'T3', 'V12', 'V3'} == _got,
+            f'提取器对两位数漏判、或把 0 号读成判据: {sorted(_got)}', None)
+    _got_doc = set(re.findall(DOC_RE, 'R10 与 R9 并列，`T3` 也提一次；R1 单独出现也算；'
+                                      'P0/R0 这类优先级与占位号不算'))
+    assert_({'R10', 'R9', 'T3', 'R1'} == _got_doc,
+            f'文档侧取号不认两位数或误收 0 号: {sorted(_got_doc)}', None)
+
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
     for name, s in scripts.items():
-        found = (set(re.findall(r"Finding\(\s*['\"]([RCFVEGKNQTP]\d)", s))
-                 | set(re.findall(r'^\s+([RCFVEGKNQTP]\d)\s', s, re.M))
-                 | set(re.findall(r'\u2192 ([NVEGKT]\d)', s)))
+        found = _extract_scripts(s)
         for t in found:
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(r'\b([RCFVEGKNQTP][1-9])\b', doctxt))
+    doc_rules = set(re.findall(DOC_RE, doctxt))
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
