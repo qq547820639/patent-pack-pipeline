@@ -2759,10 +2759,12 @@ def test_search_report_docx_channel():
 
 
 def test_check_claims():
-    """权利要求形状门禁 Q1–Q8：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
+    """权利要求形状门禁 Q1–Q11：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
 
     合规档必须先过：Q4/Q5 这种"两支互斥"的判据一旦把合规写法也判红，整套就是永久红灯。
     q4 档刻意写成"引用号都在前"，让它只点亮 Q4——同档撞两支判据时，读数说不清是谁在咬。
+    Q9–Q11（法源换成《专利审查指南》2023）按同一条规矩配档：每支必红档都用 `fired()` 断言
+    "这一档只点亮它自己那一支"，反向档则钉住中文没有词边界时那些同形却合规的写法。
     """
     TBL = ('## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
            '| 1 | 躯干框架 | 1 |\n| 2 | 锁扣本体 | 1 |\n')
@@ -2780,11 +2782,23 @@ def test_check_claims():
         open(os.path.join(root, '02_申请文件', '说明书.md'), 'w', encoding='utf8').write(body)
         return root
 
+    def fired(out):
+        """违规行（非 note 行）里点到的判据号集合——开火与否按整号取，不按子串。
+
+        两个实测的坑都在这把尺子上：①三态的 note 行也写 `→ Q5 未核`／`→ Q6 部分未判`，
+        拿子串判"开火"会把未判读成判红（Q6 那档已经踩过一次）；②`→ Q1` 是 `→ Q11` 的前缀，
+        逐条 `in` 判会把 Q11 的开火读成 Q1 的开火。Q9–Q11 的归因（"这一档只点亮它自己"）
+        全靠整号集合，函数头那句"同档撞两支判据时读数说不清是谁在咬"到这里才有机器可判的形状。
+        """
+        return set(re.findall(r'→ (Q\d+)(?!\d)',
+                              '\n'.join(ln for ln in out.splitlines()
+                                        if ln.startswith('  ') and not ln.startswith('  note '))))
+
     with tempfile.TemporaryDirectory() as d:
         ok = mkpkg(os.path.join(d, 'ok'), OK)
         r = run([PY, f'{S}/check_claims.py', ok])
-        assert_(r.returncode == 0 and '实判判据 6 条' in r.stdout and '→ Q' not in r.stdout,
-                f'合规权要被判红，或六条没各判到: {show(r)}', r)
+        assert_(r.returncode == 0 and '实判判据 9 条' in r.stdout and '→ Q' not in r.stdout,
+                f'合规权要被判红，或九条没各判到: {show(r)}', r)
         # 填充本身要合规：7 项从属两档都容得下，所以既不该红、也不该冒出"部分未判"的噪声
         assert_('Q6 部分未判' not in r.stdout, f'两档都容得下时 Q6 仍报未判: {show(r)}', r)
 
@@ -2861,7 +2875,7 @@ def test_check_claims():
         os.makedirs(p)
         open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
         r = run([PY, f'{S}/check_claims.py', p])
-        assert_(r.returncode == 0 and 'Q1–Q8 未判' in r.stdout,
+        assert_(r.returncode == 0 and 'Q1–Q11 未判' in r.stdout,
                 f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
         # 三态的另一半：有节却一行权项都没解析出。未判的理由必须是「无项」而不是「无节」，
         # 否则读者按提示回去找那一节，会发现节好好地在那里。
@@ -2901,7 +2915,7 @@ def test_check_claims():
                     t.cell(i, j).text = v
             doc.save(os.path.join(wd, '说明书.docx'))
             r = run([PY, f'{S}/check_claims.py', wd])
-            assert_(r.returncode == 0 and '实判判据 6 条' in r.stdout,
+            assert_(r.returncode == 0 and '实判判据 9 条' in r.stdout,
                     f'Word-only 权要未被 Q 真判（只认 md 的话这里假绿或成串假红）: {show(r)}', r)
             bad_doc = os.path.join(d, 'wordbad')
             os.makedirs(bad_doc)
@@ -2965,8 +2979,124 @@ def test_check_claims():
         r = run([PY, f'{S}/check_claims.py', p])
         assert_('→ Q8' not in r.stdout,
                 f'说明书节里的"如图…所示"被 Q8 越域判了（Q 只吃权要节）: {show(r)}', r)
-    print('PASS check_claims（Q1–Q8 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
-          'Q7 嵌图两通道 + Q8 引用语作用域 + rc=2）')
+
+        # ── Q9／Q10／Q11（《专利审查指南》2023 第二部分第二章 §3.2.2 与 §3.3）──────────
+        # 三条的主语都是"权利要求中／每一项权利要求"，判在**每一项权项之内**：
+        # 正向档各钉一支"咬得动"，反向档各钉一支"中文没有词边界时不许越界咬人"。
+        # 归因一律走 fired()——同档撞两支判据时读数说不清是谁在咬（见函数头）。
+        # 位点都用权项 3 那一行：它既是合规档的一部分，改它就不动别的判据的输入。
+        for term in ('例如', '最好是', '尤其是', '必要时'):
+            p = os.path.join(d, 'q9_' + term)
+            mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                                '其特征在于：所述弹臂为金属材料' + term + '钛合金。'))
+            r = run([PY, f'{S}/check_claims.py', p])
+            assert_(r.returncode == 1 and fired(r.stdout) == {'Q9'}
+                    and f'权利要求 3 里出现「{term}」' in r.stdout,
+                    f'权要里的模糊用语未被 Q9 抓到（「{term}」）: {show(r)}', r)
+        # 反向：指南同一节还有"厚／薄／强／弱"那支，本门禁**没收**——中文无词边界，
+        # "压缩强度"里的"强"会当场开火。这条合规写法钉住"词表没被悄悄扩宽"。
+        p = os.path.join(d, 'q9clean')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                            '其特征在于：所述弹臂的压缩强度高于所述锁扣本体，弹性模量随之提高。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'合规权要被 Q9 误伤（压缩强度里的强不在指南点名的那四个词里）: {show(r)}', r)
+
+        # Q10 两半各自成对：数值形状「约＋数字」与逐字短语「或类似物」是两条独立触发路径，
+        # 合在一条断言里会让"关掉一半"的变异读起来像"整条还在"。
+        p = os.path.join(d, 'q10num')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                            '其特征在于：所述弹臂的厚度约 2mm。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and fired(r.stdout) == {'Q10'}
+                and '权利要求 3 里「约 2」' in r.stdout and '限定数值' in r.stdout,
+                f'权要里"约＋数字"未被 Q10 抓到: {show(r)}', r)
+        p = os.path.join(d, 'q10sim')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                            '其特征在于：所述弹臂为钛合金或类似物。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and fired(r.stdout) == {'Q10'}
+                and '权利要求 3 里出现「或类似物」' in r.stdout,
+                f'权要里「或类似物」未被 Q10 抓到: {show(r)}', r)
+        # 反向：指南同一句里的"接近"与"等"两个词登记为**不判**——"接近开关"是真实部件名、
+        # "等待"与"约定"是构词成分。约字要撞上也只在"约＋数字"那一支撞，"约定的…0.2mm" 不撞。
+        p = os.path.join(d, 'q10clean')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                            '其特征在于：所述弹臂装有接近开关，锁扣等待到位信号后释放，'
+                            '弹臂与锁扣本体约定的配合间隙为 0.2mm。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'接近开关／等待／约定这类同形合规写法被 Q10 误伤: {show(r)}', r)
+
+        # Q11 只判"结尾之前出现句号"：①一行里两个句号 ②多行权项里非末那行以句号收尾。
+        p = os.path.join(d, 'q11')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。',
+                            '其特征在于：所述弹臂为钛合金。所述弹臂表面镀硬铬。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and fired(r.stdout) == {'Q11'}
+                and '权利要求 3 在结尾之前出现了句号' in r.stdout,
+                f'权要一行里结尾之前的句号未被 Q11 抓到: {show(r)}', r)
+        p = os.path.join(d, 'q11mid')
+        mkpkg(p, OK.replace('\n## 图中标记说明',
+                            '\n9. 根据权利要求 1 所述的锁扣装置，其特征在于：所述弹臂设有卡齿。\n'
+                            '   且所述卡齿表面镀硬铬。\n## 图中标记说明'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and fired(r.stdout) == {'Q11'}
+                and '权利要求 9 在结尾之前出现了句号' in r.stdout,
+                f'多行权项里非结尾那行的句号未被 Q11 抓到: {show(r)}', r)
+        # 反向①：整项没有结尾句号。**不判**——指南那句是给句号划界，不是设"必须以句号收尾"的
+        # 义务，反过来判等于自造一条法条里没有的禁令（电池 claims 档那条判严臂咬的就是这格）。
+        p = os.path.join(d, 'q11open')
+        mkpkg(p, OK.replace('其特征在于：所述弹臂为钛合金。', '其特征在于：所述弹臂为钛合金'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'权要结尾没有句号被 Q11 判红（那句是划界不是义务）: {show(r)}', r)
+        # 反向②：合规的多行权项——分行处分号／逗号收尾，只有末行带句号（实用新型 §7.4 那句
+        # "分行和分小段处只可用分号或逗号"的正面写法）。
+        p = os.path.join(d, 'q11mlclean')
+        mkpkg(p, OK.replace('\n## 图中标记说明',
+                            '\n9. 根据权利要求 1 所述的锁扣装置，其特征在于：所述弹臂设有卡齿；\n'
+                            '   所述卡齿表面镀硬铬，且与锁扣本体铰接。\n## 图中标记说明'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'合规的多行权项被 Q11 误伤: {show(r)}', r)
+
+        # 位点控制：Q11 报的行必须是"触发那个句号所在的那一行"，不是权项抬头行、也不是节首行。
+        # 坐标不抄门禁自己的行号基准（它这里报的是 body 下标，比 check_iron_rules／check_figures
+        # 的 1-based 小一行——本轮不改 scripts/，已写进收尾报告），而是拿同一次读数里 Q6 报出的
+        # 权项抬头行当原点：两档只差"多余的句号落在该项第几行"，报的号必须跟着走一步。
+        # Q11 若永远报抬头行，B 档当场红；若报项末行，A 档当场红。
+        def coord(out):
+            m = re.search(r':(\d+): 从属权利要求', out)
+            return int(m.group(1)) if m else None
+
+        for tag, item, want_off in (
+                # 多余句号落在抬头那一行（该项还有第二行，所以抬头那行的句号不是结尾）
+                ('A', '1. 一种锁扣装置，包括躯干框架（1）与锁扣本体（2）。\n所述弹臂为钛合金。\n', 0),
+                # 同一项多写一行，把多余句号推到第二行
+                ('B', '1. 一种锁扣装置，包括躯干框架（1）与锁扣本体（2）\n'
+                     '所述弹臂为钛合金。\n所述卡齿设有倒角。\n', 1)):
+            p = os.path.join(d, 'q11line' + tag)
+            mkpkg(p, '# 说明书\n## 权利要求书\n' + item + TBL)
+            r = run([PY, f'{S}/check_claims.py', p])
+            n0, hits = coord(r.stdout), [ln for ln in r.stdout.splitlines() if '→ Q11' in ln]
+            assert_(r.returncode == 1 and n0 is not None and len(hits) == 1
+                    and f':{n0 + want_off}:' in hits[0],
+                    f'Q11 报的行号没跟着触发句号那一行走（{tag} 档应报抬头行 {n0} 之后第 {want_off} 行）'
+                    f': {show(r)}', r)
+
+        # 作用域：三条都判在权项之内——同一批词与同一批句号写在说明书节里，一律不许开火
+        # （与 q8scope 同一形状的控制，只是原告换成指南那三句的词表）。
+        p = os.path.join(d, 'q9to11scope')
+        mkpkg(p, OK + '\n## 具体实施方式\n例如将弹臂设为钛合金，必要时把厚度设为约 2mm。'
+                      '装置包括框架。框架包括底座。底座装有接近开关。\n')
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'说明书节里的例如／必要时／约＋数字／行中句号被 Q9–Q11 越域判了（三条只吃权项之内）'
+                f': {show(r)}', r)
+    print('PASS check_claims（Q1–Q11 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
+          'Q7 嵌图两通道 + Q8 引用语作用域 + Q9 四词各一档 + Q10 两半各成对（约＋数字／或类似物）'
+          '+ Q11 两种位点／无结尾句号不判红／合规多行权项 + 行号随触发行移动 + Q9–Q11 出域不判 + rc=2）')
 
 
 def test_figure_text_channel():

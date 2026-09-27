@@ -72,6 +72,30 @@ MUTS = {
         ('Q8 引用语判据关掉（"如图…所示"指回别处也照过）', CQ,
          '        if CLAIM_FIG_REF.search(ln) or CLAIM_SPEC_REF.search(ln):', '        if False:',
          '权要里"如图…所示"未被 Q8 抓到'),
+        # Q9／Q10／Q11（法源换成《专利审查指南》2023 §3.2.2 与 §3.3）：三支各配一支只关自己的臂。
+        # Q10 的两半（「约＋数字」与「或类似物」）在源码里是 if/elif 两条独立触发路径，
+        # 所以给两支臂——合成一条臂的话"只关掉一半"永远读不出是哪个触发条件掉了。
+        ('Q9 模糊用语判据关掉（权要里写"例如／必要时"也照过）', CQ,
+         '        for term in VAGUE_TERMS:', '        for term in ():',
+         '权要里的模糊用语未被 Q9 抓到'),
+        ('Q10「约＋数字」那一半关掉（数值边界被"约"糊过去也不报）', CQ,
+         '        m = APPROX_SHAPE.search(joined)', '        m = None',
+         '权要里"约＋数字"未被 Q10 抓到'),
+        ('Q10「或类似物」那一半关掉（指南逐字点名的短语不再判）', CQ,
+         '        elif APPROX_PHRASE in joined:', '        elif False:',
+         '权要里「或类似物」未被 Q10 抓到'),
+        ('Q11 句号位点判据关掉（一项里写满句号也照过）', CQ,
+         '        for li, ln in ilines:', '        for li, ln in ():',
+         ('权要一行里结尾之前的句号未被 Q11 抓到', '多行权项里非结尾那行的句号未被 Q11 抓到')),
+        # 判严方向：指南那句是"只允许在结尾处使用句号"（划界），不是"每项必须以句号收尾"（义务）。
+        # 把划界写成义务的注入必须由**反向控制**（权项结尾不带句号仍须全绿）抓住，
+        # 而不是由合规档抓住——OK 那份每项都以句号收尾，判严了它照样全绿。
+        ('Q11 判严方向（划界当成义务：结尾没有句号也判红）', CQ,
+         '        last_line, last_txt = ilines[-1][0], ilines[-1][1].rstrip()',
+         '        last_line, last_txt = ilines[-1][0], ilines[-1][1].rstrip()\n'
+         "        if not last_txt.endswith('。'):\n"
+         "            bad.append(f'{where(last_line)}: 权利要求 {n} 结尾没有句号 → Q11')\n",
+         '权要结尾没有句号被 Q11 判红'),
         ('Q1 编号连续性判据关掉', CQ,
          '    if sorted(nums) != list(range(1, len(nums) + 1)):', '    if False:',
          '权项跳号未被 Q1 抓到'),

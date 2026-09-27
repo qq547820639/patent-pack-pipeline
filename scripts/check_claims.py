@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""权利要求结构门禁 Q1–Q8：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
+"""权利要求结构门禁 Q1–Q11：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
 
 法源逐字对过《专利法实施细则》（2023 修订，国务院令第 769 号）正文：
   第二十二条「权利要求书有几项权利要求的，应当用阿拉伯数字顺序编号」
@@ -10,6 +10,14 @@
             「……只能以择一方式引用在前的权利要求，并不得作为另一项多项从属权利要求的基础」
 条号与原文由本人重开官方页面核对（不是转述）；§4 里"独权须落在区别特征上""设计目标值撤出权要"
 这类要读懂技术方案才能判的，仍然归 reviewer，本门禁不冒充。
+
+Q9–Q11 的法源是《专利审查指南》（2023，国家知识产权局令第 78 号）——细则里没有模糊用语、
+句号位置这类形式细则，是指南把它们写成了可判的形状。三句逐字抄自本机留底的 613 页 PDF 抽取件
+（`.codebuddy/attest/zhinan2023_ahippc.txt`，复算命令见 README §6）：
+  第二部分第二章 §3.2.2（PDF p165／印刷页 2-29）「权利要求中不得出现"例如""最好是""尤其是"
+    "必要时"等类似用语。」
+  同节（PDF p166／2-30）「在一般情况下，权利要求中不得使用"约""接近""等""或类似物"等类似的用语」
+  同部分 §3.3（PDF p166／2-30）「每一项权利要求只允许在其结尾处使用句号。」
 
 判据（只判形状，不判内容）：
   Q1 权项编号必须是从 1 起的连续阿拉伯数字，不得重号/跳号（第二十二条）。
@@ -38,9 +46,24 @@
      只是不假装知道该案是发明还是实用新型（README「专利清单」的"类型"列至今只有表头没有值，
      所以类型今天只能由人告知，机器不去猜）。
 
-三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q8 全部未判（有的交付形态把权要交给代理机构写）；
-      有节但一行权项都解析不出 ⇒ Q1–Q8 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
+  Q9 权项内不得出现"例如／最好是／尤其是／必要时"（指南 §3.2.2 逐字点名的四个词：
+     这类用语会在一项权利要求中限定出不同的保护范围，导致保护范围不清楚）。
+     只收指南逐字点出的那四个，不扩表——同节"厚／薄／强／弱"那支进来就是把尺子变成假红制造机：
+     中文没有词边界，"压缩强度"里的"强"会当场开火（该形状已钉在常驻用例的反向档里）。
+  Q10 权项内不得用"约＋数字"限定数值、不得出现"或类似物"（指南 §3.2.2"在一般情况下…不得使用"）。
+     同句里的"接近"与"等"两个词**不判**："接近开关"是一个真实部件名，"等"是"相等／等待"的构词成分，
+     中文侧没有词边界可退，误伤面在本机量不出来（本仓不含任何真实交付包）。
+     指南那句自己写着"在一般情况下"，例外（例如权利要求里给出精确定义）归 reviewer。
+  Q11 每一项权利要求只允许在结尾处使用句号（指南 §3.3；实用新型侧同文见第一部分第二章 §7.4
+     形式要求（1）"分行和分小段处只可用分号或逗号"）。
+     **只判"结尾之前出现句号"，不判"结尾没有句号"**——指南那句话是给句号划界，
+     不是设定"每项必须以句号收尾"的义务，反过来判会造出一条法条里没有的禁令。
+
+三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q11 全部未判（有的交付形态把权要交给代理机构写）；
+      有节但一行权项都解析不出 ⇒ Q1–Q11 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
       没有标记对照表 ⇒ Q5 未判（括号形状没有可对照的号集）。
+      Q9–Q11 判在**每一项权项之内**，所以它们和"有没有解析出权项"同生死；
+      Q7／Q8 判在整节文本面，权项切不出来时照判。
 退出码: 0 合规或未判 / 1 存在违规 / 2 输入不可用（不是目录、读不动的 docx 等，说清成因）。
 用法: python3 scripts/check_claims.py <交付包目录>   # 只接目录，递归找 .md 与 .docx
 """
@@ -81,6 +104,19 @@ PAREN_SPAN = re.compile(r'[（(][^）)]*[）)]')
 CLAIM_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)|<img\b', re.I)
 CLAIM_FIG_REF = re.compile(r'如图\s*[0-9０-９]{1,3}\s*所示')
 CLAIM_SPEC_REF = re.compile(r'如说明书[^，。；\n]{0,16}部分所述')
+
+# Q9–Q11 的三张表逐字取自《专利审查指南》（2023，国家知识产权局令第 78 号）第二部分第二章，
+# 留底与复算命令见 README §6（PDF 613 页抽取件 .codebuddy/attest/zhinan2023_ahippc.txt）：
+#   p165（印刷页 2-29）§3.2.2「权利要求中不得出现"例如""最好是""尤其是""必要时"等类似用语。」
+#   p166（2-30）§3.2.2「在一般情况下，权利要求中不得使用"约""接近""等""或类似物"等类似的用语」
+#   p166（2-30）§3.3「每一项权利要求只允许在其结尾处使用句号。」
+# 指南只写了"等类似用语"，所以这里只收它逐字点出的那几个词，不自造扩展表——
+# 同一节里"厚／薄／强／弱"那支不进来：中文没有词边界，"压缩强度"里的"强"会把这把尺子变成假红制造机。
+VAGUE_TERMS = ('例如', '最好是', '尤其是', '必要时')
+# 「约」单用会撞"约定／预约"，「接近」撞"接近开关"（那是个真实部件名），「等」撞"相等／等待"
+# ——所以只收"约＋数字"这一种形状和「或类似物」这一个逐字短语；另两个词登记为不判，理由同上。
+APPROX_SHAPE = re.compile(r'约\s*[0-9０-９]')
+APPROX_PHRASE = '或类似物'
 
 
 def read_any(path):
@@ -183,12 +219,12 @@ def check_text(path, text, name2num, marks_found, ptype=None):
     bad, notes, seen = [], [], set()
     cstart, body = claims_body(text)
     if cstart is None:
-        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q8 未判'
+        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q11 未判'
                     f'（权要由代理机构撰写时本就没有这一节）'], seen
     items = split_items(body)
     if not items:
         return [], [f'{path}: 有权利要求书节但一行权项都没解析出（不以「N.」起头？）'
-                    f' → Q1–Q8 未判（有节却无项，整族都判不起）'], seen
+                    f' → Q1–Q11 未判（有节却无项，整族都判不起）'], seen
     where = lambda off: f'{path}:{cstart + 1 + off}'
 
     # Q7／Q8：判在**这一节内**的文本面；与权项解析无关（就算一行权项都切不出来，
@@ -203,6 +239,57 @@ def check_text(path, text, name2num, marks_found, ptype=None):
             bad.append(f'{where(off)}: 权利要求书里用"如图…所示／如说明书…部分所述"指回别的文书'
                        f' → Q8（第二十二条一款；正确写法是把标记放进括号，见 Q5）')
             seen_q78.add('Q8')
+
+    # Q9／Q10／Q11：这三条的主语都是"权利要求中／每一项权利要求"，所以判在**每一项之内**，
+    # 与 Q7／Q8 那张整节文本面分开——节标题下面写了"例如"而权项没写，不该报某一项的位点。
+    # 行号报到触发那一行；权项被软回车切成多行时，先把该项的行拼回一段再找词，
+    # 免得"例\n如"这种跨行写法被静默漏掉（拼回后仍按原行反查位点）。
+    for k, (n, off, _) in enumerate(items):
+        end = items[k + 1][1] if k + 1 < len(items) else len(body)
+        # 表格行不算权项正文（与 T4"正文（表格行之外）"同一口径）：
+        # 权要是自然段，把「标记｜名称」表尾巴卷进最后一项，表里一个"例如"就够造一条假位点。
+        ilines = [(off + j, ln) for j, ln in enumerate(body[off:end])
+                  if ln.strip() and not ln.lstrip().startswith('|')]
+        if not ilines:
+            continue
+        joined = '\n'.join(ln for _, ln in ilines)
+
+        def _at(pos, _lines=ilines):
+            acc = 0
+            for li, ln in _lines:
+                acc += len(ln) + 1
+                if pos < acc:
+                    return li
+            return _lines[-1][0]
+
+        seen |= {'Q9', 'Q10', 'Q11'}
+        for term in VAGUE_TERMS:
+            pos = joined.find(term)
+            if pos != -1:
+                bad.append(f'{where(_at(pos))}: 权利要求 {n} 里出现「{term}」→ Q9'
+                           f'（指南 §3.2.2：这类用语会在一项权利要求中限定出不同的保护范围，'
+                           f'导致保护范围不清楚）')
+        m = APPROX_SHAPE.search(joined)
+        if m:
+            bad.append(f'{where(_at(m.start()))}: 权利要求 {n} 里「{m.group(0)}」用"约"限定数值'
+                       f' → Q10（指南 §3.2.2"在一般情况下…不得使用"；数值边界因此不清楚）')
+        elif APPROX_PHRASE in joined:
+            bad.append(f'{where(_at(joined.find(APPROX_PHRASE)))}: 权利要求 {n} 里出现'
+                       f'「{APPROX_PHRASE}」→ Q10（同上，逐字点名的短语）')
+        last_line, last_txt = ilines[-1][0], ilines[-1][1].rstrip()
+        for li, ln in ilines:
+            for pos, ch in enumerate(ln):
+                if ch != '。':
+                    continue
+                if li == last_line and pos == len(last_txt) - 1:
+                    continue        # 结尾那一个句号正是指南允许的写法
+                bad.append(f'{where(li)}: 权利要求 {n} 在结尾之前出现了句号'
+                           f'（该行第 {pos + 1} 字）→ Q11（指南 §3.3"每一项权利要求只允许'
+                           f'在其结尾处使用句号"；分行处只可用分号或逗号）')
+                break
+            else:
+                continue
+            break
 
     nums = [n for n, _, _ in items]
     seen.add('Q1')
@@ -309,12 +396,12 @@ def check_package(root, ptype=None):
             notes += n
             seen |= s
     if not hit:
-        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q8 未判')
+        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q11 未判')
     return bad, notes, seen
 
 
 def main():
-    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q8（只接目录）')
+    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q11（只接目录）')
     ap.add_argument('targets', nargs='+', help='交付包目录')
     ap.add_argument('--type', default=None,
                     help='本案专利类型（发明／实用新型），决定 Q6 的从属条数档位；'
@@ -342,7 +429,7 @@ def main():
         judged += 1 if seen else 0
         total += len(bad)
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 Q1–Q8，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 Q1–Q11，判据见脚本 docstring）；实判 {judged} 个包')
     sys.exit(1 if total else 0)
 
 
