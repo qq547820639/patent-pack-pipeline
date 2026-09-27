@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""权利要求结构门禁 Q1–Q6：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
+"""权利要求结构门禁 Q1–Q8：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
 
 法源逐字对过《专利法实施细则》（2023 修订，国务院令第 769 号）正文：
   第二十二条「权利要求书有几项权利要求的，应当用阿拉伯数字顺序编号」
@@ -27,11 +27,19 @@
   Q6 从属权利要求条数落在档位内（hard-rules §4：发明 7–10、实用新型 4–8）。
      **这是房内口径不是法条**：细则没有任何条数区间（超过 10 项只是加收申请费，不是驳回理由）。
      类型从 `--type` 给；没给时退到两型并集 4–10 判——它仍能抓到"少到 3 条"和"多到 11 条"，
+  Q7 权利要求书里不得有插图（第二十二条一款"可以有化学式或者数学式，但是不得有插图"）。
+     md 认图片语法（`![…](…)`／`<img`）；docx 通道由 check_iron_rules.docx_text 把含
+     drawing/object/pict 的段落折算成一行 `![](docx-embedded-object)`——判据作用在文本面上，
+     两通道吃同一条正则。**表格里的图不在此列**（表格分支按格取文）：登记为已知盲区，
+     不是"已核无图"。
+  Q8 权利要求书里不得用"如图…所示／如说明书……部分所述"指回别的文书（第二十二条一款；
+     "除绝对必要的外"是法定例外，本判据对带编号的形状判红，无编号的"如图所示"不判、归 reviewer）。
+     正确写法是把标记放进括号（Q5），不是用"如图"指过去。
      只是不假装知道该案是发明还是实用新型（README「专利清单」的"类型"列至今只有表头没有值，
      所以类型今天只能由人告知，机器不去猜）。
 
-三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q6 全部未判（有的交付形态把权要交给代理机构写）；
-      有节但一行权项都解析不出 ⇒ Q1–Q6 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
+三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q8 全部未判（有的交付形态把权要交给代理机构写）；
+      有节但一行权项都解析不出 ⇒ Q1–Q8 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
       没有标记对照表 ⇒ Q5 未判（括号形状没有可对照的号集）。
 退出码: 0 合规或未判 / 1 存在违规 / 2 输入不可用（不是目录、读不动的 docx 等，说清成因）。
 用法: python3 scripts/check_claims.py <交付包目录>   # 只接目录，递归找 .md 与 .docx
@@ -68,6 +76,11 @@ CLAIM_ITEM = re.compile(r'^\s*(\d{1,3})\s*[.、．]\s*(.*)$')
 DEP_REF = re.compile(r'(?:根据|如|依照)\s*(?:该|上述)?\s*权利要求\s*(\d[0-9、,，和及或至~～\-–\s]*)')
 MULTI_HINT = re.compile(r'[、,，]|或|至|~|～|任一|任意|之一')
 PAREN_SPAN = re.compile(r'[（(][^）)]*[）)]')
+# Q7／Q8 的两个形状（细则第二十二条一款）。md 图片语法与 docx 的折算行同一条正则；
+# "如图…所示"要求带编号——无编号的"如图所示"误伤面没量过，不判（docstring 有记）。
+CLAIM_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)|<img\b', re.I)
+CLAIM_FIG_REF = re.compile(r'如图\s*[0-9０-９]{1,3}\s*所示')
+CLAIM_SPEC_REF = re.compile(r'如说明书[^，。；\n]{0,16}部分所述')
 
 
 def read_any(path):
@@ -170,13 +183,26 @@ def check_text(path, text, name2num, marks_found, ptype=None):
     bad, notes, seen = [], [], set()
     cstart, body = claims_body(text)
     if cstart is None:
-        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q6 未判'
+        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q8 未判'
                     f'（权要由代理机构撰写时本就没有这一节）'], seen
     items = split_items(body)
     if not items:
         return [], [f'{path}: 有权利要求书节但一行权项都没解析出（不以「N.」起头？）'
-                    f' → Q1–Q6 未判（有节却无项，整族都判不起）'], seen
+                    f' → Q1–Q8 未判（有节却无项，整族都判不起）'], seen
     where = lambda off: f'{path}:{cstart + 1 + off}'
+
+    # Q7／Q8：判在**这一节内**的文本面；与权项解析无关（就算一行权项都切不出来，
+    # 这两条也判得动——所以放在 items 的早退之后、用 body 直接扫）。
+    seen_q78 = set()
+    for off, ln in enumerate(body):
+        if CLAIM_IMAGE.search(ln):
+            bad.append(f'{where(off)}: 权利要求书里出现插图（md 图片语法／docx 嵌入对象折算行）'
+                       f' → Q7（第二十二条一款"不得有插图"）')
+            seen_q78.add('Q7')
+        if CLAIM_FIG_REF.search(ln) or CLAIM_SPEC_REF.search(ln):
+            bad.append(f'{where(off)}: 权利要求书里用"如图…所示／如说明书…部分所述"指回别的文书'
+                       f' → Q8（第二十二条一款；正确写法是把标记放进括号，见 Q5）')
+            seen_q78.add('Q8')
 
     nums = [n for n, _, _ in items]
     seen.add('Q1')
@@ -262,6 +288,7 @@ def check_text(path, text, name2num, marks_found, ptype=None):
                          f'不当附图标记处理，Q5 未核（不折成合规）')
     else:
         notes.append(f'{path}: 文书里没有「标记｜名称」对照表 → Q5 未判')
+    seen |= seen_q78          # Q7/Q8 与权项解析无关，但"实判判据集合"必须把它们记进去
     return bad, notes, seen
 
 
@@ -282,12 +309,12 @@ def check_package(root, ptype=None):
             notes += n
             seen |= s
     if not hit:
-        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q6 未判')
+        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q8 未判')
     return bad, notes, seen
 
 
 def main():
-    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q6（只接目录）')
+    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q8（只接目录）')
     ap.add_argument('targets', nargs='+', help='交付包目录')
     ap.add_argument('--type', default=None,
                     help='本案专利类型（发明／实用新型），决定 Q6 的从属条数档位；'
@@ -315,7 +342,7 @@ def main():
         judged += 1 if seen else 0
         total += len(bad)
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 Q1–Q6，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 Q1–Q8，判据见脚本 docstring）；实判 {judged} 个包')
     sys.exit(1 if total else 0)
 
 

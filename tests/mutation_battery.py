@@ -63,6 +63,15 @@ TS = 'tests/test_scripts.py'            # 量具自身也算一个目标：常�
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
     'claims': [
+        # Q7／Q8（细则 22 条一款）：插图与"如图…所示"这两格各自要有一支只关自己的臂。
+        ('Q7 插图判据关掉（权要里塞图也照过）', CQ,
+         '        if CLAIM_IMAGE.search(ln):', '        if False:',
+         # 两个合法原告：md 侧与 docx 侧（真嵌图档）各有一条"插图没被抓住"的断言，
+         # docx 那条在测试文件里更靠前，先红的是它——expect 必须写成消费者集合。
+         ('权要里的插图未被 Q7 抓到', 'Word 件里嵌入的插图未被 Q7 抓到')),
+        ('Q8 引用语判据关掉（"如图…所示"指回别处也照过）', CQ,
+         '        if CLAIM_FIG_REF.search(ln) or CLAIM_SPEC_REF.search(ln):', '        if False:',
+         '权要里"如图…所示"未被 Q8 抓到'),
         ('Q1 编号连续性判据关掉', CQ,
          '    if sorted(nums) != list(range(1, len(nums) + 1)):', '    if False:',
          '权项跳号未被 Q1 抓到'),

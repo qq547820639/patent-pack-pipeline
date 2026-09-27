@@ -339,6 +339,12 @@ def docx_text(path):
             out.append('#' * int(m.group(1)) + ' ')
         out.append(txt(p))
         out.append('\n')
+        # 嵌入的图形对象（插图/OLE/旧式 VML）在纯文本抽取里是**看不见的**，
+        # 而 Q7 判的是"权利要求书里不得有插图"——不看这一行，Word 件上 Q7 永远是绿的瞎子。
+        # 折算成一行 md 图片语法：Q7 的正则两通道吃同一份，别处没有判据扫这个形状。
+        # 表格里的图不在此列（表格分支按格取文，见上）——登记为已知盲区，不是"已核无图"。
+        if any(el.tag.endswith(('}drawing', '}object', '}pict')) for el in p.iter()):
+            out.append('![](docx-embedded-object)\n')
     return ''.join(out)
 
 

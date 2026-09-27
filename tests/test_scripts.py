@@ -2734,7 +2734,7 @@ def test_search_report_docx_channel():
 
 
 def test_check_claims():
-    """权利要求形状门禁 Q1–Q6：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
+    """权利要求形状门禁 Q1–Q8：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
 
     合规档必须先过：Q4/Q5 这种"两支互斥"的判据一旦把合规写法也判红，整套就是永久红灯。
     q4 档刻意写成"引用号都在前"，让它只点亮 Q4——同档撞两支判据时，读数说不清是谁在咬。
@@ -2836,7 +2836,7 @@ def test_check_claims():
         os.makedirs(p)
         open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
         r = run([PY, f'{S}/check_claims.py', p])
-        assert_(r.returncode == 0 and 'Q1–Q6 未判' in r.stdout,
+        assert_(r.returncode == 0 and 'Q1–Q8 未判' in r.stdout,
                 f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
         # 三态的另一半：有节却一行权项都没解析出。未判的理由必须是「无项」而不是「无节」，
         # 否则读者按提示回去找那一节，会发现节好好地在那里。
@@ -2893,7 +2893,55 @@ def test_check_claims():
             r = run([PY, f'{S}/check_claims.py', bad_doc])
             assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
                     f'读不动的 docx 崩成异常或退码不是 2: {show(r)} / {r.stderr[-140:]}', r)
-    print('PASS check_claims（Q1–Q6 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + rc=2）')
+
+            # Q7 的 docx 通道：真嵌一张图（不是折算行手抄），看 docx_text 有没有把图形对象
+            # 折算成文本面上的那一行。控制档就是上面 wordonly 那份无图 Word 件（它必须全绿）。
+            imgd = os.path.join(d, 'wordimg')
+            os.makedirs(imgd)
+            tiny = os.path.join(d, 'tiny.png')
+            Image.new('RGB', (16, 8), (255, 0, 0)).save(tiny)
+            doc = Document()
+            doc.add_heading('权利要求书', level=2)
+            doc.add_paragraph('1. 一种装置，包括甲。')
+            doc.add_picture(tiny)
+            doc.save(os.path.join(imgd, '说明书.docx'))
+            r = run([PY, f'{S}/check_claims.py', imgd])
+            assert_(r.returncode == 1 and '→ Q7' in r.stdout,
+                    f'Word 件里嵌入的插图未被 Q7 抓到（折算行没生效）: {show(r)}', r)
+
+        # Q7／Q8（细则 22 条一款）：权要里不得有插图、不得用"如图…所示／如说明书…部分所述"指回别处。
+        # 必红各配对向：合规档不红（第一档已顺带证）、"如图…"写在说明书节里不归 Q 管
+        # （Q 只吃权要节）、括注式写法不是 22 条禁的那种指回。
+        p = os.path.join(d, 'q7')
+        # 插图必须落在**权要节内**：OK 的结尾是「图中标记说明」表（另一个节），
+        # 追加在文件尾的话 Q7 根本看不见——那测的是"节切分"不是"插图"。
+        mkpkg(p, OK.replace('\n## 图中标记说明', '\n![结构图](图1.png)\n## 图中标记说明'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '→ Q7' in r.stdout,
+                f'权要里的插图未被 Q7 抓到: {show(r)}', r)
+        p = os.path.join(d, 'q7clean')
+        mkpkg(p, OK)
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and '→ Q7' not in r.stdout,
+                f'合规权要被 Q7 误伤: {show(r)}', r)
+        p = os.path.join(d, 'q8')
+        mkpkg(p, OK.replace('其特征在于：所述锁扣本体设有卡齿4。',
+                            '其特征在于：所述弹臂如图 3 所示布置。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and '→ Q8' in r.stdout,
+                f'权要里"如图…所示"未被 Q8 抓到: {show(r)}', r)
+        p = os.path.join(d, 'q8spec')
+        mkpkg(p, OK.replace('其特征在于：所述锁扣本体设有卡齿4。',
+                            '其特征在于：如说明书第三部分所述，所述弹臂设有卡齿。'))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_('→ Q8' in r.stdout, f'"如说明书…部分所述"未被 Q8 抓到: {show(r)}', r)
+        p = os.path.join(d, 'q8scope')
+        mkpkg(p, OK + '\n## 说明书\n如图 1 所示，装置包括框架。\n')
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_('→ Q8' not in r.stdout,
+                f'说明书节里的"如图…所示"被 Q8 越域判了（Q 只吃权要节）: {show(r)}', r)
+    print('PASS check_claims（Q1–Q8 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
+          'Q7 嵌图两通道 + Q8 引用语作用域 + rc=2）')
 
 
 def test_figure_text_channel():
