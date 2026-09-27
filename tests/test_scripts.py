@@ -328,11 +328,14 @@ def test_rebuild_package():
             os.makedirs(os.path.join(pkg, seg))
         open(os.path.join(pkg, 'README.md'), 'w', encoding='utf8').write(
             '# T包 专利交付包\n\n## 专利清单\n\n| 序号 | 专利名称 | 类型 |\n|---|---|---|\n')
-        # 三件齐（P10）＋附图说明（N1）：第五份"合规范本"被新判据照红的那一处，
-        # 红得对——02_申请文件 法定就是摘要／权要／说明书三件，夹具只写一件等于替判据造假绿。
+        # 三件齐（P10）＋五节（P12）＋附图说明（N1）：第六份"合规范本"被新判据照红的那一处，
+        # 红得对——02_申请文件 法定就是摘要／权要／说明书三件，夹具只写一件等于替判据造假绿；
+        # 同一份说明书又要按二十条一款带齐五节，这次补的是那五节（本包无图，附图说明是条件项）。
         open(os.path.join(pkg, '02_申请文件', '说明书_T包.md'), 'w', encoding='utf8').write(
             '# T包 申请文件（说明书骨架）\n\n## 说明书摘要\n\n躯干框架。\n'
             '## 权利要求书\n\n1. 一种躯干框架。\n\n## 说明书\n\n正文。\n'
+            '## 技术领域\n\n可穿戴设备。\n## 背景技术\n\n在先技术。\n'
+            '## 发明内容\n\n方案要点。\n## 具体实施方式\n\n实施例一。\n'
             '\n## 附图说明\n\n图 1 为躯干框架结构示意图。\n')
         src = os.path.join(pkg, '01_交底书', '交底书.md')
         BODY = '中文内容测试' * 8
@@ -412,9 +415,13 @@ def test_rebuild_package():
             # 三件齐（P10）：骨架期那份只有"正文"两个字的说明书，P10 一上去就红了——
             # 这是设计好的反馈：02_申请文件 的法定件本来就是摘要／权要／说明书三件，
             # 夹具若只写一件，"缺一件会不会真拦住"那条断言就永远不红。
+            # 五节名在这里**硬写**而不是 import 判据常量：抄了常量，改名时夹具跟着改，
+            # "少一节会不会真拦住"那条断言就永远不红（R9/P10 同一先例）。
             open(os.path.join(p, '02_申请文件', '说明书.md'), 'w', encoding='utf8').write(
                 '# 申请文件\n## 说明书摘要\n摘要正文\n## 权利要求书\n1. 一种装置。\n'
-                '## 说明书\n正文\n' if not empty_app else '')
+                '## 说明书\n正文\n## 技术领域\n可穿戴设备。\n## 背景技术\n在先技术。\n'
+                '## 发明内容\n方案要点。\n## 附图说明\n见随包图样。\n'
+                '## 具体实施方式\n实施例一。\n' if not empty_app else '')
             return p
 
         v = rp.shape_violations(mkshape('形状包_合规'))
@@ -519,8 +526,11 @@ def test_rebuild_package():
                 open(os.path.join(app, '坏件.docx'), 'wb').write(b'not a zip')
             return p
 
+        # 五节一起带上（P12）：FULL3 是 P10/P11 各档的"合规范本"，不带五节就会被 P12 照红，
+        # 而那些档测的是缺件/遮蔽，不是五节齐——正本清源是补夹具，不是放宽判据。
         FULL3 = ('# 申请文件\n## 说明书摘要\nx\n## 权利要求书\n1. 一种装置。\n'
-                 '## 说明书\ny\n## 说明书附图\n图1\n')
+                 '## 说明书\ny\n## 技术领域\nz1\n## 背景技术\nz2\n## 发明内容\nz3\n'
+                 '## 附图说明\nz4\n## 具体实施方式\nz5\n## 说明书附图\n图1\n')
         b, n = rp.shape_state(mkapp('P10_三件齐', FULL3))
         assert_(b == [] and not any('P10' in x for x in n),
                 f'三件齐的申请文件被 P10 误伤: {b} / {n}', None)
@@ -535,8 +545,10 @@ def test_rebuild_package():
                 and any('「说明书」' in x for x in b) and any('「权利要求书」' in x for x in b),
                 f'摘要/附图被当成说明书，或缺件报少了: {b}', None)
         b, _ = rp.shape_state(mkapp('P10_带编号括注',
-                                    '# 申请文件\n### 1. 说明书（技术领域/发明内容）\n'
-                                    '### 2. 权利要求书（取自交底书 §6）\n### 3. 说明书摘要（≤300 字）\n'))
+                                    '# 申请文件\n### 1. 说明书（正文另存）\n'
+                                    '### 2. 权利要求书（取自交底书 §6）\n### 3. 说明书摘要（≤300 字）\n'
+                                    '### 4. 技术领域（可穿戴设备）\n### 5. 背景技术（引证在先技术）\n'
+                                    '### 6. 发明内容\n### 7. 附图说明\n### 8. 具体实施方式\n'))
         assert_(b == [], f'节名带编号与尾注时 P10 误伤: {b}', None)
         try:
             from docx import Document
@@ -569,7 +581,10 @@ def test_rebuild_package():
         # P10 那句"归 P11 判"的说明里就含 P11 三个字，字面判会把说明读成开火。
         assert_(b == [] and not any(x.startswith('P11') for x in n),
                 f'交了简要说明又有图的外观设计包被 P11 误伤: {b} / {n}', None)
-        def mkonly(tag, cells, names):
+        SPEC5 = ('技术领域', '背景技术', '发明内容', '附图说明', '具体实施方式')
+        SPEC4 = ('技术领域', '背景技术', '发明内容', '具体实施方式')
+
+        def mkonly(tag, cells, names, img=True):
             p = mktbl(tag, cells)                       # 先造表，再清 02 段重建内容
             app = os.path.join(p, '02_申请文件')
             for f in os.listdir(app):
@@ -578,7 +593,21 @@ def test_rebuild_package():
             for nm in names:
                 open(os.path.join(app, nm + '.md'), 'w', encoding='utf8').write(
                     '# %s\n## %s\n正文若干。\n' % (nm, nm))
-            open(os.path.join(app, '主视图.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
+            if img:      # 图的有无是 P12 的条件项输入，必须可由夹具控制
+                open(os.path.join(app, '主视图.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
+            return p
+
+        def mkspec(tag, cells, names, png=1, split=False):
+            """P12 的夹具：先把 P10 那三件立齐（否则测的是 P10 不是 P12），
+            再把 names 里的五节按 split 写进一份或几份文书。"""
+            p = mkonly(tag, cells, ['说明书摘要', '权利要求书', '说明书'], img=bool(png))
+            app = os.path.join(p, '02_申请文件')
+            for nm in names:
+                fn = ('说明书_%s.md' % nm) if split else '说明书.md'
+                with open(os.path.join(app, fn), 'a', encoding='utf8') as f:
+                    f.write('## %s\n%s：正文若干。\n' % (nm, nm))
+            if png:
+                open(os.path.join(app, '图1.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
             return p
 
         # 缺简要说明：单这一件坏，就该只点这一个名（图已经给了）
@@ -609,8 +638,7 @@ def test_rebuild_package():
                 any('P11 的"没图"' in x for x in n),
                 f'同一件"全包零图"被判成两个原告，或那件 note 没说清: {b} / {n}', None)
         # 清单没列外观设计 ⇒ 不适用（与"没列实用新型"对偶，连没图也不报）
-        b, n = rp.shape_state(mkonly('P11_未列外观', ['发明'],
-                                     ['说明书摘要', '权利要求书', '说明书']))
+        b, n = rp.shape_state(mkspec('P11_未列外观', ['发明'], list(SPEC5)))
         assert_(b == [] and not any(x.startswith('P11') for x in b + n),
                 f'只列发明的包被 P11 管上了（适用域越界）: {b} / {n}', None)
         # 类型格还是占位 ⇒ 未判，不折成"没交"也不折成合规
@@ -651,6 +679,62 @@ def test_rebuild_package():
                 not any('P10 不适用' in x for x in n),
                 f'类型还没定时 P10 被折成"这一支不受要求"（未判当豁免）: {b} / {n}', None)
 
+        # P12：细则第二十条一款的说明书五节（技术领域／背景技术／发明内容／附图说明／具体实施方式），
+        # 二款还要求"按照前款规定的方式和顺序撰写…并在每一部分前面写明标题"⇒ 认的是**节标题**，
+        # 不是正文里提到这几个词。两条口径缺一不可，否则判据会松成"出现过就行"：
+        #   ① 必须**同一份**说明书里齐（拼盘式满足不算）；
+        #   ② 附图说明只在"这份说明书所属的包有图"或实用新型时才要（20 条（四）写的是"说明书有附图的"）。
+        b, n = rp.shape_state(mkspec('P12_五节齐', ['发明'], list(SPEC5)))
+        assert_(b == [] and not any(x.startswith('P12') for x in n),
+                f'五节齐的发明说明书被 P12 误伤: {b} / {n}', None)
+        b, _ = rp.shape_state(mkspec('P12_缺两节', ['发明'], ['技术领域', '附图说明', '具体实施方式']))
+        assert_(sum(x.startswith('P12') for x in b) == 2 and
+                all('背景技术' in x or '发明内容' in x for x in b if x.startswith('P12')),
+                f'缺两节没被 P12 逐节点出来（或牵连误报了别的）: {b}', None)
+        # 拼盘：五节各写在各文件里 ⇒ 并集会读成齐，P12 必须看穿
+        b, _ = rp.shape_state(mkspec('P12_拼盘不算', ['发明'], list(SPEC5), split=True))
+        assert_(any(x.startswith('P12') for x in b),
+                f'五节被拆成五份文件仍被读成"说明书五节齐": {b}', None)
+        # 发明＋全包零图 ⇒ 附图说明不硬要（20 条（四）的条件句）
+        b, _ = rp.shape_state(mkspec('P12_无图发明免附图说明', ['发明'], list(SPEC4), png=0))
+        assert_(b == [], f'没有附图的发明包被 P12 要求"附图说明"这一节: {b}', None)
+        # 实用新型 ⇒ 图是 44 条（一）的硬要求，附图说明这一节也就跟着要（有图的那档已测在上面）
+        b, _ = rp.shape_state(mkspec('P12_实用新型有图缺附表', ['实用新型'], list(SPEC4), png=1))
+        assert_(any(x.startswith('P12') and '附图说明' in x for x in b),
+                f'有图的包缺「附图说明」节没被 P12 点出: {b}', None)
+        # 类型未定（占位）⇒ 与 P10 同口径照判；只列外观设计 ⇒ 不适用（那一支根本没有说明书）
+        b, n = rp.shape_state(mkbrief('P12_只列外观', ['外观设计'], png=1, brief=BRIEF))
+        assert_(b == [] and any('P12 不适用' in x for x in n) and
+                any('P10 不适用' in x for x in n),
+                f'外观设计包被按发明口径要三件或五节（或不适用这件事没说出口）: {b} / {n}', None)
+        b, n = rp.shape_state(mkonly('P12_无说明书那份', ['发明'],
+                                     ['说明书摘要', '权利要求书']))
+        assert_(any(x.startswith('P10') for x in b) and
+                any('P12 未判' in x for x in n),
+                f'连「说明书」节都没有时，P12 该说未判而不是再判一遍缺件: {b} / {n}', None)
+
+        # 模板 §2 是给人抄的那份形状：它若与 P10/P12 对不上，判据就是在判红自己的范本
+        # （V5 第一版犯的正是这个错，红在自家 templates §10 上）。所以把那段 markdown
+        # **原样**取出来当文书喂进去——不另抄一份"我以为模板长什么样"的字符串。
+        tpl = open(os.path.join(ROOT, 'references', 'templates.md'), encoding='utf8').read()
+        seg = tpl.split('## 2. CNIPA 申请文件草稿模板', 1)
+        assert_(len(seg) == 2, '模板 §2 的标题变了，这条"范本必须开箱过门禁"的断言就空转了', None)
+        body = seg[1].split('```', 2)[1]
+        assert_('### 附图说明' in body and '## 说明书（' in body,
+                '模板 §2 里五节不是各自立标题（P12 会判红自己的范本）', None)
+        tp = mkonly('P12_模板§2形状', ['发明'], [])
+        open(os.path.join(tp, '02_申请文件', '申请文件.md'), 'w', encoding='utf8').write(body)
+        b, n = rp.shape_state(tp)
+        assert_(b == [], f'照 templates §2 写出来的申请文件被 P10/P12 判红: {b} / {n}', None)
+        # 反向：把模板里那五个小标题去掉（回到旧写法"五节挤在一个括注里"），P12 必须逐节点出五条
+        stripped = body.replace('### 技术领域\n### 背景技术\n### 发明内容\n### 附图说明\n'
+                                '### 具体实施方式\n', '')
+        assert_(stripped != body, '模板 §2 里那五行标题变了，这个反向对照没改动任何东西', None)
+        open(os.path.join(tp, '02_申请文件', '申请文件.md'), 'w', encoding='utf8').write(stripped)
+        b, _ = rp.shape_state(tp)
+        assert_(sum(x.startswith('P12') for x in b) == 5,
+                f'五节被收回括注后 P12 没有逐节点出五条: {b}', None)
+
         # 形状判据必须走得到真入口：main() 打完包后要能报出来（否则 shape 只在单元里活着）
         rpk = mkshape('形状包_走main', drop='05_法规与裁决')
         r = run([PY, f'{S}/rebuild_package.py', rpk])
@@ -670,10 +754,32 @@ def test_rebuild_package():
                  mkbrief('P11_走main红', ['外观设计'], png=1)])
         assert_(r.returncode == 1 and 'P11' in r.stdout and '简要说明' in r.stdout,
                 f'缺简要说明的外观设计包从 main() 出去时没被点名: {show(r)}', r)
+        # 自报区间的上界必须由源码现推（与 check_iron_rules 那把 R 号尺子同一条纪律）。
+        # 本轮实测到四处 "P1–P11" 是一个中断补丁没落盘留下的旧值——判据加了 P12 而自述还说 11，
+        # 契约只看文档侧的区间，看不见脚本自己这两行。
+        rpsrc = open(f'{S}/rebuild_package.py', encoding='utf8').read()
+        pk = sorted({int(x) for x in re.findall(r"(?:bad|notes)\.append\((?:f|)['\"]P([1-9]\d?)(?!\d)", rpsrc)} |
+                    {int(x) for x in re.findall(r'^\s{2}P([1-9]\d?)\s', rpsrc, re.M)})
+        assert_(pk and pk[0] == 1, f'P 号现推结果不像话（应从 P1 起）：{pk}', None)
+        # 提取器自带的反证：两位数必须看得见，否则会退化成"永远说 P1–P9"而无人察觉
+        _psrc = ('  P9 九号\n  P12 十二号\nbad.append(\'P10 报文\')\n'
+                 'bad.append(f"P11 报文")\nnotes.append(\'P8／P9 未判\')\nP0 不是判据号\n')
+        _pp = sorted({int(x) for x in re.findall(
+            r"(?:bad|notes)\.append\((?:f|)['\"]P([1-9]\d?)(?!\d)", _psrc)} | {int(x) for x in re.findall(
+            r'^\s{2}P([1-9]\d?)\s', _psrc, re.M)})
+        assert_(_pp == [8, 9, 10, 11, 12], f'P 号提取器对两位数漏判或误收 0 号：{_pp}', None)
+        for claim in (f'MISMATCH（P1–P{pk[-1]}）', f'（P1–P{pk[-1]} 任一）'):
+            assert_(claim in rpsrc,
+                    f'打包门禁自报的区间与实际判据 P1–P{pk[-1]} 不一致：缺 {claim}', None)
+        assert_(re.search(r'包形状 P5–P9 判', open(os.path.join(ROOT, 'references', 'hard-rules.md'),
+                                                   encoding='utf8').read()) is None,
+                'hard-rules §8 还说 P5–P9 判包形状（区间落后于判据）', None)
+
     print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / '
           'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / '
           'P10 三件齐含遮蔽与未核＋只列外观设计不套发明口径（三向各一档） / '
-          'P11 外观设计两件含建议稿遮蔽与两型同列不重复报 / rc=2 三档）')
+          'P11 外观设计两件含建议稿遮蔽与两型同列不重复报 / '
+          'P12 说明书五节齐含拼盘不认、附图说明条件项与模板§2 正反两档 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):

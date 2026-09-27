@@ -135,7 +135,21 @@ def spec_doc(name):
     # 生成器另抄一份节名就是给"P10 绿而骨架没那节"这种漂移留活路。
     for s in _rp.APPLY_SECTIONS:
         parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
+    # 细则第二十条一款那五节同样由判据侧持有（P12 与生成器一份，两端各抄迟早漂）。
+    # 背景技术这一节必须带上 R9 那句逐字查新声明：P12 把该节从"没有本节⇒R9 未判"
+    # 变成"有节⇒R9 要句"，不带的话骨架自己就过不了铁律门禁——这是设计好的反馈，不是要绕的误伤。
+    hints = dict(_nl.DOC_SECTIONS)
+    for s in _rp.SPEC_SECTIONS:
+        if s == '背景技术':
+            parts.append('## 背景技术\n【待填写：最接近的在先技术与本案区别特征】\n'
+                         + _c.NOVELTY_CLAUSE)
+        elif s in hints:
+            parts.append(f'## {s}\n{hints[s]}')
+        else:
+            parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
     for title, hint in _nl.DOC_SECTIONS:
+        if title in _rp.SPEC_SECTIONS:
+            continue                      # 附图说明 已按五节发过，重复立节会有两个同名节
         body = hint if hint else f'{_nl.header_row()}\n{_nl.separator_row()}'
         parts.append(f'## {title}\n{body}')
     return '\n'.join(parts) + '\n'

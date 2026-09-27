@@ -499,11 +499,33 @@ MUTS = {
          '        for s in miss:', '        for s in ():',
          ('缺权利要求书没被 P10 抓到', '摘要/附图被当成说明书，或缺件报少了')),
         ('P10 退回"包含"认节（摘要与附图冒充说明书）', RP,
-         '    return [s for s in APPLY_SECTIONS if s not in seen], unread',
-         '    return [s for s in APPLY_SECTIONS if not any(s in h for h in seen)], unread',
+         '    miss = [s for s in APPLY_SECTIONS if s not in aseen]',
+         '    miss = [s for s in APPLY_SECTIONS if not any(s in h for h in aseen)]',
          '摘要/附图被当成说明书，或缺件报少了'),
+        # P12 四条：整条不跑／适用域跟着 P10 走歪／"同一份说明书"这条被放宽成并集／
+        # 附图说明的条件项被当成无条件项。第三条最要紧——它正是 P12 与 P10/P11 的分工：
+        # 并集判"包里有吗"，逐份判"这一份齐不齐"，两者混用会把拼盘读成合规。
+        ('P12 五节这条整列不跑', RP,
+         '    if need_trio and adocs is not None:', '    if False:',
+         '缺两节没被 P12 逐节点出来（或牵连误报了别的）'),
+        ('P12 的适用域跟着外观那一支走（该判的不判）', RP,
+         "    need_trio = (not declared) or bool({'发明', '实用新型'} & set(declared))",
+         "    need_trio = bool(declared)",
+         ('外观设计包被按发明口径要三件或五节', '缺两节没被 P12 逐节点出来',
+          # 类型未定（清单只有表头）时被折成豁免，先红的仍是 P10 那档合规范本
+          '三件齐的申请文件被 P10 误伤')),
+        ('P12 放宽成并集（五节拆成五份文件也算齐）', RP,
+         "        specs = [(f, sset) for f, sset in adocs[0] if '说明书' in sset]",
+         "        specs = [('整个 02 目录',"
+         "{n for _f, ss in adocs[0] for n in ss})]"
+         " if any('说明书' in ss for _f, ss in adocs[0]) else []",
+         '五节被拆成五份文件仍被读成"说明书五节齐"'),
+        ('P12 把「附图说明」当无条件项（无图发明也被要）', RP,
+         "                    want_fig = bool(n_fig) or '实用新型' in declared",
+         "                    want_fig = True",
+         '没有附图的发明包被 P12 要求"附图说明"这一节'),
         ('读不动的文书不再计成未核（P10 的绿就没了依据）', RP,
-         "        if unread:\n            notes.append(f'P10 未核：",
+         "        if aunread:\n            notes.append(f'P10 未核：",
          "        if False:\n            notes.append(f'P10 未核：",
          '读不动的 docx 被折成缺件、或未核这件事没说出来'),
         # P10 的适用面两个相反方向各一条：把发明口径套到只列外观设计的包上（假红），
@@ -535,8 +557,8 @@ MUTS = {
           # 都会被 P11 要一份简要说明，先红的可能是清单族那档而非我新写的那档。
           '合规清单被 P8/P9 误伤')),
         ('P11 节名退回"包含"认（「简要说明建议稿」冒充已交）', RP,
-         '                    if DESIGN_SECTION not in seen:',
-         '                    if not any(DESIGN_SECTION in h for h in seen):',
+         '                    if DESIGN_SECTION not in aseen:',
+         '                    if not any(DESIGN_SECTION in h for h in aseen):',
          '「简要说明建议稿」被当成已经交了简要说明'),
         ('P11 的"没图"漏判（外观设计的图片这一格没人核）', RP,
          "                    elif n_img == 0:\n                        if '实用新型' in declared:",
