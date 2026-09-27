@@ -1526,10 +1526,11 @@ def test_check_iron_rules():
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md')])
         assert_(r.returncode == 0 and 'R6 未核' in r.stdout, '标准规格写法被自动判红', r)
 
-        # R7 发明名称 ≤25 字（templates §0）：超限必红，合规必绿，字段缺失报未核
+        # R7 发明名称字数：过 60 硬上限必红、≤25 必绿、字段缺失报未核。
+        # 25<n≤60 那一档（法条允许、本仓只出提示）由常驻 test_r7_title_tiers 逐档钉，不在这里重复。
         named = '# 专利技术交底书\n\n## 0. 著录项目\n   - 发明名称：{t}\n'
-        long_name = '一种' + '腰部助力外骨骼控制装置' * 3
-        assert_(len(long_name) > 25, f'必红夹具仅 {len(long_name)} 字，未超限')
+        long_name = '一种' + '腰部助力外骨骼控制装置' * 6
+        assert_(len(long_name) > 60, f'必红夹具仅 {len(long_name)} 字，未过硬上限')
         open(os.path.join(d, '命名.md'), 'w', encoding='utf8').write(named.format(t=long_name))
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '命名.md')])
         assert_(r.returncode == 1 and 'FAIL R7' in r.stdout, 'R7 未拦超长发明名称', r)
@@ -2160,6 +2161,107 @@ def test_iron_spec_region_shapes():
 
     print('PASS 说明书区域落点形状（生产扁平／旧嵌套／越界节名静默／第二处同名节／三态不折叠 '
           '+ 共享常量同对象 + 生产真工件开火）')
+
+
+def test_r7_title_tiers():
+    """R7 发明名称字数的三档判决：把法条明确允许的那一侧从"退回修订"里救出来。
+
+    法源是《专利审查指南》（2023）第一部分第一章 §4.1.1，逐字一句：
+    「发明名称一般不得超过 25 个字，必要时可不受此限，但也不得超过 60 个字。」
+    （本机留底 .codebuddy/attest/zhinan2023_ahippc.txt:629-630，该句位于 <<<PAGE 21>>> 之后、
+    页标行「（1-5） 17」之下，即 PDF p21／印刷页 1-5）⇒ 25 是**软**上限、60 才是**硬**上限。
+    旧实现把 25 当硬上限，26 字就 rc=1，而 60/61 这根轴根本没实现过。
+
+    档位形状：两根轴分别钉——25/26 与 60/61 各配"合规侧静默 + 违规侧开火"的成对档。
+    缺席断言一律按 iron 族的真输出形状写（违规行 `  FAIL <判据名> 路径:行: 成因 -> 摘句`、
+    提示行 `  note 路径: 成因`）：`'R7' not in stdout` 那种会被自家未核行挡掉的永真断言不算断言。
+    位点由本档自己 enumerate 夹具行算出，不抄门禁读数。
+    """
+    def named_md(dirpath, fname, title):
+        """写一份只有一行发明名称的交底书，返回 (路径, 本档自己数出的 1-based 行号)。"""
+        lines = ['# 专利技术交底书', '', '## 0. 著录项目', f'   - 发明名称：{title}', '']
+        p = os.path.join(dirpath, fname)
+        with open(p, 'w', encoding='utf8') as fobj:
+            fobj.write('\n'.join(lines) + '\n')
+        ln = next(i for i, txt in enumerate(lines, 1) if txt.lstrip().startswith('- 发明名称'))
+        return p, ln
+
+    def r7_lines(r):
+        """按本族真输出形状把 R7 的违规行／提示行各挑出来（未核行两条都不算）。"""
+        fails = [l for l in r.stdout.splitlines() if l.startswith('  FAIL R7')]
+        notes = [l for l in r.stdout.splitlines()
+                 if l.startswith('  note ') and '软上限' in l]
+        return fails, notes
+
+    with tempfile.TemporaryDirectory() as d:
+        for n, expect in ((25, 'silent'), (26, 'note'), (60, 'note'), (61, 'fail')):
+            title = '锁' * n
+            assert_(len(re.sub(r'\s', '', title)) == n, f'夹具自数 {n} 字不成立')
+            p, ln = named_md(d, f'命名{n}.md', title)
+            r = run([PY, f'{S}/check_iron_rules.py', p])
+            fails, notes = r7_lines(r)
+            if expect == 'silent':
+                assert_(r.returncode == 0 and not fails and not notes
+                        and 'R7 未核' not in r.stdout,
+                        f'{n} 字（≤{n} 即房内口径内）该整条静默，实得 rc={r.returncode} '
+                        f'FAIL={fails} note={notes}', r)
+            elif expect == 'note':
+                assert_(r.returncode == 0 and not fails,
+                        f'{n} 字落在指南允许的 25<n≤60 一侧却被判红（硬上限被退回 {n} 或 25）：'
+                        f'FAIL={fails}', r)
+                assert_(len(notes) == 1 and f'{n} 字' in notes[0] and '60' in notes[0],
+                        f'{n} 字这一档没出"只提示不判红"的那一行（软硬两档没分开，'
+                        f'或 60 那档整个关掉）: {notes}', r)
+            else:
+                assert_(r.returncode == 1 and len(fails) == 1,
+                        f'{n} 字（>60 硬上限）该判红，实得 rc={r.returncode} FAIL={fails}', r)
+                m = re.search(re.escape(p) + r':(\d+):', fails[0])
+                assert_(m and int(m.group(1)) == ln,
+                        f'R7 位点不对：判据给「{fails[0]}」，本档自己数到第 {ln} 行', r)
+                assert_(f'{n} 字' in fails[0] and '60' in fails[0] and '审查指南' in fails[0],
+                        f'硬上限的违规文案没点出 60 与法源：{fails[0]}', r)
+
+        # 三态不许被新提示行折叠：没有那一行 → 仍是「R7 未核」，既不折成违规也不折成"核过了"
+        p_missing = os.path.join(d, '无字段.md')
+        with open(p_missing, 'w', encoding='utf8') as fobj:
+            fobj.write('# 专利技术交底书\n\n## 0. 著录项目\n   - 申请人：某单位\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p_missing])
+        fails, notes = r7_lines(r)
+        assert_(r.returncode == 0 and '未找到「发明名称：」字段，R7 未核' in r.stdout
+                and not fails and not notes,
+                f'缺字段时的 R7 未核三态被改动（提示行/违规行不该出现）: FAIL={fails} note={notes}', r)
+
+        # docx 通道：R7 认的那一行是正文段落，与节标题还原无关，Word 件上必须照判
+        try:
+            from docx import Document
+        except ImportError:
+            SKIPPED.append('r7_title_tiers_docx')
+            print('  SKIP r7_title_tiers_docx（本机无 python-docx，造不出 Word 夹具）')
+            print('PASS r7_title_tiers（md 两根轴四档成对 + 未核三态；docx 档未跑）')
+            return
+        for n, expect in ((26, 'note'), (61, 'fail')):
+            paras = ['专利技术交底书', f'   - 发明名称：{"锁" * n}', '正文：一种装置。']
+            dx = os.path.join(d, f'命名{n}.docx')
+            doc = Document()
+            for txt in paras:
+                doc.add_paragraph(txt)
+            doc.save(dx)
+            # 段落一支一段一行 → 本档按自己塞进去的段落序数出抽取文本的行号
+            ln = next(i for i, txt in enumerate(paras, 1) if '发明名称' in txt)
+            r = run([PY, f'{S}/check_iron_rules.py', dx])
+            fails, notes = r7_lines(r)
+            if expect == 'note':
+                assert_(r.returncode == 0 and not fails and len(notes) == 1 and f'{n} 字' in notes[0],
+                        f'docx 通道上 {n} 字（法条允许侧）没按"只提示不判红"判：'
+                        f'rc={r.returncode} FAIL={fails} note={notes}', r)
+            else:
+                assert_(r.returncode == 1 and len(fails) == 1,
+                        f'docx 通道上 {n} 字（>60）没被判红（说明抽取后那一行没吃上 R7）：'
+                        f'rc={r.returncode} FAIL={fails}', r)
+                m = re.search(re.escape(dx) + r':(\d+):', fails[0])
+                assert_(m and int(m.group(1)) == ln,
+                        f'docx 通道 R7 位点不对：判据给「{fails[0]}」，按段落序数到第 {ln} 行', r)
+    print('PASS r7_title_tiers（25/26 与 60/61 两根轴各成对 + 未核三态未折叠 + docx 通道照判）')
 
 
 def test_battery_crash_attribution():
@@ -4382,7 +4484,7 @@ if __name__ == '__main__':
              test_check_figures_colour,
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
-             test_iron_spec_region_shapes,
+             test_iron_spec_region_shapes, test_r7_title_tiers,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
