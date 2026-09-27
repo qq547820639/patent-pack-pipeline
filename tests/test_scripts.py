@@ -553,6 +553,104 @@ def test_rebuild_package():
                 and not any('P10 未判' in x for x in n),
                 f'空壳 02 目录的两种坏没分开报: {b} / {n}', None)
 
+        # P11：外观设计那一支的法定件（细则 44 条（一）**后段**＋专利法 27 条一）。
+        # 第三十轮把 44 条（一）引成"……"时正好切掉了"或者外观设计专利申请缺少请求书、
+        # 图片或者照片、简要说明的"这半句，于是 P9/P10 都落了地而这一支还空着。
+        BRIEF = '# 简要说明\n## 简要说明\n本外观设计产品的名称：手柄。用途：握持。\n'
+
+        def mkbrief(tag, cells, brief=None, **kw):   # 缺件靠默认，交件必须显式给 brief=BRIEF
+            p = mktbl(tag, cells, **kw)
+            if brief is not None:
+                open(os.path.join(p, '02_申请文件', '简要说明.md'), 'w', encoding='utf8').write(brief)
+            return p
+
+        b, n = rp.shape_state(mkbrief('P11_外观齐件', ['外观设计'], png=1, brief=BRIEF))
+        # 断言只看"P11 自己开没开口"，不能写 'P11' in note：
+        # P10 那句"归 P11 判"的说明里就含 P11 三个字，字面判会把说明读成开火。
+        assert_(b == [] and not any(x.startswith('P11') for x in n),
+                f'交了简要说明又有图的外观设计包被 P11 误伤: {b} / {n}', None)
+        def mkonly(tag, cells, names):
+            p = mktbl(tag, cells)                       # 先造表，再清 02 段重建内容
+            app = os.path.join(p, '02_申请文件')
+            for f in os.listdir(app):
+                fp = os.path.join(app, f)
+                shutil.rmtree(fp) if os.path.isdir(fp) else os.remove(fp)
+            for nm in names:
+                open(os.path.join(app, nm + '.md'), 'w', encoding='utf8').write(
+                    '# %s\n## %s\n正文若干。\n' % (nm, nm))
+            open(os.path.join(app, '主视图.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
+            return p
+
+        # 缺简要说明：单这一件坏，就该只点这一个名（图已经给了）
+        b, _ = rp.shape_state(mkbrief('P11_缺简要说明', ['外观设计'], png=1, brief=None))
+        assert_([x for x in b if x.startswith('P11')] and
+                all('简要说明' in x for x in b if x.startswith('P11')),
+                f'外观设计缺简要说明没被 P11 单独点出来: {b}', None)
+        # 建议稿式节名不与"简要说明"全等 ⇒ 仍算缺（与 P10 的"摘要不算说明书"同一条认法）
+        b, _ = rp.shape_state(mkbrief('P11_建议稿不算', ['外观设计'], png=1,
+                                      brief='# 简要说明建议稿\n## 简要说明建议稿\n名称：手柄。\n'))
+        assert_(any(x.startswith('P11') and '简要说明' in x for x in b),
+                f'「简要说明建议稿」被当成已经交了简要说明: {b}', None)
+        # 没图：外观设计的"图片或者照片"是 44 条（一）后段明文那一格
+        b, _ = rp.shape_state(mkbrief('P11_外观没图', ['外观设计'], png=0, brief=BRIEF))
+        assert_(sum(x.startswith('P11') for x in b) == 1 and
+                any('图片或照片' in x for x in b if x.startswith('P11')) and
+                not any(x.startswith('P9') for x in b),
+                f'零图的外观设计包没被 P11 恰好抓住一条（或反过来牵连了 P9）: {b}', None)
+        # docx 内嵌件算图：与 P9 同一条通道，两通道任一有图即不判红
+        b, _ = rp.shape_state(mkbrief('P11_图在docx里', ['外观设计'], media=1, brief=BRIEF))
+        assert_(not any(x.startswith('P11') and '图片' in x for x in b),
+                f'图藏在 docx word/media/ 里被 P11 当成没交图: {b}', None)
+        # 两型同列且零图：全包几张图是**一件事实**，判红只出一次（P9），P11 补一条 note
+        b, n = rp.shape_state(mkbrief('P11_两型都缺图', ['实用新型', '外观设计'], png=0,
+                                         brief=BRIEF))
+        assert_(sum(('图片' in x or '一张图' in x) for x in b) == 1 and
+                any(x.startswith('P9') for x in b) and
+                any('P11 的"没图"' in x for x in n),
+                f'同一件"全包零图"被判成两个原告，或那件 note 没说清: {b} / {n}', None)
+        # 清单没列外观设计 ⇒ 不适用（与"没列实用新型"对偶，连没图也不报）
+        b, n = rp.shape_state(mkonly('P11_未列外观', ['发明'],
+                                     ['说明书摘要', '权利要求书', '说明书']))
+        assert_(b == [] and not any(x.startswith('P11') for x in b + n),
+                f'只列发明的包被 P11 管上了（适用域越界）: {b} / {n}', None)
+        # 类型格还是占位 ⇒ 未判，不折成"没交"也不折成合规
+        b, n = rp.shape_state(mkbrief('P11_类型占位', ['【待填写：发明/外观设计】'], png=0))
+        assert_(b == [] and any('占位' in x for x in n),
+                f'类别未定时 P11 猜了一边: {b} / {n}', None)
+        # 02_申请文件 整段不在 ⇒ P5 报缺段，P11 走未判（同一件坏不占两个原告）
+        gone = mkbrief('P11_无02段', ['外观设计'], png=1, brief=BRIEF)
+        shutil.rmtree(os.path.join(gone, '02_申请文件'))
+        b, n = rp.shape_state(gone)
+        assert_(any(x.startswith('P5') for x in b) and
+                not any(x.startswith('P11') for x in b) and
+                any('P11 未判' in x for x in n),
+                f'缺整段被判成"缺简要说明"（重复）或未说清未判: {b} / {n}', None)
+        # 包里有读不动的 docx ⇒ 图这一半未判（不猜"没图"），简要说明这一半照判缺
+        b, n = rp.shape_state(mkbrief('P11_坏docx', ['外观设计'], broken_docx=True))
+        assert_(any(x.startswith('P11') and '简要说明' in x for x in b) and
+                any('P11 未判' in x and 'docx' in x for x in n),
+                f'读不动的 docx 下，P11 该"半判半未判"而不是一边倒: {b} / {n}', None)
+
+        # P10 的适用面：三件是**发明／实用新型那一支**的要件（44 条（一）同一项里给
+        # 外观设计另写了后一段）。三种包形各钉一头：
+        #   只列外观设计 → 不许按发明口径要件（那是假红）
+        #   混合两型   → 发明那一支照样要三件，不能被"外观不交"带过去
+        #   类型占位   → 未判不许折成豁免
+        b, n = rp.shape_state(mkonly('P10_外观只交简要说明', ['外观设计'], ['简要说明']))
+        assert_(not any(x.startswith('P10') for x in b) and
+                any('P10 不适用' in x for x in n),
+                f'只列外观设计、依法只交简要说明与图的包被按发明口径要了三件: {b} / {n}', None)
+        b, n = rp.shape_state(mkonly('P10_混合缺权要', ['发明', '外观设计'],
+                                     ['简要说明', '说明书摘要', '说明书']))
+        assert_(sum(x.startswith('P10') for x in b) == 1 and
+                any('权利要求书' in x for x in b),
+                f'混合包里发明那一支的三件要件丢了: {b} / {n}', None)
+        b, n = rp.shape_state(mkonly('P10_类型占位仍要三件', ['【待填写：发明/实用新型】'],
+                                     ['简要说明']))
+        assert_(sum(x.startswith('P10') for x in b) == 3 and
+                not any('P10 不适用' in x for x in n),
+                f'类型还没定时 P10 被折成"这一支不受要求"（未判当豁免）: {b} / {n}', None)
+
         # 形状判据必须走得到真入口：main() 打完包后要能报出来（否则 shape 只在单元里活着）
         rpk = mkshape('形状包_走main', drop='05_法规与裁决')
         r = run([PY, f'{S}/rebuild_package.py', rpk])
@@ -568,8 +666,14 @@ def test_rebuild_package():
                  mkapp('P10_走main红', FULL3.replace('## 权利要求书\n1. 一种装置。\n', ''))])
         assert_(r.returncode == 1 and 'P10' in r.stdout and '权利要求书' in r.stdout,
                 f'缺件的申请文件从 main() 出去时没被点名: {show(r)}', r)
+        r = run([PY, f'{S}/rebuild_package.py',
+                 mkbrief('P11_走main红', ['外观设计'], png=1)])
+        assert_(r.returncode == 1 and 'P11' in r.stdout and '简要说明' in r.stdout,
+                f'缺简要说明的外观设计包从 main() 出去时没被点名: {show(r)}', r)
     print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / '
-          'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / P10 三件齐含遮蔽与未核 / rc=2 三档）')
+          'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / '
+          'P10 三件齐含遮蔽与未核＋只列外观设计不套发明口径（三向各一档） / '
+          'P11 外观设计两件含建议稿遮蔽与两型同列不重复报 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):
@@ -842,6 +946,21 @@ def test_check_iron_rules_docx():
         r = run([PY, f'{S}/check_iron_rules.py', bgdoc])
         assert_(r.returncode == 0 and 'FAIL R9' not in r.stdout and 'R9 未判' not in r.stdout,
                 f'docx 补上逐字声明后 R9 未判绿（"没读到节"与"核过了"必须分得开）: {show(r)}', r)
+
+        # R10 的第二消费者：交付物是 Word 件时，摘要里的宣传语同样要抓到。
+        # 外观设计的「简要说明」也走同一通道——它是那一支唯一以"节"形态存在的法定件。
+        promo = os.path.join(d, '宣传摘要.docx')
+        doc = Document()
+        doc.add_heading('说明书摘要', level=2)
+        doc.add_paragraph('本发明公开一种装置，性价比极高。')
+        doc.add_heading('简要说明', level=2)
+        doc.add_paragraph('本外观设计产品的名称：手柄。销量第一。')
+        doc.save(promo)
+        r = run([PY, f'{S}/check_iron_rules.py', promo])
+        assert_(r.returncode == 1 and 'FAIL R10' in r.stdout,
+                f'docx 里的宣传语未被 R10 抓到（说明 pStyle 还原没喂到这一条）: {show(r)}', r)
+        assert_('细则第二十六条' in r.stdout and '细则第三十一条' in r.stdout,
+                f'docx 两节各引各的法源没分开: {show(r)}', r)
 
         # 三态：没有标题样式的 docx 找不到节 → 必须说"未核"，不能拿"违规 0"冒充核过
         naked = os.path.join(d, '无节标题.docx')
@@ -1169,6 +1288,15 @@ def test_regen_docx_stale():
     print('PASS regen_docx --check（陈旧必红/新转必绿/无孪生不算/不需 pandoc/rc=2/孪生读不到按待重转）')
 
 
+def rule_span(src):
+    """从门禁源码现取它定义的判据号（R1、R2a…→[1,2,…]）。
+    `\\d{1,2}` 不可省成 `\\d`：那会把 R10 折成 1，于是"号有断档"这条断言从此看不见两位数区，
+    自报区间也会被读成 R1–R9 而放行——与第 26 轮契约取号那次同源（当时是 [1-9] 漏了两位数）。
+    `\\s*` 也不可省：R8 的 Finding( 与实参之间有换行，紧凑写法会把它整个漏掉。
+    两份调用点（iron 档内、契约档内）共用这一把，不在两处各写一遍正则。"""
+    return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d{1,2})", src)})
+
+
 def test_check_iron_rules():
     """铁律门禁 R1–R5：每条判据各自成对（注入即红 / 合规必绿），外加三态与输入不可用档。"""
     def gate(d, report=True, extra=None):
@@ -1332,11 +1460,65 @@ def test_check_iron_rules():
         assert_(r.returncode == 0 and 'R9 未判' in r.stdout,
                 '缺背景技术节时 R9 未报未判（未判不得折成合规）', r)
 
+        # R10：摘要／简要说明两节内的商业性宣传用语（细则 26 条、31 条各管一件文书）。
+        # 六档：节内必红／合规摘要必绿／同一句写在别处不报（作用域）／技术撞车词不报（误伤面）／
+        # 简要说明侧各引自己的法源／两张词表交集必须为空（否则同一件事被 R1 与 R10 各报一遍）。
+        _isp = importlib.util.spec_from_file_location('cir_r10', f'{S}/check_iron_rules.py')
+        _cir10 = importlib.util.module_from_spec(_isp)
+        _isp.loader.exec_module(_cir10)
+        overlap = set(_cir10.COMMERCIAL) & set(_cir10.BANNED_ALWAYS)
+        assert_(not overlap,
+                f'R10 词表与 R1 的 BANNED_ALWAYS 有重叠 {sorted(overlap)}：那四个词全文都报，'
+                f'摘要节里再报一遍是同一件事占两个原告', r)
+        assert_(len(_cir10.COMMERCIAL) >= 10,
+                f'R10 词表只剩 {len(_cir10.COMMERCIAL)} 个词，这条判据基本等于没做', r)
+
+        write(d, abstract='本发明公开一种腰部助力装置，性价比高，属业界标杆。')
+        r = gate(d)
+        assert_(r.returncode == 1 and 'FAIL R10' in r.stdout and '细则第二十六条' in r.stdout,
+                f'摘要里的商业宣传语未被 R10 抓住（或没引对法源）: {show(r)}', r)
+        write(d)
+        r = gate(d)
+        assert_(r.returncode == 0 and 'FAIL R10' not in r.stdout,
+                f'合规摘要被 R10 误伤: {show(r)}', r)
+        # 作用域：同一句写在权利要求段里不报（31/26 两句各管一件文书，不是全文禁词）
+        open(os.path.join(d, '宣传在他节.md'), 'w', encoding='utf8').write(
+            _iron(claims='1. 一种装置，性价比极高，属业界标杆。\n'))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '宣传在他节.md')])
+        assert_(r.returncode == 0 and 'FAIL R10' not in r.stdout,
+                f'R10 越出摘要／简要说明两节去管全文了: {show(r)}', r)
+        # 撞车面：这些词在技术文本里是术语不是宣传语，全部排除在词表外（2026-09-27 全仓普查）
+        open(os.path.join(d, '撞车词.md'), 'w', encoding='utf8').write(
+            '# 说明书\n\n## 说明书摘要\n本发明第一方面提供一种装置，采用绝对式编码器，'
+            '为顶级精度的最优实施例，终身学习框架免费开源，达到完美匹配。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '撞车词.md')])
+        assert_(r.returncode == 0 and 'FAIL R10' not in r.stdout,
+                f'技术语义撞车的词被 R10 判红了: {show(r)}', r)
+        # 简要说明侧：外观设计的这一件与摘要不同文书，法源必须引 31 条而不是 26 条
+        open(os.path.join(d, '简要宣传.md'), 'w', encoding='utf8').write(
+            '# 简要说明\n\n## 简要说明\n本外观设计产品的名称：手柄。销量第一，用户首选。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '简要宣传.md')])
+        assert_(r.returncode == 1 and 'FAIL R10' in r.stdout and '细则第三十一条' in r.stdout,
+                f'简要说明里的宣传语未被 R10 抓住（或引成了摘要那条法源）: {show(r)}', r)
+        # 「简要说明：…」写在正文里不算节（那是 C5 的触发词面，两张面分开判）。
+        # 夹具刻意把标签单独成行、宣传语落在**下一行**：锚点若丢了井号，
+        # 这一行会被当成节标题，下一行就成了"节内正文"，这把尺子会顺着 C5 的词面开火。
+        open(os.path.join(d, '内联不算节.md'), 'w', encoding='utf8').write(
+            '# 说明书\n简要说明：\n本产品销量第一。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '内联不算节.md')])
+        assert_(r.returncode == 0 and 'FAIL R10' not in r.stdout,
+                f'正文里的「简要说明：」内联写法被当成一个节来判了: {show(r)}', r)
+
         # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
         # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）
         irtxt = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
-        # \s* 不可省：R8 的 Finding( 与实参之间有换行，紧凑写法会漏读成 R1–R7
-        rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)", irtxt)})
+        # 提取器自己的两档：两位数不许折成个位、断档不许被读成连续
+        assert_(rule_span("Finding('R1 a')\nFinding('R10 b')\nFinding(\n    'R9 c')") == [1, 9, 10],
+                'R 号提取器把两位数判据号读错了（R10 被折成 R1 那一类）', r)
+        assert_(rule_span("Finding('R1 a')\nFinding('R3 b')") == [1, 3],
+                'R 号提取器看不见断档，"号是否连续"那条断言是假的', r)
+        assert_(rule_span("Finding('R1 a')") == [1], 'R 号提取器在最小样本上就不对', r)
+        rnums = rule_span(irtxt)
         assert_(rnums == list(range(rnums[0], rnums[0] + len(rnums))) if rnums else False,
                 f'判据 R 号推导有断档（说明推导正则漏读了某个 token）：{rnums}', r)
         claim = f'（规则 R{rnums[0]}–R{rnums[-1]}，'
@@ -1378,7 +1560,10 @@ def test_check_iron_rules():
             r = run([PY, f'{S}/check_iron_rules.py', empty, '--all'])
             assert_(r.returncode == 2 and '未找到待检文件' in r.stdout,
                     '--all 空目录未说明原因', r)
-    print(f'PASS check_iron_rules（R1–R8 各条成对必红必绿 + 三态 + rc=2 + --all 四档；'
+    # 这行自述曾长期硬写成 "R1–R8"（实际判据已到 R10）：清单型自述只能现算，
+    # 抄一份就是一份会过期的假账（tooling-pitfalls §10 同条）。
+    _rn = rule_span(open(f'{S}/check_iron_rules.py', encoding='utf8').read())
+    print(f'PASS check_iron_rules（R{_rn[0]}–R{_rn[-1]} 各条成对必红必绿 + 三态 + rc=2 + --all 四档；'
           f'摘要 {n_ok}/{n_over} 字）')
 
 
@@ -1558,8 +1743,7 @@ def test_docs_scripts_contract():
 
     # 任何提到本门禁并给出规则区间的文档行，区间都必须等于脚本源码现推的判据范围
     # （README 用法行与 pipeline-stages 的"出 R1–R5 红点"都曾谎报且无人核对）
-    rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)",
-                                               scripts['check_iron_rules.py'])})
+    rnums = rule_span(scripts['check_iron_rules.py'])
     span = f'R{rnums[0]}–R{rnums[-1]}'
     hit = 0
     for ln_no, line in enumerate(doctxt.splitlines(), 1):
@@ -2983,6 +3167,13 @@ def test_battery_needle_census():
                                        os.path.join(ROOT, 'tests', 'mutation_battery.py'))
     mb = ilu.module_from_spec(spec)
     spec.loader.exec_module(mb)
+    # 空变异：new 与 old 一字不差的臂改不动任何东西，那一支永远只能读出"存活/注入无效"，
+    # 却照样被计入"跑了 N 条"。记忆里"登记对照前先数 old 恰好一处、new 不许是原文"讲的就是这格，
+    # 此前只有前半（needle 命中数）被常驻挡着，后半没人管。
+    noop = [f'{g}/{a[0]}' for g, entries in mb.MUTS.items() for a in entries if a[2] == a[3]]
+    assert_(not noop, f'这些变异臂改写前后完全相同（空变异，读不出任何牙）: {noop}', None)
+    # 臂表总数留一份，下面用来证明"体检的分母 == 臂表全量"（没被静默跳过）
+    n_arms = sum(len(v) for v in mb.MUTS.values())
     # 只挡"电池此刻正在改写的那一片"：同脚本内 needle 相等、互为包含的都算被波及
     # （一次 replace 会让它们同时看不见锚点，报失配是体检在诬告变异）
     mutating = os.environ.get('PP_MUTATING', '').strip()
@@ -3014,6 +3205,10 @@ def test_battery_needle_census():
                 miss.append(f'{group}/{label} → {rel}')
             elif n > 1:
                 dup.append(f'{group}/{label} → {rel} 命中 {n} 次')
+    assert_(total + skipped == n_arms,
+            f'体检的分母比臂表全量少 {n_arms - total - skipped} 条：有臂被静默跳过（跳过的口子只有'
+            f'「电池正在生效的那一支」，其余一律该数进来）: 数到 {total} + 跳过 {skipped} ≠ 臂表 {n_arms}',
+            None)
     assert_(len(texts) >= 6 and total >= 100,
             f'分母异常（{total} 条变异 / {len(texts)} 个目标脚本），本检查空转', None)
     assert_(not mutating or skipped >= 1, f'跳过分母为 0，PP_MUTATING 没起作用: {mutating}', None)

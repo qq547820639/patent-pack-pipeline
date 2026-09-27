@@ -34,10 +34,23 @@ P5–P9 看的是**包本身**而不是 zip：P1–P4 全绿而包里本来就�
      《专利法实施细则》第四十四条（一）只把缺 说明书／权利要求书 列进不予受理清单，
      摘要缺失走补正——所以三条都判红，报文里分别写各自的后果层级。md 与 docx 两通道同一套认法
      （docx 的节标题由 w:pStyle 还原成 # 行，与 N/T/Q 族同一条通道）。
-三态：清单里没有带「类型」列的表／一条专利都没列／docx 读不动 ⇒ P8、P9 走未判，不折成合规；
-      02_申请文件 目录本身不在 ⇒ P10 未判（缺段已由 P5 报，不重复报成缺件）。
+  P11 清单列了**外观设计**的那一类申请件齐：02_申请文件 里要有「简要说明」这一件，
+     并且包内找得到图片或者照片。法源是同一条第四十四条（一）的**后半句**（第三十轮写 §8 时
+     那句被省略号切掉了，于是这一半没人看得见）："……或者外观设计专利申请缺少请求书、
+     图片或者照片、简要说明的"——与发明／实用新型缺说明书**同一档：不予受理级**。
+     《专利法》第二十七条一（两份留底逐字比对一致）："申请外观设计专利的，应当提交请求书、
+     该外观设计的图片或者照片以及对该外观设计的简要说明等文件。"
+     细则第三十一条另要求简要说明写明 名称／用途／设计要点 并指定一幅最能表明设计要点的图，
+     这四要素**本轮不判红**：节里写"产品用途：…"还是"本设计用于…"是措辞问题，
+     误伤面在没有真实交付包语料的本机量不出来（先例：R9 的"置于本节末尾"半条只提示不判红）。
+     与 P9 的分工：全包"几张图"这件事只数一次、只报一遍——同时列了实用新型与外观设计而无图时，
+     判红由 P9 出，P11 只补一条"图这一半已由 P9 报过"的 note，同一件事不占两个原告。
+三态：清单里没有带「类型」列的表／一条专利都没列／类型格还是【待填写】式占位／包里有读不动的
+      docx ⇒ P8、P9、P11 未判（`main()` 逐行打印 note），不折成合规；
+      清单里没列外观设计 ⇒ P11 不适用（连"没图"也不报，与 P9 的"没列实用新型"对偶）；
+      02_申请文件 目录本身不在 ⇒ P10、P11 未判（缺段已由 P5 报，不重复报成缺件）。
 
-退出码: 0 全过或未判 / 1 存在不符（P1–P10 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
+退出码: 0 全过或未判 / 1 存在不符（P1–P11 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
 注意：必须用 Python zipfile 写包——Info-ZIP zip(1) 在本环境不写 UTF-8 标志位（0x800），
 导致中文文件名在 Windows 资源管理器/部分解压软件下显示乱码。Python zipfile 对非 ASCII
 文件名自动置 UTF-8 标志位，Windows/macOS/Linux 全兼容。
@@ -77,6 +90,10 @@ import re
 # 节名一律**归一后全等**才认：模板 §2 里「说明书摘要」「说明书附图」「说明书」是三个并列节，
 # 用"包含"会把"只写了摘要"的包读成"有说明书"。
 APPLY_SECTIONS = ('说明书摘要', '权利要求书', '说明书')
+# P11：外观设计那一支应交的两件里，本仓交付物里存在的只有「简要说明」
+# （图片／照片由 image_count 在全包数，节名认不出来——照片不是 markdown 标题）。
+# 认法与 APPLY_SECTIONS 同一条：归一后**全等**，"简要说明建议稿"不与"简要说明"互认。
+DESIGN_SECTION = '简要说明'
 _PAREN = re.compile(r'[（(].*?[）)]')
 _HD_NUM = re.compile(r'^[0-9０-９.、\s]+')
 
@@ -106,10 +123,14 @@ README_HEAD = '专利清单'
 
 
 def shape_state(pkg):
-    """P5–P9 包形状，返回 (违规, 未判/提示)。
+    """P5–P11 包形状，返回 (违规, 未判/提示)。
     这些条不依赖 zip：zip 对得上而包本来就缺一整段，P1–P4 会全绿——那正是它们看不见的那种坏。
     txt 先给 None：README 根本不存在时下面那段读表不能拿一个没赋过值的变量当"读不出"。"""
     bad, notes, txt = [], [], None
+    # declared 提到函数开头：P10 也要看它（44 条（一）把发明／实用新型与外观设计两支
+    # 分写在同一项的两半句里，要件各不相同）。只在**真认出类别**时才往里加，
+    # 所以"空"的含义是"还没定"，不是"定了别的一支"。
+    declared = []
     for d in PKG_DIRS:
         if not os.path.isdir(os.path.join(pkg, d)):
             bad.append(f'P5 缺 §8 固定段 {d}（目录不存在，整段交付物无从谈起）')
@@ -145,7 +166,6 @@ def shape_state(pkg):
                          '第四十四条（一）（六）两条都判不起）')
         else:
             ti = _t.col(header, '类型')
-            declared = []
             for i, row in enumerate(rows, 1):
                 cell = row[ti] if ti is not None and ti < len(row) else ''
                 # 占位要先认，再认类别：底稿写的是「【待填写：发明/实用新型】」，
@@ -165,18 +185,59 @@ def shape_state(pkg):
                     bad.append(f'P8 专利清单第 {i} 行的类型「{cell}」不是 '
                                f'{"／".join(_ck.PATENT_TYPES)} 之一'
                                f'（第四十四条（六）：类别不明确或者难以确定＝不予受理级）')
+            # "全包几张图"只数一次：P9（实用新型）与 P11（外观设计）引的是同一个事实，
+            # 两处各自 os.walk 一遍再各报一遍，同一件坏会占掉两个原告（P3 同一条纪律）。
+            n_img = image_count(pkg) if ({'实用新型', '外观设计'} & set(declared)) else None
             if '实用新型' in declared:
-                n = image_count(pkg)
-                if n is None:
+                if n_img is None:
                     notes.append('P9 未判：包里有读不动的 docx，无从确认"全包没图"（不猜）')
-                elif n == 0:
+                elif n_img == 0:
                     bad.append('P9 专利清单列了实用新型，可全包找不到一张图'
                                '（图片文件与 docx 内嵌件都是零）——第四十四条（一）'
                                '"说明书（实用新型无附图）"按缺说明书处理，不予受理级')
+            if '外观设计' in declared:
+                # 变量名刻意不叫 got：下面 P10 那里的 got 是「缺哪几件」的清单，
+                # 这里是「读到过哪些节名」的集合，两个两元组形状一样、语义相反，
+                # 同名会在日后有人搬代码时静默互串。
+                dseen = read_apply_sections(app)
+                if dseen is None:
+                    notes.append('P11 未判：02_申请文件 目录本身不在（缺段已由 P5 报，'
+                                 '这里不重复报成缺件）')
+                else:
+                    seen, unread = dseen
+                    if DESIGN_SECTION not in seen:
+                        bad.append(f'P11 02_申请文件 里找不到「{DESIGN_SECTION}」节'
+                                   '（md 与 docx 两通道都读过了）——第四十四条（一）后段'
+                                   '"外观设计专利申请缺少请求书、图片或者照片、简要说明的"，'
+                                   '不予受理级；专利法第二十七条一也列了它')
+                    if unread:
+                        notes.append(f'P11 未核：{len(unread)} 份文书读不动（{"、".join(unread[:3])}），'
+                                     f'{DESIGN_SECTION}这条不能替它们担保')
+                    if n_img is None:
+                        if '实用新型' not in declared:
+                            notes.append('P11 未判：包里有读不动的 docx，'
+                                         '无从确认"外观设计的图没交"（不猜）')
+                    elif n_img == 0:
+                        if '实用新型' in declared:
+                            notes.append('P11 的"没图"这一半已由 P9 报出（同一件事实：'
+                                         '全包 0 张图），不重复判')
+                        else:
+                            bad.append('P11 专利清单列了外观设计，可全包找不到一张图片或照片'
+                                       '（图片文件与 docx 内嵌件都是零）——第四十四条（一）后段'
+                                       '缺"图片或者照片"，不予受理级')
 
-    # P10：02_申请文件 的三件齐不齐（专利法 26 条一；不予受理级那一半另引细则 44 条（一））
-    got = missing_apply_sections(app)
-    if got is None:
+    # P10：02_申请文件 的三件齐不齐（专利法 26 条一；不予受理级那一半另引细则 44 条（一）前段）。
+    # 三件是**发明／实用新型那一支**的要件：44 条（一）同一项里给外观设计单写了后一段
+    # （请求书／图片或者照片／简要说明），所以"清单只列外观设计"的包若被按发明口径要摘要·权要·说明书，
+    # 是造假红——那一支本来就不交这几件。类型判不起（没表／没行／占位／读不动）时**照旧要三件**：
+    # "不知道是哪一支"不等于"这一支不受要求"，把看不见折成豁免是反方向的错——
+    # 这就是判据用 declared 而不是"表在不在"的原因：类型格还是占位时 declared 为空，照旧要三件。
+    need_trio = (not declared) or bool({'发明', '实用新型'} & set(declared))
+    got = missing_apply_sections(app) if need_trio else None
+    if got is None and not need_trio:
+        notes.append('P10 不适用：「专利清单」只列外观设计，那一支的法定件（简要说明＋图片或者照片）'
+                     '归 P11 判，这里不按发明口径要件')
+    elif got is None:
         notes.append('P10 未判：02_申请文件 目录本身不在（缺段已由 P5 报，这里不重复报成缺件）')
     else:
         miss, unread = got
@@ -205,9 +266,11 @@ def head_names(text):
     return out
 
 
-def missing_apply_sections(app):
-    """02_申请文件 缺哪几件 → (缺失节名, 读不动的文件名)。
-    目录本身不在时返回 None：那是 P5 的地盘，不在这里重复报成"缺件"。"""
+def read_apply_sections(app):
+    """02_申请文件 里出现过的节名集合 → (节名集合, 读不动的文件名)。
+    目录本身不在时返回 None：那是 P5 的地盘，不在这里重复报成"缺件"。
+    P10（三件齐）与 P11（外观设计的简要说明）共用这一份 walk——两处各写一遍迟早漂，
+    漂了的表现是同一张包在一边齐、在另一边缺。"""
     if not os.path.isdir(app):
         return None
     seen, unread = set(), []
@@ -220,6 +283,15 @@ def missing_apply_sections(app):
                 seen |= head_names(_cir.read_text(os.path.join(dp, f)))
             except Exception as e:
                 unread.append(f'{f}（{type(e).__name__}）')
+    return seen, unread
+
+
+def missing_apply_sections(app):
+    """P10 用：三件里缺哪几件 → (缺失节名, 读不动的文件名)。"""
+    got = read_apply_sections(app)
+    if got is None:
+        return None
+    seen, unread = got
     return [s for s in APPLY_SECTIONS if s not in seen], unread
 
 
@@ -270,7 +342,7 @@ def verify(pkg, zfin):
     except (OSError, zipfile.BadZipFile) as e:
         print(f"输入不可用，未做任何判定: {zfin}（{type(e).__name__}: {e}）")
         sys.exit(2)
-    bad = shape_violations(pkg)                                  # P5–P9：包形状先看
+    bad = shape_violations(pkg)                                  # P5–P11：包形状先看
     with z:
         crc_bad = z.testzip()                                   # P3
         if crc_bad is not None:
@@ -329,7 +401,7 @@ def main(pkg):
         print('  note ' + n)                       # 未判单独说，不混进不符清单
     bad = verify(pkg, zfin)
     if bad:
-        print("MISMATCH（P1–P10）:")
+        print("MISMATCH（P1–P11）:")
         for b in bad:
             print('  ✗', b)
         sys.exit(1)

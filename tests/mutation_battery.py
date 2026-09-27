@@ -58,6 +58,7 @@ MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 RP = 'scripts/rebuild_package.py'
 TB = 'tests/mutation_battery.py'        # cen 档有一条臂咬电池自己的 arm 清单，目标就是本文件
+TS = 'tests/test_scripts.py'            # 量具自身也算一个目标：常驻里的提取器自测要有注入臂咬得住
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
@@ -147,8 +148,45 @@ MUTS = {
          "        flat = re.sub(r'\\s+', '', '\\n'.join(bg_body))",
          "        flat = re.sub(r'\\s+', '', text)",
          '作用域丢了'),
-        ('脚本总结行谎称 R1–R5', IRON, '（规则 R1–R9，判据见脚本 docstring）',
+        # R10 七条：整条不跑／适用域越界／两节引错法源／词表混进 R1 的词／词表混进撞车词／
+        # 内联写法冒充节／pStyle 通道之外还有一条 md 通道。
+        # 后两条各打一张"只关掉自己"的常驻前提断言（交集为空、撞车词必绿），
+        # 这两格若没有注入臂，前提断言就是装饰。
+        ('R10 整条不跑（摘要与简要说明的宣传语都不管）', IRON,
+         '    for head, ref in R10_SCOPE:', '    for head, ref in ():',
+         ('摘要里的商业宣传语未被 R10 抓住', 'docx 里的宣传语未被 R10 抓到')),
+        ('R10 适用域越出两节（把权利要求段也管进来）', IRON,
+         "R10_SCOPE = ((ABSTRACT_HEAD, '细则第二十六条：摘要中不得使用商业性宣传用语'),",
+         "R10_SCOPE = ((ABSTRACT_HEAD, '细则第二十六条：摘要中不得使用商业性宣传用语'),\n"
+         "             (CLAIMS_HEAD, '越界'),",
+         'R10 越出摘要／简要说明两节去管全文了'),
+        ('R10 简要说明侧引成摘要那条法源', IRON,
+         "             (BRIEF_DESC_HEAD, '细则第三十一条：简要说明不得使用商业性宣传用语'))",
+         "             (BRIEF_DESC_HEAD, '细则第二十六条：摘要中不得使用商业性宣传用语'))",
+         ('简要说明里的宣传语未被 R10 抓住', 'docx 两节各引各的法源没分开')),
+        ('R10 词表与 R1 重叠（同一件事被两条判据各报一遍）', IRON,
+         "COMMERCIAL = ['性价比', '物美价廉', '价廉物美',",
+         "COMMERCIAL = ['首创', '性价比', '物美价廉', '价廉物美',",
+         'R10 词表与 R1 的 BANNED_ALWAYS 有重叠'),
+        ('R10 词表混进技术撞车词（绝对式编码器被当宣传语）', IRON,
+         "COMMERCIAL = ['性价比', '物美价廉', '价廉物美',",
+         "COMMERCIAL = ['绝对', '性价比', '物美价廉', '价廉物美',",
+         '技术语义撞车的词被 R10 判红了'),
+        ('R10 的节锚点丢掉井号（正文里的「简要说明：」冒充一个节）', IRON,
+         r"BRIEF_DESC_HEAD = re.compile(r'^#{2,3}\s*(?:\d+\.\s*)?(?:外观)?简要说明')",
+         r"BRIEF_DESC_HEAD = re.compile(r'^\s*(?:\d+\.\s*)?(?:外观)?简要说明')",
+         ('内联写法被当成一个节来判了',
+          # 锚点放宽后一级标题 `# 简要说明` 也会先被 section_body 取走，
+          # 于是"简要说明里的宣传语必红"那档同样翻绿——同一件变异的第二个合法原告。
+          '简要说明里的宣传语未被 R10 抓住')),
+        ('脚本总结行谎称 R1–R5', IRON, '（规则 R1–R10，判据见脚本 docstring）',
          '（规则 R1–R5，判据见脚本 docstring）', '门禁自报规则区间与实际判据'),
+        # 这条打的是**量具**：常驻里那把现推 R 号的尺子若退回只认一位，R10 会被折成 R1，
+        # "号有断档"从此看不见——与第 26 轮契约取号那次同源，只是这次咬的是测试自己。
+        ('R 号提取器退回只认一位（R10 被折成 R1，断档永远看不见）', TS,
+         r'''    return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d{1,2})", src)})''',
+         r'''    return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)", src)})''',
+         ('R 号提取器把两位数判据号读错了', '门禁自报规则区间与实际判据')),
         ('--all 只扫顶层（不递归）', IRON, '        for dp, _, fs in os.walk(root):',
          '        for dp, _, fs in [(root, [], [f for f in os.listdir(root)\n'
          '                              if os.path.isfile(os.path.join(root, f))])]:',
@@ -451,7 +489,8 @@ MUTS = {
          "                if '【' in cell and '】' in cell:", '                if False:',
          '占位被当成已声明类别，或没说清这是未判'),
         ('P9 实用新型零图不报', RP,
-         '                elif n == 0:', '                elif False:',
+         "                elif n_img == 0:\n                    bad.append('P9 专利清单列了实用新型",
+         "                elif False:\n                    bad.append('P9 专利清单列了实用新型",
          '实用新型零图未被 P9 抓到（或牵连误报了 P8）'),
         ('docx 读不动时 P9 猜成"没图"（看不见折成违规）', RP,
          '                    return None', '                    return 0',
@@ -464,8 +503,49 @@ MUTS = {
          '    return [s for s in APPLY_SECTIONS if not any(s in h for h in seen)], unread',
          '摘要/附图被当成说明书，或缺件报少了'),
         ('读不动的文书不再计成未核（P10 的绿就没了依据）', RP,
-         '        if unread:', '        if False:',
+         "        if unread:\n            notes.append(f'P10 未核：",
+         "        if False:\n            notes.append(f'P10 未核：",
          '读不动的 docx 被折成缺件、或未核这件事没说出来'),
+        # P10 的适用面两个相反方向各一条：把发明口径套到只列外观设计的包上（假红），
+        # 和把"类型还没定"折成豁免（假绿）。同 needle、不同变体——这一对的形状就是
+        # 记忆里"冗余双防线必须各配一条只关掉自己的对照"，只是这次两根轴在同一行上。
+        ('P10 对只列外观设计的包也按发明口径要三件', RP,
+         "    need_trio = (not declared) or bool({'发明', '实用新型'} & set(declared))",
+         '    need_trio = True',
+         '只列外观设计、依法只交简要说明与图的包被按发明口径要了三件'),
+        ('P10 把"类型还没定"折成豁免', RP,
+         "    need_trio = (not declared) or bool({'发明', '实用新型'} & set(declared))",
+         "    need_trio = bool({'发明', '实用新型'} & set(declared))",
+         ('类型还没定时 P10 被折成"这一支不受要求"（未判当豁免）',
+          # 同一件变异的第二个合法原告：合规范本（清单只有表头 ⇒ 类型未定）会先被
+          # "P10 不适用"那句 note 撞红，因为老断言禁的是"任何 P10 note"。
+          '三件齐的申请文件被 P10 误伤')),
+        # P11 五条：整条不跑／适用域越界（未列外观设计也管）／节名退回"包含"认（建议稿冒充）／
+        # 没图这一半漏判／同一件事实被 P9 与 P11 各报一遍。
+        # 第 4、5 条分别打的是 P11 里"漏判"与"双报"两个相反方向——它们由同一件事实
+        # （n_img==0 且两型同列）决定，缺任一臂另一臂就是装饰。
+        ('P11 外观设计那一支整条不跑', RP,
+         "            if '外观设计' in declared:", "            if False:",
+         ('外观设计缺简要说明没被 P11 单独点出来', '同一件"全包零图"被判成两个原告')),
+        ('P11 适用域越界（清单没列外观设计也去要简要说明）', RP,
+         "            if '外观设计' in declared:", "            if True:",
+         ('只列发明的包被 P11 管上了（适用域越界）', '三件齐的申请文件被 P10 误伤',
+          '外观齐件', '缺简要说明的外观设计包',
+          # 再两个合法原告：越界后所有 P8/P9 那批只列发明／实用新型的夹具
+          # 都会被 P11 要一份简要说明，先红的可能是清单族那档而非我新写的那档。
+          '合规清单被 P8/P9 误伤')),
+        ('P11 节名退回"包含"认（「简要说明建议稿」冒充已交）', RP,
+         '                    if DESIGN_SECTION not in seen:',
+         '                    if not any(DESIGN_SECTION in h for h in seen):',
+         '「简要说明建议稿」被当成已经交了简要说明'),
+        ('P11 的"没图"漏判（外观设计的图片这一格没人核）', RP,
+         "                    elif n_img == 0:\n                        if '实用新型' in declared:",
+         "                    elif False:\n                        if '实用新型' in declared:",
+         ('零图的外观设计包没被 P11 恰好抓住一条', '同一件"全包零图"被判成两个原告')),
+        ('P11 与 P9 各报一遍同一件"全包零图"', RP,
+         "                        if '实用新型' in declared:",
+         "                        if False:",
+         '同一件"全包零图"被判成两个原告'),
     ],
     'doc': [
         ('陈旧判据彻底关闭（永不判陈旧）', RG,
@@ -999,8 +1079,22 @@ def run_arm(name, work, verbose=False):
                                capture_output=True, text=True)
                if rel.endswith('.py')
                else subprocess.run([PY, '-c', 'pass'], capture_output=True, text=True))
+        # py_compile 只管**语法**。本轮实测到一条变异把常量插成"引用同文件里更晚定义的常量"：
+        # 语法合法、py_compile 全过，但导入即 NameError ⇒ 整套件第一档（真渲染图那档）先炸，
+        # 读数被记成 "C1 彩色判据未触发" 的 MISRED。那不是"另一种实现"，是"这个模块不存在"，
+        # 属于电池自己的缺陷，必须单列而不是当成覆盖或归因失败。
+        # 只 exec scripts/：tests/test_scripts.py 一 exec 就是跑整套件（那是被测内容不是检查）。
+        if chk.returncode == 0 and rel.startswith('scripts/'):
+            chk = subprocess.run(
+                [PY, '-c', 'import importlib.util as u, sys; '
+                 's = u.spec_from_file_location("mb_probe", sys.argv[1]); '
+                 'm = u.module_from_spec(s); s.loader.exec_module(m)', rel],
+                cwd=work, capture_output=True, text=True)
+            note = '导入'
+        else:
+            note = '编译'
         if chk.returncode != 0:
-            print(f'  [BAD-MUTATION] {label} —— 变异后文件不能编译：{chk.stderr.strip()[-90:]}')
+            print(f'  [BAD-MUTATION] {label} —— 变异后文件不能{note}：{chk.stderr.strip()[-90:]}')
             broken += 1
             open(path, 'w', encoding='utf8').write(orig)
             continue
