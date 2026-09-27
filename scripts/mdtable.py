@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""markdown 表格读取的唯一实现。四把判据尺子（check_evt / check_regulatory /
-check_design_completion / verify_search_report）都要按列读表，两处各写一份
+"""markdown 表格读取的唯一实现。多把判据尺子都要按列读表，同一件事两处各写一份
 split_row/col 迟早漂移——漂移的表现是同一个表在一边合规、在另一边判红。
+谁在用它不在这里抄名单：README §7 的 `mdtable` 条目列一份、常驻用例按 scripts/ 树现算一份，
+两边对账（"防漂移的那句话"自己就漂过三个名字，本轮起由用例盯着）。
 """
 import re
 

@@ -1377,6 +1377,52 @@ def test_docs_scripts_contract():
     # 方向二：脚本声明的每个参数都要至少在文档出现一次
     for flag in sorted(all_flags):
         assert_(flag in doctxt, f'脚本参数 {flag} 无任何文档出处')
+    # mdtable 的「共用」清单只能现算不能抄：本轮开工时 README 列 5 个、树上是 7 个。
+    MD_LOAD_A = "_load('mdtable')"
+    MD_LOAD_B = 'import mdtable'
+
+    def _md_consumers(srcs):
+        return {n for n, s in srcs.items() if n != 'mdtable.py'
+                and (MD_LOAD_A in s or MD_LOAD_B in s)}
+
+    # 先证这把尺子会开火：两种拼写各认得，量具自己不算消费者。
+    _syn = {'a.py': MD_LOAD_A, 'b.py': MD_LOAD_B + '\n',
+            'mdtable.py': MD_LOAD_A, 'c.py': 'pass\n'}
+    assert_(_md_consumers(_syn) == {'a.py', 'b.py'},
+            f'消费者现算漏了某种拼写或把量具自己算了进去: {sorted(_md_consumers(_syn))}', None)
+    tree_md = _md_consumers(scripts)
+    assert_(len(tree_md) >= 5, f'消费者现算只读到 {sorted(tree_md)}，本检查在空转')
+
+    def _md_doc_list(txt):
+        """取 README 里 `scripts/mdtable.py` 那一条（含其续行）列出的 *.py 名字。"""
+        lines = txt.splitlines()
+        for i, ln in enumerate(lines):
+            if 'scripts/mdtable.py' not in ln:
+                continue
+            out = set()
+            for cont in lines[i:]:
+                if not cont.strip() or (cont.startswith('- ') and 'mdtable' not in cont):
+                    break
+                out |= set(re.findall(r'`([a-z_]+\.py)`', cont))
+            out.discard('mdtable.py')
+            return out
+        assert_(False, '文档里再没有 `scripts/mdtable.py` 那一条，共用清单没地方对账', None)
+        return set()
+
+    doc_md = _md_doc_list(doctxt)
+    # 抽取器自己的必开火对照：名字写在续行里也要取到（只认首行的话，这条对账是恒真的）
+    _doc_syn = ('- `scripts/mdtable.py`：markdown 表格读取的唯一实现，\n'
+                '  由 `check_evt.py`、`check_claims.py` 共用。\n'
+                '  这一行不点名。\n'
+                '\n'
+                '- 下一条 bullet\n')
+    assert_(_md_doc_list(_doc_syn) == {'check_evt.py', 'check_claims.py'},
+            f'清单抽取器没从续行里取到名字（那这条对账取不到东西）: '
+            f'{sorted(_md_doc_list(_doc_syn))}', None)
+    assert_(doc_md == tree_md,
+            f'mdtable 共用清单不对账 文档漏写={sorted(tree_md - doc_md)} '
+            f'文档虚指={sorted(doc_md - tree_md)}（消费者一律按 scripts/ 树现算）')
+
     # 任何提到本门禁并给出规则区间的文档行，区间都必须等于脚本源码现推的判据范围
     # （README 用法行与 pipeline-stages 的"出 R1–R5 红点"都曾谎报且无人核对）
     rnums = sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)",

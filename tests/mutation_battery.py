@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm lab        # 只跑一支（chan|claims|dc|doc|evt|fig|iron|lab|pack|reg|text|vsr）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（cen|chan|claims|dc|doc|evt|fig|iron|lab|pack|reg|text|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -57,6 +57,7 @@ CQ = 'scripts/check_claims.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 RP = 'scripts/rebuild_package.py'
+TB = 'tests/mutation_battery.py'        # cen 档有一条臂咬电池自己的 arm 清单，目标就是本文件
 
 # (说明, 目标脚本, 原样 needle, plausible 错误实现, 允许点名抓红的断言消息[可写成元组])
 MUTS = {
@@ -653,6 +654,24 @@ MUTS = {
     ],
     # docx 通道从本轮起有两把门禁共用（N 与 Q 都读同一份抽取），
     # 抽取坏掉时先红的是套件里排在前面的那支断言——下面四支 expect 因此各带两个消费者。
+    # cen＝"清单现算"这一类：判据核的是"文档抄的那份名单 == 树里现算的那份"。
+    # 两支脚本侧臂各钉一头（现算侧认拼写、对账侧认差集），第三支钉电池自己的 arm 清单，
+    # 第四支是语料侧（README）臂——它同时证明"变异目标不必是 .py"这条放开是真的。
+    'cen': [
+        ('消费者换了拼写，现算就不认了（清单对账于是恒真）', CE,
+         "_t = _load('mdtable')", '_t = _load("mdtable")',
+         'mdtable 共用清单不对账'),
+        ('现算把量具自己也算成消费者', 'tests/test_scripts.py',
+         "        return {n for n, s in srcs.items() if n != 'mdtable.py'",
+         "        return {n for n, s in srcs.items() if True",
+         '消费者现算漏了某种拼写或把量具自己算了进去'),
+        ('电池自己的 arm 清单漏抄一支（那支等于不存在）', TB,
+         '只跑一支（' + 'cen|chan|claims|', '只跑一支（' + 'chan|claims|',
+         '电池 docstring 的 arm 清单与 MUTS 键不对齐'),
+        ('README 少列一个消费者（文档侧差集必须咬得动）', 'README.md',
+         '`check_figure_labels.py`、`check_figure_text.py`', '`check_figure_labels.py`',
+         'mdtable 共用清单不对账'),
+    ],
     'chan': [
         ('docx 表格还原分支整支关掉（表散成裸行→N 误判"有节无表"）', IRON,
          "        if p.tag.endswith('}tbl'):", '        if False:',
@@ -921,8 +940,12 @@ def run_arm(name, work, verbose=False):
         open(path, 'w', encoding='utf8').write(orig.replace(old, new, 1))
         # 变异本身必须仍是"可运行的另一种实现"：改出语法错的文件不是覆盖证据，
         # 而是电池自己的缺陷（本轮就有一条 needle 只截到半截 f-string，留下孤立续行）
-        chk = subprocess.run([PY, '-m', 'py_compile', rel], cwd=work,
-                             capture_output=True, text=True)
+        # 只有 .py 目标能编译检查；语料侧（README 这类）改的是文字，编译无从谈起，
+        # 但不让改就把「文档↔脚本」这类判据永远排除在电池之外——那是人为限制不是判据限制。
+        chk = (subprocess.run([PY, '-m', 'py_compile', rel], cwd=work,
+                               capture_output=True, text=True)
+               if rel.endswith('.py')
+               else subprocess.run([PY, '-c', 'pass'], capture_output=True, text=True))
         if chk.returncode != 0:
             print(f'  [BAD-MUTATION] {label} —— 变异后文件不能编译：{chk.stderr.strip()[-90:]}')
             broken += 1
