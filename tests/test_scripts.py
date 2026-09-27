@@ -3274,13 +3274,47 @@ def test_check_claims():
                               '\n'.join(ln for ln in out.splitlines()
                                         if ln.startswith('  ') and not ln.startswith('  note '))))
 
+    def ledger(out):
+        """收尾那行的覆盖账 (违规数, 实判判据数)——第二个数就是本轮缺陷的主语。
+
+        `实判判据 N 条` 判的是覆盖（这条判据的适用域读到了没有），不是开火；所以它**不能**
+        拿 fired() 去核：合规档 fired() 是空集，而覆盖账必须是 12，两者一比就等于把
+        "跑了没发现问题"折成"根本没跑"（第 36 轮 Q7/Q8、第 39 轮 Q12 都是这一形状，
+        合规模具因此只自报 9 条）。这里只按门禁自己打印的那一行逐字取数，不抄判据号。
+        """
+        m = re.search(r'违规 (\d+)｜实判判据 (\d+) 条', out)
+        assert_(m is not None, f'门禁没打印覆盖账那一行（读者拿不到分母）: {out}', None)
+        return int(m.group(1)), int(m.group(2))
+
     with tempfile.TemporaryDirectory() as d:
         ok = mkpkg(os.path.join(d, 'ok'), OK)
         r = run([PY, f'{S}/check_claims.py', ok])
-        assert_(r.returncode == 0 and '实判判据 9 条' in r.stdout and '→ Q' not in r.stdout,
-                f'合规权要被判红，或九条没各判到: {show(r)}', r)
+        # 覆盖账主钉：三节齐（说明书＋权利要求书＋标记对照表）、形状全合规 ⇒ 违规 0 且 12 条。
+        # 12 = **适用数**（Q1–Q6、Q9–Q11 判在解析出的八项权项上，Q7／Q8／Q12 扫过这一节就记），
+        # 不是开火数——这一档开火 0 条，所以拿 fired() 核对分母等于把"跑了没发现问题"
+        # 折成"根本没跑"（第 36 轮 Q7/Q8、第 39 轮 Q12 的登记都写在 `if 命中:` 里，
+        # 合规权要因此只自报 9 条）。缺陷若退回原位，第一红就是这一条。
+        assert_(r.returncode == 0 and ledger(r.stdout) == (0, 12) and '→ Q' not in r.stdout,
+                f'合规权要被判红，或十二条没各判到: {show(r)}', r)
         # 填充本身要合规：7 项从属两档都容得下，所以既不该红、也不该冒出"部分未判"的噪声
         assert_('Q6 部分未判' not in r.stdout, f'两档都容得下时 Q6 仍报未判: {show(r)}', r)
+
+        # ── 覆盖账常驻钉：三节齐（说明书＋权利要求书＋标记对照表）、形状全合规 ──
+        # 上面那档钉的是**分母等于适用数**（12），不是分母等于开火数：同一份读数里 fired() 恒为空集，
+        # 所以"节面三条只在开火时才记进分母"那个缺陷只有覆盖账看得见。
+        # 这一档钉的是同一件事的另一半：合计行也得把这份"跑了、没发现问题"的包算成**已判 1 个包**
+        # （`judged += 1 if seen else 0` 走的是包级账，跟 len(seen) 不是同一格）——
+        # 少报这一格，读者从合计行照样会把"读到了没问题"读成"这包没人判过"，同一种把已判折成未报。
+        assert_(fired(r.stdout) == set() and '实判 1 个包' in r.stdout and '合计违规 0' in r.stdout,
+                f'合规包（零开火）没被合计行算作已判的 1 个包: {show(r)}', r)
+        # 适用域少一格、分母就必须跟着少一格：去掉「标记｜名称」对照表 ⇒ Q5 没得对照 ⇒ 11 条。
+        # 这一档证明那个 12 是现算的覆盖账、不是写死的常量；反方向（把没读到的折成已判）
+        # 由下面 noclaims 档的"0 条 + 实判 0 个包"钉住。
+        p = os.path.join(d, 'nomarks')
+        mkpkg(p, OK.replace(TBL, ''))
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and ledger(r.stdout) == (0, 11) and '→ Q5 未判' in r.stdout,
+                f'去掉标记对照表后覆盖账没跟着让出 Q5 这一格（未判被折成已判）: {show(r)}', r)
 
         p = os.path.join(d, 'q1')
         mkpkg(p, OK.replace('\n3. 根据权利要求1或2', '\n4. 根据权利要求1或2'))
@@ -3355,7 +3389,10 @@ def test_check_claims():
         os.makedirs(p)
         open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
         r = run([PY, f'{S}/check_claims.py', p])
-        assert_(r.returncode == 0 and 'Q1–Q12 未判' in r.stdout,
+        # 反方向那一半也得钉住：没读到节 ⇒ 覆盖账 0 条、包级账也不算已判的包，
+        # 本次改动（扫过节就记）不许把"没读到"折成"已判"。
+        assert_(r.returncode == 0 and 'Q1–Q12 未判' in r.stdout
+                and '实判判据 0 条' in r.stdout and '实判 0 个包' in r.stdout,
                 f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
         # 三态的另一半：有节却一行权项都没解析出。未判的理由必须是「无项」而不是「无节」，
         # 否则读者按提示回去找那一节，会发现节好好地在那里。
@@ -3363,7 +3400,7 @@ def test_check_claims():
         mkpkg(p, '# 说明书\n## 权利要求书\n一种锁扣装置，包括躯干框架与锁扣本体。\n')
         r = run([PY, f'{S}/check_claims.py', p])
         assert_(r.returncode == 0 and '一行权项都没解析出' in r.stdout
-                and '没有「权利要求书」节' not in r.stdout,
+                and '没有「权利要求书」节' not in r.stdout and ledger(r.stdout) == (0, 3),
                 f'有节无项被折成合规，或未判理由报错了对象: {show(r)}', r)
 
         r = run([PY, f'{S}/check_claims.py', os.path.join(ok, '02_申请文件', '说明书.md')])
@@ -3395,7 +3432,7 @@ def test_check_claims():
                     t.cell(i, j).text = v
             doc.save(os.path.join(wd, '说明书.docx'))
             r = run([PY, f'{S}/check_claims.py', wd])
-            assert_(r.returncode == 0 and '实判判据 9 条' in r.stdout,
+            assert_(r.returncode == 0 and '实判判据 12 条' in r.stdout,
                     f'Word-only 权要未被 Q 真判（只认 md 的话这里假绿或成串假红）: {show(r)}', r)
             bad_doc = os.path.join(d, 'wordbad')
             os.makedirs(bad_doc)
@@ -3538,9 +3575,11 @@ def test_check_claims():
                 f'"有节却无项"那档没点名到底是哪几条判不起: {show(r)}', r)
         assert_('没有「权利要求书」节' not in r.stdout,
                 f'明明读到了节却报"没有权利要求书节"（两档未判混成一档）: {show(r)}', r)
-        # 实判判据那一格也跟着走：一项权项都没解析出，但节面这条判动了，Q12 就该被算进分母
-        assert_('实判判据 1 条' in r.stdout,
-                f'节面判据开了火却没被算进实判分母: {show(r)}', r)
+        # 实判判据那一格也跟着走：一行权项都没解析出，但**这一节扫过了**，节面三条
+        # （Q7／Q8／Q12）就都该记进覆盖账——判没判红与记不记无关（这里 Q7／Q8 零开火也记）。
+        # 旧写法把登记写在 `if 命中:` 里，这一档只自报 1 条，把"跑了没发现问题"折成"没跑"。
+        assert_('实判判据 3 条' in r.stdout,
+                f'扫过这一节却没把节面三条记进实判分母（登记还留在开火分支里）: {show(r)}', r)
 
         # ── Q9／Q10／Q11（《专利审查指南》2023 第二部分第二章 §3.2.2 与 §3.3）──────────
         # 三条的主语都是"权利要求中／每一项权利要求"，判在**每一项权项之内**：
@@ -3681,7 +3720,8 @@ def test_check_claims():
     print('PASS check_claims（Q1–Q12 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
           'Q7 嵌图两通道 + Q8 引用语作用域 + Q9 四词各一档 + Q10 两半各成对（约＋数字／或类似物）'
           '+ Q11 两种位点／无结尾句号不判红／合规多行权项 + 行号随触发行移动 + Q9–Q11 出域不判 '
-          '+ Q12 冠词正反档／通篇冠词仍判满（节面条目排在无项早退之前）+ rc=2）')
+          '+ Q12 冠词正反档／通篇冠词仍判满（节面条目排在无项早退之前）'
+          '+ 覆盖账：合规 12 条／无对照表 11 条／有节无项 3 条／无节 0 条（包级账同步 1／0 个包）+ rc=2）')
 
 
 def test_figure_text_channel():

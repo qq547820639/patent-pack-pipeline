@@ -72,6 +72,8 @@ Q9–Q11 的法源是《专利审查指南》（2023，国家知识产权局令�
       没有标记对照表 ⇒ Q5 未判（括号形状没有可对照的号集）。
       Q9–Q11 判在**每一项权项之内**，所以它们和"有没有解析出权项"同生死；
       Q7／Q8 判在整节文本面，权项切不出来时照判。
+      `实判判据 N 条` 是覆盖账：只要该条的适用域读到了就该记，判没判红与它无关；
+      "看不见"走未判、"读到了没问题"走已判零违规——两者不许互相冒充。
 退出码: 0 合规或未判 / 1 存在违规 / 2 输入不可用（不是目录、读不动的 docx 等，说清成因）。
 用法: python3 scripts/check_claims.py <交付包目录>   # 只接目录，递归找 .md 与 .docx
 """
@@ -251,15 +253,17 @@ def check_text(path, text, name2num, marks_found, ptype=None):
         if CLAIM_IMAGE.search(ln):
             bad.append(f'{where(off)}: 权利要求书里出现插图（md 图片语法／docx 嵌入对象折算行）'
                        f' → Q7（第二十二条一款"不得有插图"）')
-            seen.add('Q7')
         if CLAIM_FIG_REF.search(ln) or CLAIM_SPEC_REF.search(ln):
             bad.append(f'{where(off)}: 权利要求书里用"如图…所示／如说明书…部分所述"指回别的文书'
                        f' → Q8（第二十二条一款；正确写法是把标记放进括号，见 Q5）')
-            seen.add('Q8')
         if CLAIM_NUM_PREFIX.search(ln):
             bad.append(f'{where(off)}: 权项编号「{ln.strip()[:12]}…」前冠了"权利要求／权项"字样'
                        f' → Q12（指南第一部分第一章 §4.4"编号前不得冠以\'权利要求\'或者\'权项\'等词"）')
-            seen.add('Q12')
+    # 覆盖账：扫过这一节就把节面三条记进分母，与开火与否无关。
+    # 登记原先写在上面三个 `if 命中:` 里面，于是合规权要只自报 9 条而不是 12 条，
+    # 读者分不清"跑了没发现问题"与"根本没跑"——那是把已判折成未报，与三态纪律反方向。
+    # 早退在前：没有「权利要求书」节时上面 return 掉了，这里到不了，无节仍是整族未判。
+    seen |= {'Q7', 'Q8', 'Q12'}
 
     items = split_items(body)
     if not items:
