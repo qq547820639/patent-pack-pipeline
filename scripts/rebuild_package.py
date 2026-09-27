@@ -27,9 +27,16 @@
 P5–P9 看的是**包本身**而不是 zip：P1–P4 全绿而包里本来就缺一整段、或整包是"没附图的实用新型"，
 是这两种判据的分界。P9 的判红条件刻意取最强形态（**全包一张图都没有**）——这种时候说明书附图
 必然也没有；"有图但说明书没引到"那种弱形态归 T4/T5/T6，不在这里重复判。
-三态：清单里没有带「类型」列的表／一条专利都没列／docx 读不动 ⇒ P8、P9 走未判，不折成合规。
+  P10 02_申请文件 里三件齐：**说明书摘要**、**权利要求书**、**说明书**（按归一后的节名全等认，
+     「说明书摘要」「说明书附图」都不与「说明书」互认）。法源两层：《专利法》第二十六条一
+     "应当提交请求书、说明书及其摘要和权利要求书等文件"（三件都应提交），
+     《专利法实施细则》第四十四条（一）只把缺 说明书／权利要求书 列进不予受理清单，
+     摘要缺失走补正——所以三条都判红，报文里分别写各自的后果层级。md 与 docx 两通道同一套认法
+     （docx 的节标题由 w:pStyle 还原成 # 行，与 N/T/Q 族同一条通道）。
+三态：清单里没有带「类型」列的表／一条专利都没列／docx 读不动 ⇒ P8、P9 走未判，不折成合规；
+      02_申请文件 目录本身不在 ⇒ P10 未判（缺段已由 P5 报，不重复报成缺件）。
 
-退出码: 0 全过或未判 / 1 存在不符（P1–P9 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
+退出码: 0 全过或未判 / 1 存在不符（P1–P10 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
 注意：必须用 Python zipfile 写包——Info-ZIP zip(1) 在本环境不写 UTF-8 标志位（0x800），
 导致中文文件名在 Windows 资源管理器/部分解压软件下显示乱码。Python zipfile 对非 ASCII
 文件名自动置 UTF-8 标志位，Windows/macOS/Linux 全兼容。
@@ -54,8 +61,23 @@ def _load(name):
 
 
 _t = _load('mdtable')                  # 专利清单按列读，读表实现由 mdtable 唯一持有
-_ck = _load('check_claims')            # 专利类别清单由 Q 族一处持有，这里不另抄一份
+_ck = _load('check_claims')            # 专利类别清单由 Q 族一处持有，这里不抄第二份
+_cir = _load('check_iron_rules')         # 文书读取（md＋docx 两通道）共用它的 read_text。
+# 不用 check_claims.read_any：那一层把「读不动」直接 sys.exit(2)，而 P10 要的是
+# 「这块读不动就计成未核、继续读其余文书」，不是整包不收。
 IMG_EXT = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.webp')
+import re
+
+# 02_申请文件 必须交出的三件（按节名认）。法源两层，别混着写：
+# 《专利法》第二十六条第一句（逐字，两份源各读过一遍）："申请发明或者实用新型专利的，
+# 应当提交请求书、说明书及其摘要和权利要求书等文件。"——三件都是"应当提交"；
+# 《专利法实施细则》第四十四条（一）只把"缺少请求书、说明书（实用新型无附图）或者权利要求书"
+# 列进不予受理清单，摘要缺失不在那一档（走补正）。所以三条都判红，但后果层级在报文里分别写。
+# 节名一律**归一后全等**才认：模板 §2 里「说明书摘要」「说明书附图」「说明书」是三个并列节，
+# 用"包含"会把"只写了摘要"的包读成"有说明书"。
+APPLY_SECTIONS = ('说明书摘要', '权利要求书', '说明书')
+_PAREN = re.compile(r'[（(].*?[）)]')
+_HD_NUM = re.compile(r'^[0-9０-９.、\s]+')
 
 
 def files_of(root):
@@ -150,7 +172,54 @@ def shape_state(pkg):
                     bad.append('P9 专利清单列了实用新型，可全包找不到一张图'
                                '（图片文件与 docx 内嵌件都是零）——第四十四条（一）'
                                '"说明书（实用新型无附图）"按缺说明书处理，不予受理级')
+
+    # P10：02_申请文件 的三件齐不齐（专利法 26 条一；不予受理级那一半另引细则 44 条（一））
+    got = missing_apply_sections(app)
+    if got is None:
+        notes.append('P10 未判：02_申请文件 目录本身不在（缺段已由 P5 报，这里不重复报成缺件）')
+    else:
+        miss, unread = got
+        for s in miss:
+            tier = ('细则第四十四条（一）：不予受理级' if s != '说明书摘要'
+                    else '专利法第二十六条一：应提交而未提交（补正级，不在 44 条清单里）')
+            bad.append(f'P10 02_申请文件 里找不到「{s}」节（md 与 docx 两通道都读过了）——{tier}')
+        if unread:
+            notes.append(f'P10 未核：{len(unread)} 份文书读不动（{"、".join(unread[:3])}），'
+                         f'缺件这条不能替它们担保')
     return bad, notes
+
+
+def head_names(text):
+    """把 markdown 标题行归一成节名集合：去井号、去尾部括注、去编号前缀。
+    docx 通道由 check_iron_rules.docx_text 按 w:pStyle 还原成同样的 # 行，两通道一套认法。"""
+    out = set()
+    for ln in text.splitlines():
+        if not ln.strip().startswith('#'):
+            continue
+        h = ln.strip().lstrip('#').strip()
+        h = _PAREN.sub('', h).strip()
+        h = _HD_NUM.sub('', h).strip()
+        if h:
+            out.add(h)
+    return out
+
+
+def missing_apply_sections(app):
+    """02_申请文件 缺哪几件 → (缺失节名, 读不动的文件名)。
+    目录本身不在时返回 None：那是 P5 的地盘，不在这里重复报成"缺件"。"""
+    if not os.path.isdir(app):
+        return None
+    seen, unread = set(), []
+    for dp, _, fs in os.walk(app):
+        for f in sorted(fs):
+            low = f.lower()
+            if not low.endswith(('.md', '.docx')):
+                continue
+            try:
+                seen |= head_names(_cir.read_text(os.path.join(dp, f)))
+            except Exception as e:
+                unread.append(f'{f}（{type(e).__name__}）')
+    return [s for s in APPLY_SECTIONS if s not in seen], unread
 
 
 def claim_rows(text):
@@ -259,7 +328,7 @@ def main(pkg):
         print('  note ' + n)                       # 未判单独说，不混进不符清单
     bad = verify(pkg, zfin)
     if bad:
-        print("MISMATCH（P1–P9）:")
+        print("MISMATCH（P1–P10）:")
         for b in bad:
             print('  ✗', b)
         sys.exit(1)

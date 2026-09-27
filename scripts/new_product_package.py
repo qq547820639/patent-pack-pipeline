@@ -131,6 +131,10 @@ def spec_doc(name):
     列名漂移时判据照绿、底稿照错——正是要防的那种漂移。"""
     parts = [f'# {name} 申请文件（说明书骨架）\n',
              '（骨架期对照表只有表头：N2–N4 报"未判"而不是判红，填了行才会被判。）\n']
+    # 三件应提交的文书先立节、内容留占位：节名由判据侧 rebuild_package.APPLY_SECTIONS 持有，
+    # 生成器另抄一份节名就是给"P10 绿而骨架没那节"这种漂移留活路。
+    for s in _rp.APPLY_SECTIONS:
+        parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
     for title, hint in _nl.DOC_SECTIONS:
         body = hint if hint else f'{_nl.header_row()}\n{_nl.separator_row()}'
         parts.append(f'## {title}\n{body}')

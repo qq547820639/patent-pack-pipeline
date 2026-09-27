@@ -328,14 +328,18 @@ def test_rebuild_package():
             os.makedirs(os.path.join(pkg, seg))
         open(os.path.join(pkg, 'README.md'), 'w', encoding='utf8').write(
             '# T包 专利交付包\n\n## 专利清单\n\n| 序号 | 专利名称 | 类型 |\n|---|---|---|\n')
+        # 三件齐（P10）＋附图说明（N1）：第五份"合规范本"被新判据照红的那一处，
+        # 红得对——02_申请文件 法定就是摘要／权要／说明书三件，夹具只写一件等于替判据造假绿。
         open(os.path.join(pkg, '02_申请文件', '说明书_T包.md'), 'w', encoding='utf8').write(
-            '# T包 申请文件（说明书骨架）\n\n## 附图说明\n\n图 1 为躯干框架结构示意图。\n')
+            '# T包 申请文件（说明书骨架）\n\n## 说明书摘要\n\n躯干框架。\n'
+            '## 权利要求书\n\n1. 一种躯干框架。\n\n## 说明书\n\n正文。\n'
+            '\n## 附图说明\n\n图 1 为躯干框架结构示意图。\n')
         src = os.path.join(pkg, '01_交底书', '交底书.md')
         BODY = '中文内容测试' * 8
         open(src, 'w', encoding='utf8').write(BODY)
         r = run([PY, f'{S}/rebuild_package.py', pkg])
         assert_(r.returncode == 0 and 'SHA-256+CRC+UTF-8 标志位全过' in r.stdout,
-                '打包或 P1–P7 校验异常', r)
+                '打包或 P1–P10 校验异常', r)
         with zipfile.ZipFile(pkg + '.zip') as z:
             i = [x for x in z.infolist() if '交底书.md' in x.filename][0]
             assert_(i.flag_bits & 0x800, 'UTF-8 标志位未置', r)
@@ -405,8 +409,12 @@ def test_rebuild_package():
             if readme is not None:
                 open(os.path.join(p, 'README.md'), 'w', encoding='utf8').write(
                     '# 交付包\n\n## 专利' + readme + '\n\n| 序号 | 名称 | 类型 |\n')
+            # 三件齐（P10）：骨架期那份只有"正文"两个字的说明书，P10 一上去就红了——
+            # 这是设计好的反馈：02_申请文件 的法定件本来就是摘要／权要／说明书三件，
+            # 夹具若只写一件，"缺一件会不会真拦住"那条断言就永远不红。
             open(os.path.join(p, '02_申请文件', '说明书.md'), 'w', encoding='utf8').write(
-                '正文' if not empty_app else '')
+                '# 申请文件\n## 说明书摘要\n摘要正文\n## 权利要求书\n1. 一种装置。\n'
+                '## 说明书\n正文\n' if not empty_app else '')
             return p
 
         v = rp.shape_violations(mkshape('形状包_合规'))
@@ -488,6 +496,63 @@ def test_rebuild_package():
         assert_(b == [] and any(x.startswith('P9 未判') for x in n),
                 f'docx 读不动时 P9 猜成"没图"、或干脆不吭声: {b} / {n}', None)
 
+        # P10：02_申请文件 三件齐（专利法 26 条一；不予受理那一半另引细则 44 条（一））
+        def mkapp(tag, body=None, docx=False, broken=False):
+            p = mkshape(tag)
+            app = os.path.join(p, '02_申请文件')
+            for f in os.listdir(app):
+                os.remove(os.path.join(app, f))
+            if body is not None:
+                nm = '申请文件.docx' if docx else '申请文件.md'
+                if docx:
+                    from docx import Document
+                    doc = Document()
+                    for ln in body.splitlines():
+                        if ln.startswith('## '):
+                            doc.add_heading(ln[3:], level=2)
+                        elif ln.strip():
+                            doc.add_paragraph(ln)
+                    doc.save(os.path.join(app, nm))
+                else:
+                    open(os.path.join(app, nm), 'w', encoding='utf8').write(body)
+            if broken:
+                open(os.path.join(app, '坏件.docx'), 'wb').write(b'not a zip')
+            return p
+
+        FULL3 = ('# 申请文件\n## 说明书摘要\nx\n## 权利要求书\n1. 一种装置。\n'
+                 '## 说明书\ny\n## 说明书附图\n图1\n')
+        b, n = rp.shape_state(mkapp('P10_三件齐', FULL3))
+        assert_(b == [] and not any('P10' in x for x in n),
+                f'三件齐的申请文件被 P10 误伤: {b} / {n}', None)
+        b, _ = rp.shape_state(mkapp('P10_缺权要', FULL3.replace('## 权利要求书\n1. 一种装置。\n', '')))
+        assert_(any('P10' in x and '权利要求书' in x for x in b),
+                f'缺权利要求书没被 P10 抓到: {b}', None)
+        # 子串遮蔽：模板 §2 里「说明书摘要」「说明书附图」与「说明书」并列存在，
+        # 按"包含"认的话，一份只写了摘要与附图的包会被读成"说明书齐了"。
+        b, _ = rp.shape_state(mkapp('P10_摘要不算说明书',
+                                    '# 申请文件\n## 说明书摘要\nx\n## 说明书附图\n图1\n'))
+        assert_(sum('P10' in x for x in b) == 2
+                and any('「说明书」' in x for x in b) and any('「权利要求书」' in x for x in b),
+                f'摘要/附图被当成说明书，或缺件报少了: {b}', None)
+        b, _ = rp.shape_state(mkapp('P10_带编号括注',
+                                    '# 申请文件\n### 1. 说明书（技术领域/发明内容）\n'
+                                    '### 2. 权利要求书（取自交底书 §6）\n### 3. 说明书摘要（≤300 字）\n'))
+        assert_(b == [], f'节名带编号与尾注时 P10 误伤: {b}', None)
+        try:
+            from docx import Document
+            b, _ = rp.shape_state(mkapp('P10_只有Word件', FULL3, docx=True))
+            assert_(b == [], f'Word-only 申请文件被 P10 当成缺件: {b}', None)
+        except ImportError:
+            print('  SKIP P10 的 docx 通道（无 python-docx）')
+        b, n = rp.shape_state(mkapp('P10_坏docx', FULL3, broken=True))
+        assert_(b == [] and any('P10 未核' in x for x in n),
+                f'读不动的 docx 被折成缺件、或未核这件事没说出来: {b} / {n}', None)
+        # 目录在而里面一份文书都没有：P7 报空壳，P10 也照报三件缺（两码事，各报各的）
+        b, n = rp.shape_state(mkapp('P10_空壳02', None))
+        assert_(any(x.startswith('P7') for x in b) and sum(x.startswith('P10') for x in b) == 3
+                and not any('P10 未判' in x for x in n),
+                f'空壳 02 目录的两种坏没分开报: {b} / {n}', None)
+
         # 形状判据必须走得到真入口：main() 打完包后要能报出来（否则 shape 只在单元里活着）
         rpk = mkshape('形状包_走main', drop='05_法规与裁决')
         r = run([PY, f'{S}/rebuild_package.py', rpk])
@@ -499,8 +564,12 @@ def test_rebuild_package():
         r = run([PY, f'{S}/rebuild_package.py', mktbl('P89_走main未判', ['【待填写】'])])
         assert_(r.returncode == 0 and 'note' in r.stdout and '占位' in r.stdout,
                 f'未判没随 main() 打印：退 0 就等于宣称核过了: {show(r)}', r)
+        r = run([PY, f'{S}/rebuild_package.py',
+                 mkapp('P10_走main红', FULL3.replace('## 权利要求书\n1. 一种装置。\n', ''))])
+        assert_(r.returncode == 1 and 'P10' in r.stdout and '权利要求书' in r.stdout,
+                f'缺件的申请文件从 main() 出去时没被点名: {show(r)}', r)
     print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / '
-          'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / rc=2 三档）')
+          'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / P10 三件齐含遮蔽与未核 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):

@@ -125,7 +125,7 @@ python3 scripts/check_figure_text.py <交付包目录>                # 图 ↔ 
 python3 scripts/check_figures.py <申请文件目录> [...]              # 附图：C1 彩色=0 / C2 非空白 / C3 图数一致 / C4 docx 内嵌图同判 / C5 声明了请求保护色彩却没有彩色图（递归是默认行为，只接目录；除 `-h` 用法出口外不认任何开关）
 python3 scripts/regen_docx.py <根目录>                           # 批量 md→docx（强制 UTF-8 locale；缺前置依赖给安装指引）
 python3 scripts/regen_docx.py <根目录> --check                # 只列待重转（md 比 docx 新）的成对文书，不需要 pandoc
-python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」内容级比对 P1–P4（路径+字节数+SHA-256+CRC+UTF-8 位）＋包形状 P5–P9（五段目录/README 专利清单/申请文件非空/类型列三类之一/实用新型必须有附图）
+python3 scripts/rebuild_package.py <包目录>                      # 打包并做「目录↔zip」内容级比对 P1–P4（路径+字节数+SHA-256+CRC+UTF-8 位）＋包形状 P5–P10（五段目录/README 专利清单/申请文件非空/类型列三类之一/实用新型必须有附图/申请三件齐：摘要·权要·说明书）
 ```
 
 退出码（判据类脚本统一约定：0 合规 / 1 违规 / 2 环境或输入问题，未做判定）：
