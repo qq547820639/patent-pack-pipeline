@@ -2217,7 +2217,7 @@ def test_search_report_docx_channel():
 
 
 def test_check_claims():
-    """权利要求形状门禁 Q1–Q5：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
+    """权利要求形状门禁 Q1–Q6：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
 
     合规档必须先过：Q4/Q5 这种"两支互斥"的判据一旦把合规写法也判红，整套就是永久红灯。
     q4 档刻意写成"引用号都在前"，让它只点亮 Q4——同档撞两支判据时，读数说不清是谁在咬。
@@ -2227,7 +2227,11 @@ def test_check_claims():
     OK = ('# 说明书\n## 权利要求书\n'
           '1. 一种锁扣装置，包括躯干框架（1）与锁扣本体（2），其特征在于：所述锁扣本体（2）与所述躯干框架（1）铰接。\n'
           '2. 根据权利要求 1 所述的锁扣装置，其特征在于：所述锁扣本体（2）的弹臂拉脱力 90N。\n'
-          '3. 根据权利要求1或2所述的锁扣装置，其特征在于：所述弹臂为钛合金。\n' + TBL)
+          '3. 根据权利要求1或2所述的锁扣装置，其特征在于：所述弹臂为钛合金。\n'
+          # 4–8 是纯合规填充：Q6 判从属条数（发明 7–10／实用新型 4–8），
+          # 这份「合规档」若只有 2 项从属，合不合规就说不清了。
+          + ''.join(f'{i}. 根据权利要求 1 所述的锁扣装置，其特征在于：所述锁扣本体设有卡齿{i}。\n'
+                  for i in range(4, 9)) + TBL)
 
     def mkpkg(root, body):
         os.makedirs(os.path.join(root, '02_申请文件'), exist_ok=True)
@@ -2237,8 +2241,10 @@ def test_check_claims():
     with tempfile.TemporaryDirectory() as d:
         ok = mkpkg(os.path.join(d, 'ok'), OK)
         r = run([PY, f'{S}/check_claims.py', ok])
-        assert_(r.returncode == 0 and '实判判据 5 条' in r.stdout and '→ Q' not in r.stdout,
-                f'合规权要被判红，或五条没各判到: {show(r)}', r)
+        assert_(r.returncode == 0 and '实判判据 6 条' in r.stdout and '→ Q' not in r.stdout,
+                f'合规权要被判红，或六条没各判到: {show(r)}', r)
+        # 填充本身要合规：7 项从属两档都容得下，所以既不该红、也不该冒出"部分未判"的噪声
+        assert_('Q6 部分未判' not in r.stdout, f'两档都容得下时 Q6 仍报未判: {show(r)}', r)
 
         p = os.path.join(d, 'q1')
         mkpkg(p, OK.replace('\n3. 根据权利要求1或2', '\n4. 根据权利要求1或2'))
@@ -2263,7 +2269,7 @@ def test_check_claims():
         p = os.path.join(d, 'q4')
         # 3 本身是多项从属（引 1或2），4 又以它为引用基础 → Q4；引用号全都在前，Q3 不陪跑
         mkpkg(p, OK.replace('## 图中标记说明',
-                            '4. 根据权利要求1或3所述的锁扣装置，其特征在于：所述弹臂表面镀硬铬。\n'
+                            '9. 根据权利要求1或3所述的锁扣装置，其特征在于：所述弹臂表面镀硬铬。\n'
                             '## 图中标记说明'))
         r = run([PY, f'{S}/check_claims.py', p])
         assert_(r.returncode == 1 and '同为多项从属' in r.stdout and '→ Q4' in r.stdout,
@@ -2279,12 +2285,46 @@ def test_check_claims():
         # "根据权利要求 1" 里的 1 是权项号不是标记；"拉脱力 90N" 是量值不是标记。
         # 这两处若被判红，Q5 就是一把造假红的尺子——合规档（上面第一支）同时钉着这条。
 
+        # Q6 从属条数：红档按类型各钉一条，绿档各钉一种"不该判红"的理由。
+        def q6pkg(tag, ndep):
+            return mkpkg(os.path.join(d, 'q6_' + tag),
+                         '# 说明书\n## 权利要求书\n1. 一种锁扣装置，包括躯干框架与锁扣本体。\n'
+                         + ''.join(f'{i}. 根据权利要求 1 所述的锁扣装置，其特征在于：设有卡齿{i}。\n'
+                                   for i in range(2, ndep + 2)))
+        for tag, ndep, flags, want_red in (
+                ('发明7', 7, ['--type', '发明'], False),      # 发明档下沿，必绿
+                ('发明5', 5, ['--type', '发明'], True),       # 差 2 项，必红
+                ('实用新型3', 3, ['--type', '实用新型'], True),
+                ('实用新型8', 8, ['--type', '实用新型'], False),
+                ('不给类型2', 2, [], True),                    # 并集 4–10 也拦得住"太薄"
+                ('不给类型5', 5, [], False)):                  # 并集内、只一型容得下 → 绿＋说明
+            r = run([PY, f'{S}/check_claims.py', q6pkg(tag, ndep)] + flags)
+            # 红与"部分未判"的 note 都以 `→ Q6` 收尾，只看这个子串会把未判读成判红——
+            # 开火与否必须按"这一行是不是违规行"来断。
+            red = any('→ Q6' in l and '部分未判' not in l for l in r.stdout.splitlines())
+            assert_(red == want_red and r.returncode == (1 if want_red else 0),
+                    f'Q6 档位判错（{tag}，{ndep} 项从属）: rc={r.returncode} {show(r)}', r)
+        r = run([PY, f'{S}/check_claims.py', q6pkg('不给类型5b', 5)])
+        assert_('Q6 部分未判' in r.stdout and '未给 --type' in r.stdout,
+                f'只有一型容得下时没说出"为什么没判红": {show(r)}', r)
+        r = run([PY, f'{S}/check_claims.py', q6pkg('怪类型5', 5), '--type', '外观设计'])
+        assert_('既不是发明也不是实用新型' in r.stdout,
+                f'认不出的 --type 被当成"没给"了: {show(r)}', r)
+
         p = os.path.join(d, 'noclaims')
         os.makedirs(p)
         open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
         r = run([PY, f'{S}/check_claims.py', p])
-        assert_(r.returncode == 0 and 'Q1–Q5 未判' in r.stdout,
+        assert_(r.returncode == 0 and 'Q1–Q6 未判' in r.stdout,
                 f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
+        # 三态的另一半：有节却一行权项都没解析出。未判的理由必须是「无项」而不是「无节」，
+        # 否则读者按提示回去找那一节，会发现节好好地在那里。
+        p = os.path.join(d, 'unparsed')
+        mkpkg(p, '# 说明书\n## 权利要求书\n一种锁扣装置，包括躯干框架与锁扣本体。\n')
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and '一行权项都没解析出' in r.stdout
+                and '没有「权利要求书」节' not in r.stdout,
+                f'有节无项被折成合规，或未判理由报错了对象: {show(r)}', r)
 
         r = run([PY, f'{S}/check_claims.py', os.path.join(ok, '02_申请文件', '说明书.md')])
         assert_(r.returncode == 2 and '只接目录' in r.stdout,
@@ -2315,7 +2355,7 @@ def test_check_claims():
                     t.cell(i, j).text = v
             doc.save(os.path.join(wd, '说明书.docx'))
             r = run([PY, f'{S}/check_claims.py', wd])
-            assert_(r.returncode == 0 and '实判判据 5 条' in r.stdout,
+            assert_(r.returncode == 0 and '实判判据 6 条' in r.stdout,
                     f'Word-only 权要未被 Q 真判（只认 md 的话这里假绿或成串假红）: {show(r)}', r)
             bad_doc = os.path.join(d, 'wordbad')
             os.makedirs(bad_doc)
@@ -2332,7 +2372,7 @@ def test_check_claims():
             r = run([PY, f'{S}/check_claims.py', bad_doc])
             assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
                     f'读不动的 docx 崩成异常或退码不是 2: {show(r)} / {r.stderr[-140:]}', r)
-    print('PASS check_claims（Q1–Q5 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + rc=2）')
+    print('PASS check_claims（Q1–Q6 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + rc=2）')
 
 
 def test_figure_text_channel():

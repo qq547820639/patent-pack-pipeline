@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""权利要求结构门禁 Q1–Q5：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
+"""权利要求结构门禁 Q1–Q6：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
 
 法源逐字对过《专利法实施细则》（2023 修订，国务院令第 769 号）正文：
   第二十二条「权利要求书有几项权利要求的，应当用阿拉伯数字顺序编号」
@@ -24,9 +24,14 @@
   Q5 权要里引用附图标记必须写在括号内（第二十二条"置于括号内"）。
      只认那张「标记｜名称」对照表里真实存在的号——正文里的自由数字（"拉脱力 90N"）
      一律不当标记，否则这把尺子只会制造假红。
+  Q6 从属权利要求条数落在档位内（hard-rules §4：发明 7–10、实用新型 4–8）。
+     **这是房内口径不是法条**：细则没有任何条数区间（超过 10 项只是加收申请费，不是驳回理由）。
+     类型从 `--type` 给；没给时退到两型并集 4–10 判——它仍能抓到"少到 3 条"和"多到 11 条"，
+     只是不假装知道该案是发明还是实用新型（README「专利清单」的"类型"列至今只有表头没有值，
+     所以类型今天只能由人告知，机器不去猜）。
 
-三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q5 全部未判（有的交付形态把权要交给代理机构写）；
-      有节但一行权项都解析不出 ⇒ Q1–Q4 未判并说清读到了什么；
+三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q6 全部未判（有的交付形态把权要交给代理机构写）；
+      有节但一行权项都解析不出 ⇒ Q1–Q6 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
       没有标记对照表 ⇒ Q5 未判（括号形状没有可对照的号集）。
 退出码: 0 合规或未判 / 1 存在违规 / 2 输入不可用（不是目录、读不动的 docx 等，说清成因）。
 用法: python3 scripts/check_claims.py <交付包目录>   # 只接目录，递归找 .md 与 .docx
@@ -132,17 +137,30 @@ def mark_set(docs):
     return name2num, found
 
 
-def check_text(path, text, name2num, marks_found):
+# Q6 的档位（hard-rules §4）。细则没有任何条数区间，这是房内口径，别冒法条。
+TYPE_BANDS = {'发明': (7, 10), '实用新型': (4, 8)}
+UNION_BAND = (4, 10)          # 类型没告知时的兜底：两型区间的并，仍能抓"太少/太多"
+
+
+def band_of(ptype):
+    """返回 (下界, 上界, 命中的类型键)。ptype 只认包含"发明"/"实用新型"的写法，认不出一律走并集。"""
+    for key, band in TYPE_BANDS.items():
+        if key in (ptype or ''):
+            return band[0], band[1], key
+    return UNION_BAND[0], UNION_BAND[1], None
+
+
+def check_text(path, text, name2num, marks_found, ptype=None):
     """返回 (违规, 未判/提示, 实判判据集合)。"""
     bad, notes, seen = [], [], set()
     cstart, body = claims_body(text)
     if cstart is None:
-        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q5 未判'
+        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q6 未判'
                     f'（权要由代理机构撰写时本就没有这一节）'], seen
     items = split_items(body)
     if not items:
         return [], [f'{path}: 有权利要求书节但一行权项都没解析出（不以「N.」起头？）'
-                    f' → Q1–Q4 未判'], seen
+                    f' → Q1–Q6 未判（有节却无项，整族都判不起）'], seen
     where = lambda off: f'{path}:{cstart + 1 + off}'
 
     nums = [n for n, _, _ in items]
@@ -168,6 +186,22 @@ def check_text(path, text, name2num, marks_found):
         if len(ind) > 1:
             notes.append(f'{path}: 读到 {len(ind)} 项独立权利要求（{"、".join(map(str, ind))}）'
                          f'→ 个数那一半不判红，需要人判是不是同一组（第二十四条）')
+
+    lo, hi, used_type = band_of(ptype)
+    seen.add('Q6')
+    ndep = len(deps)
+    if not (lo <= ndep <= hi):
+        bad.append(f'{where(items[-1][1])}: 从属权利要求 {ndep} 项，不在 {lo}–{hi} 之内'
+                   f'（{used_type or "两型并集"}口径，hard-rules §4；房内口径非法条）→ Q6')
+    elif used_type is None:
+        # 两型都容得下（7–8 项）时这一档其实已经判完，不必制造噪声；
+        # 只有一型容得下时才说清"没判红是因为不知道是哪一型"。
+        fits = [f'{k}的 {a}–{b}' for k, (a, b) in TYPE_BANDS.items() if a <= ndep <= b]
+        if len(fits) != 2:
+            why = ('未给 --type' if not ptype else
+                   f'--type 给的是「{ptype}」，既不是发明也不是实用新型')
+            notes.append(f'{path}: 从属权利要求 {ndep} 项在两型并集内、只落在 {"、".join(fits) or "两档之外"}；'
+                         f'{why}，所以这一半不判红（README「专利清单」的类型列至今无值）→ Q6 部分未判')
 
     maxn = max(nums)
     for n, off, txt in deps:
@@ -216,7 +250,7 @@ def check_text(path, text, name2num, marks_found):
     return bad, notes, seen
 
 
-def check_package(root):
+def check_package(root, ptype=None):
     docs = []
     for dp, _, fs in os.walk(root):
         for f in sorted(fs):
@@ -228,18 +262,21 @@ def check_package(root):
     for path, text in docs:
         if CLAIMS_HEAD_M.search(text):
             hit += 1
-            b, n, s = check_text(path, text, name2num, marks_found)
+            b, n, s = check_text(path, text, name2num, marks_found, ptype)
             bad += b
             notes += n
             seen |= s
     if not hit:
-        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q5 未判')
+        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q6 未判')
     return bad, notes, seen
 
 
 def main():
-    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q5（只接目录）')
+    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q6（只接目录）')
     ap.add_argument('targets', nargs='+', help='交付包目录')
+    ap.add_argument('--type', default=None,
+                    help='本案专利类型（发明／实用新型），决定 Q6 的从属条数档位；'
+                         '不给则退到两型并集 4–10，并把它少判的那一半说出来')
     args = ap.parse_args()
 
     roots = []
@@ -255,7 +292,7 @@ def main():
 
     total = judged = 0
     for root in roots:
-        bad, notes, seen = check_package(root)
+        bad, notes, seen = check_package(root, args.type)
         for n in notes:
             print(f'  note {n}')
         for b in bad:
@@ -263,7 +300,7 @@ def main():
         judged += 1 if seen else 0
         total += len(bad)
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 Q1–Q5，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 Q1–Q6，判据见脚本 docstring）；实判 {judged} 个包')
     sys.exit(1 if total else 0)
 
 
