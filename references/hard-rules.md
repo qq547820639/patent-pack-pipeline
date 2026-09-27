@@ -21,7 +21,9 @@
 - arXiv 预印本标注"预印本"。此条由 `scripts/verify_search_report.py` V4 实跑（离线判：只看 arXiv 行的「类型」列
   有没有这三个字，不依赖网络）；表里没有「类型」列或报告里没有 arXiv 条目时报"V4 未判"，两种"看不见"都不折成违规。
   扩展方向（本轮未证实、没做）：Crossref 的 work 记录带 `type` 字段，理论上能把 bioRxiv/medRxiv 那类 DOI 也认成预印本；
-  本机两次请求分别拿到 HTTP 400 与 404，没读到过一个真实字段名，所以不据此写判据。
+  本机两次请求分别拿到 HTTP 400 与 404，没读到过一个真实字段名，所以不据此写判据
+  （两条 endpoint 形状与出处见 `scripts/verify_search_report.py` docstring 第 17 行：
+  `/works?filter=type:…&select=…` 与 `/types/posted-article/works`）。
 
 ### 2.1 查新方法纪律（吸收自 handsomestWei/patent-disclosure-skill，2026-09-04 评估）
 - **两段式查新**：第一轮关键词召回（web_search/CrossRef/arXiv/可用插件）→ 从命中条目抽出 IPC/CPC 分类号（取 1–3 个高频前缀）→ 第二轮按分类号收口（同分类号+更贴本案手段的核心词）——显著高于单层关键词检索的相关度。
@@ -29,7 +31,9 @@
 - **保底规则**：第二轮筛后 <4 条 → 从第一轮按同一分类号+手段沾边回补至约 4–6 条；仍不够 → 仅用分类号再查一次或带相邻分类号；还不够 → 如实写"检索范围内近邻较少"，**禁止编造条目凑数**。
 - **查新 vs 著录清单分离**：技术查新（一词一页、不翻完）与申请人/发明人清单式穷尽检索是两个用途，不混用、不互替。
 - **写入背景技术的门槛**：分类号重合+技术手段对得上才进 1.1/2.1；禁止把召回全集整表写入。
-- **CNIPA 通道现状（本环境实测 2026-09-04；2026-09-25 四项逐一复核仍一致）**：epub.cnipa.gov.cn 与 patents.google.com 不可达（curl 超时）、pss-system 返回 HTTP 412、www.cnipa.gov.cn 返回 200 可达——CNIPA 著录检索须用网页版人工执行或在可达环境执行；该仓库（handsomestWei/patent-disclosure-skill）的 Playwright 工具在 CNIPA 可达环境可直接复用。可达性会随网络环境变化，动用前按当次实测为准，不得沿用本条结论。
+- **CNIPA 通道现状（本环境实测 2026-09-04；2026-09-25 四项逐一复核仍一致；
+  2026-09-27 第三次复跑，四项照旧——命令 `curl -sS -m 20 -o /dev/null -w 'code=%{http_code} time=%{time_total}s' https://<host>/`，
+  读数 `epub 000/20.00s`、`pss-system 412/0.35s`、`www 200/0.43s`，留底 `.codebuddy/attest/r54_cnipa.log`，该目录不入 git）：epub.cnipa.gov.cn 与 patents.google.com 不可达（curl 超时）、pss-system 返回 HTTP 412、www.cnipa.gov.cn 返回 200 可达——CNIPA 著录检索须用网页版人工执行或在可达环境执行；该仓库（handsomestWei/patent-disclosure-skill）的 Playwright 工具在 CNIPA 可达环境可直接复用。可达性会随网络环境变化，动用前按当次实测为准，不得沿用本条结论。
 
 ## 3. 防御性措辞与划界
 - 禁用词：首次/填补空白/国际领先/首创/国际先进（作新颖性或水平声明时）。其中 首创/填补空白/国际领先/国际先进 四类由 `scripts/check_iron_rules.py` R1 无条件判红；"首次"只在声明语境判红（"首次加载配置表"这类正常描述不判），语义层的新颖性声明判断仍归 reviewer。

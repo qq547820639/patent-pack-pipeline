@@ -107,7 +107,8 @@ def main(root):
 
 def cli():
     # 与其他门禁一致走 argparse：判据类脚本的参数必须"可被声明处查到"，
-    # 手工扫 sys.argv 会让文档↔脚本契约看不见这个参数（实测就是这样漏过一次）。
+    # 手工扫 sys.argv 会让文档↔脚本契约看不见这个参数
+    # （某次就是这样漏过的，当场未留命令；这个形状今天由 test_docs_scripts_contract 的参数双向对齐钉住）。
     import argparse
     ap = argparse.ArgumentParser(description='批量 md→docx 重转，或只做陈旧检查')
     ap.add_argument('target', nargs='?', default='.', help='交付包根目录')

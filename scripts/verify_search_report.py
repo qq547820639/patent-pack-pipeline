@@ -17,10 +17,17 @@
      我这一台只拿到 HTTP 400（`/works?filter=type:…&select=…`）与 404（`/types/posted-article/works`），
      没读到过一个真实字段名，因此不据此写判据。
 
-为什么专利号不在线核：那是提交 `afcba9b` 留下的一次观察（google patents 端点 75s 无响应、
-patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、patentscope 只有 JSF 表单），
-同一串读数抄在三处（本文件、README 的 V 段、templates §C），**哪一处都没写命令**，
-所以现在无法逐条重放——按"某次未留命令的观察"读，不当作本轮实测（重测登记在普查余项）。
+为什么专利号不在线核：那串读数 2026-09-27 各重跑了一遍（命令与逐条读数落
+`.codebuddy/attest/r53_provenance.sh`→`r53_provenance.log`，该目录不入 git，clone 里照命令重跑）：
+  · `curl -m 80 https://patents.google.com/?q=lock+mechanism` → `code=000 time=75.046795s`
+    （curl 自己报 "Failed to connect … after 75046 ms"）——旧那句"75s 无响应"量的其实是
+    **本机 TCP 连接超时**，不是服务器响应慢；这条比旧措辞精确，也更不该被读成"再等等就有"。
+  · `socket.getaddrinfo('api.patentsview.org', 443)` → **今天解析得到**
+    （2606:4700:440a::6812:23c9）。旧那句"DNS 解析不到"不复现：那是一次网络态，不是恒定事实。
+    今天也**没有**再打它的查询接口，所以"patentsview 能不能核公开号"仍未测。
+  · EPO OPS `code=403 time=2.66s`、Espacenet `code=403 time=1.11s`、Patentscope `code=302`
+    （跳登录，仍是只有 JSF 表单那条路）。
+结论不变：专利公开号的存在性走 S1 线下逐条人工核对，V3 只核 DOI 与 arXiv id。
 宁可不判，也不拿一个没跑通的源假装"已核验"。
 
 读 md 与 docx 两个通道（docx 走 check_iron_rules 那份唯一抽取器，表格还原成管道行后按列读）；

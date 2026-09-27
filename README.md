@@ -134,7 +134,7 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
   F5 线宽与 F6 灰底/位图/渐变都只活在画布对象上，存成 PNG 就没有 witness；这一档开跑会自己打印覆盖面声明，
   常驻用例与电池注入钉着这句不许被删。F5 判在 `line(width=…)` 入参侧而不是回读像素量笔画——像素量法分不开带内与带外：0.8pt（带下沿）读到 0.72、1.0pt 与 1.2pt 并成同一个 1.08、1.5pt 的 45° 斜线读到 1.92（直接出带），真图里框线/引线粘连后按连通域量到 1.26–6.26pt；任何像素阈值都会在合法图上假红（固定量法与完整表见 `references/tooling-pitfalls.md` §8）。引出线 0.6pt 是 §5 自己要的细直线，属显式豁免类。PNG 无 dpi 元数据时 F1 报"未核"，不拿假定 dpi 反推的数字误判；带 dpi 元数据时 `--check` 会真按 PNG 自带 dpi 换算图宽判 F1。重画包内单图时把本案登记表传进去（`Figure(..., parts=json.load(open('parts.json'))[...])`），同号异件在出图当场即拒，不必等离线核对。**出图通过时同时写 `<图名>.manifest.json` 留底**（图上画的 标记号→部件 与每段框内文字）；自检不过的图既不落 PNG 也不落清单——留一份没有图对应的清单就是无图之账。这份留底是 `check_figure_text.py` 的对账对象（为什么做成 sidecar 而不是 OCR 或 PNG 内嵌元数据：现有技术排查见 `references/tooling-pitfalls.md` §7）。
 - `check_iron_rules.py`：R1 绝对化措辞、R2 占位符格式（R2a 裸 TODO/FIXME/XXX、R2b 方括号须为 待*/占位 标记、R2c 【待设计方确认：…】须三字段）、R3 权文内占位注释、R4 摘要含标点字数、R5 背景技术公开号须属于检索报告、R6 本案型号/商标（须 `--brand-terms X,Y` 给出清单，不给报"未核"——自动猜会把 IP67/M5/45#钢 这类标准规格写法判红）、R7 发明名称 ≤25 字、R8 EVT/投产文书缺逐字投产总则、R9 背景技术节缺逐字查新声明句（判在该节内是否逐字出现，写在别的节不算兑现；比较前只剥空白，标点汉字一个不许差；无该节报"R9 未判"）。**适用域是交付包内的文书**（S5/S7 跑的那批 .md），不是本 skill 自己的规则文档。拿仓库根跑 `--all .` 会把 git 跟踪的 .md 一起扫进来，逐条读下来全部是"规则文档引用了自己禁止的写法"——禁用词清单、占位式样示例，以及 master-execution 里讨论投产判定的那一节；这不是判据错，也不为此加豁免分支。注意该读数会随 `.codebuddy/` 本地日志入扫而变（那份日志不参与 git 跟踪），要复算请按上面那份文件清单来。另：R8 的适用域已按"路径 or 正文节标题"分轴——正文里列出 `04_EVT验证/` 目录名不再被当成 EVT 文书，否则 `new_product_package.py` 生成的包 README 自己就过不了门禁（这条是第八轮由"新包开箱应零违规"的常驻断言抓出来的）。按交付包目录跑即为设计用途。 **`--all` 现在同时收 .md 与 .docx**：交付物是 Word 件，铁律不能只检 md——「md 改干净了、docx 里还留着禁用词」正是本仓库记录在案的事故形状。docx 正文用 stdlib zip+XML 抽取（不引 python-docx），节标题按 `w:pStyle` 还原成井号好让 R3/R4/R7 同样适用，Word 表格按 `w:tbl` 还原成 markdown 管道行（表头后补一行 `|---|`，段落分支跳过表格内部的 `w:p`，否则同一格文字既进管道行又散成裸行，正文对账会把自己和自己打架）——这一处还原是 E/G/K/N 四把按列读的门禁能吃 docx 的前提，全仓只有这一份 docx 解析；认不出标题样式时报「R3/R4 未核」而不是零违规，含 `DOCTYPE/ENTITY` 声明或解压尺寸超限的 docx 直接拒绝解析并走 rc=2（docx 可能是外部落件，默认 ET 解析器不防实体展开与压缩炸弹）。
-- `verify_search_report.py`：V1 每条已核验条目须带可机检标识（公开号/DOI/arXiv id，公开号形状与 R5 同一处定义）、V2 关键字段填齐（关键日期/核验出处/核验日期）、V3 在线存在性（DOI 走 Crossref、arXiv id 走 arXiv 官方 API，都无需密钥）、V4 arXiv 条目的「类型」列须含"预印本"（离线判，不联网；「类型」列不存在或表里没有 arXiv 条目都报"V4 未判"，两种"看不见"都不折成违规）。`--offline` 跳过 V3 一律报未核；`--require-online` 在一条在线核对都没做成时给 rc=2（说"本次判定不成立"，既不判绿也不判红）。**专利公开号一律"存在性未核"**——本机实测 google patents 两端点 75s 无响应、patentsview DNS 解析不到、EPO OPS 需 OAuth key、Espacenet 403、Patentscope 只有 JSF 表单，所以专利存在性仍是 S1 的线下逐条人工核对项；源不可达判"未核"三态，绝不把网络故障折算成"引用造假"。读 md 与 docx 两个通道（Word 表格由 `check_iron_rules.docx_text` 那份唯一抽取器还原成管道行）；传目录时同时收 `.md` 与 `.docx`，同名成对只挑 md（可编辑源）并把被丢的那份说出来——两份都收会把同一批条目报两遍，而"违规 4 条"与"同一份违规 2 条"在退出码上同形。
+- `verify_search_report.py`：V1 每条已核验条目须带可机检标识（公开号/DOI/arXiv id，公开号形状与 R5 同一处定义）、V2 关键字段填齐（关键日期/核验出处/核验日期）、V3 在线存在性（DOI 走 Crossref、arXiv id 走 arXiv 官方 API，都无需密钥）、V4 arXiv 条目的「类型」列须含"预印本"（离线判，不联网；「类型」列不存在或表里没有 arXiv 条目都报"V4 未判"，两种"看不见"都不折成违规）。`--offline` 跳过 V3 一律报未核；`--require-online` 在一条在线核对都没做成时给 rc=2（说"本次判定不成立"，既不判绿也不判红）。**专利公开号一律"存在性未核"**——2026-09-27 重跑（命令与读数见 `.codebuddy/attest/r53_provenance.log`，该目录不入 git）：`curl -m 80 https://patents.google.com/?q=…` → `code=000 time=75.046s`（是本机 TCP 连接超时，不是服务器慢）、EPO OPS 与 Espacenet 均 `403`、Patentscope `302` 跳登录；**patentsview 的 DNS 今天解析得到**（旧句"解析不到"是某一次的网络态，已按今天读数更正，其查询接口今天未测）。所以专利存在性仍是 S1 的线下逐条人工核对项；源不可达判"未核"三态，绝不把网络故障折算成"引用造假"。读 md 与 docx 两个通道（Word 表格由 `check_iron_rules.docx_text` 那份唯一抽取器还原成管道行）；传目录时同时收 `.md` 与 `.docx`，同名成对只挑 md（可编辑源）并把被丢的那份说出来——两份都收会把同一批条目报两遍，而"违规 4 条"与"同一份违规 2 条"在退出码上同形。
 - `new_product_package.py` 生成的五份底稿都要能被对应门禁**开箱真判一次**：`检索_<产品>.md` 过 V1–V3（空表合法、并报"条目 0 条"），`04_EVT验证/EVT_<产品>.md` 过 E1–E4（判定表在场，判"实核 EVT 文书 1 份"），`05_法规与裁决/法规_<产品>.md` 过 G1–G5，`03_设计补全/补全_<产品>.md` 过 K1–K5，`02_申请文件/说明书_<产品>.md` 过 N1–N4。投产总则是 import 来的同一份串；补全底稿的四张表头由判据侧的 `check_design_completion.SPECS` 生成，说明书底稿的对照表表头由 `check_figure_labels.COLS` 生成。手抄的那份迟早和判据漂移，所以常驻测试对每份底稿都留一条"抹掉一列必须当场判红"的断言——空表也不例外（缺列是结构问题，排在"空表未判"之前判）。
 - `check_evt.py`：E1 判定必须落 ✅/⚠️/❌ 恰一个（「基本通过」这种无符号措辞、或两个符号并存都判红）；E2 非 ✅ 必须带下一步（⚠️ 要同时出现「缺口」与「关闭判据」，❌ 要给「改法」）；E3 物理实测列出现**量值**（数字带单位，或"测得/实测/结果"紧跟数字）却没有「待物理实测/Not Run/预测值」字样即判红——刻意不写"任意数字"，这样标准号 GB/T 31701-2015、条款号"第 4.3 条"、IPC 码 A42B3/00 天然不在其列，不必维护一张永远缺一种写法的引用号豁免表（正反两向都钉在常驻测试里）；E4 同一行同时给出设计值与复算值且相对偏差>10% 而未标「偏差/原因」即判红，只给一侧走三态不判红。投产总则逐字仍归 R8，这里不重复一条。E1–E3 的载体是模板 §5 第 1 项的「验证总表」：**04_EVT 目录内的交付物缺这张判定表直接判红**（散文写的 EVT 报告不能白白通过），只是正文提到「投产判定」的规则类文档缺表则报未判。
 - **若目录里没有一份落在 EVT 适用域内，rc=2 说明「未做任何判定」，不折成「已通过**。本仓库自己的规则文档不是 EVT 交付物：对仓库根跑 `--all .` 时它们一律走未判注记（具体条数随树变，复算以命令为准，不在此写死）。
@@ -170,11 +170,17 @@ python3 scripts/rebuild_package.py <包目录>                      # 打包并�
   `patentsmartindia/patent-reference-numeral-checker`（浏览器端 HTML+JS）思路最贴近——它把
   "同一标号配到两个名称"当缺陷报；但它的词边界写死成一张英文虚词表（" the "/" of " 等），
   中文正文一律抽不出名称，仓库无 LICENSE（默认保留所有权利，只能借鉴做法不能搬代码），
-  2021 年后未更新、0 star、无测试。`Wujiamu/PatentCAD-Annotator`（C#，MIT，2026-09 仍在更新）
+  2021 年后未更新、0 star、无测试
+  （`curl -sS https://api.github.com/repos/patentsmartindia/patent-reference-numeral-checker`
+  2026-09-27 读数：`stars 0`、`pushed_at 2021-12-02T20:29:16Z`、`license None`、`size 5`——
+  无 LICENSE 即默认保留所有权利，只能借鉴做法不能搬代码；
+  同一条命令读 `Wujiamu/PatentCAD-Annotator` → `stars 1`、`license MIT`、`pushed_at 2026-09-14`）。`Wujiamu/PatentCAD-Annotator`（C#，MIT，2026-09 仍在更新）
   确实解析 Word 里的附图标记说明，但目的是往 CAD 里放引线而非形式审查：六维里功能匹配度最低
   （没有"正文↔表"对账）、License 兼容（MIT 可抄）、维护活跃、无网络面、代码质量尚可（按版
   本目录复制了 5 份同名命令类）、适配成本最高（要重写一遍解析）。`friedrichscheele/ReferenceNumerals`
-  标题正中，但仓库是空的（API 报 409、size 0），没有可读实现。所以沿用本仓库的 `mdtable`
+  标题正中，但仓库是空的（2026-09-27 重读：`/repos/friedrichscheele/ReferenceNumerals` 返回
+  `size 0`、`pushed_at 2026-03-06`，而 `/contents/` 是 **HTTP 404**——早先记的"API 报 409"今天复现不出来，
+  按今天读数改过来），没有可读实现。所以沿用本仓库的 `mdtable`
   共用读取（硬约束是判据脚本必须能在 3.9 裸跑，markdown-it-py 要 ≥3.10），只借第一项的对账方向。
   md 与 .docx 两通道同判据：Word 里的对照表由上面那份唯一抽取器还原成管道行后再按列读。读不动的 docx（非 zip / 含 DTD 或 ENTITY 声明 / 解压尺寸超限）一律报成因并走 rc=2——把 .docx 当 md 直读会抛 UnicodeDecodeError，而 traceback 的退码 1 在门禁语境里等于宣布「发现违规」，那是最坏的假红。
 - `check_claims.py`：权利要求书的**形状**门禁 Q1–Q6——编号连续（第二十二条）、独权存在且写在从权之前（第二十三、二十四条）、从权只引在前（第二十五条）、多项从权不以多项从权为基础（第二十五条）、附图标记须写在括号内且只认对照表里真存在的号（第二十二条）、从属条数落在档位内（hard-rules §4 房内口径：发明 7–10、实用新型 4–8，细则没有条数区间，别冒法条）。节不存在就整族未判，不折成合规；"独权应当只有一个"的个数那一半只出提示不判红（并列独权是常见写法，是不是同一组要读技术方案）。Q6 的档位要从 `--type` 告知；没告知时按两型并集 4–10 判，只有一型容得下时出「Q6 部分未判」提示而不是判红（README「专利清单」的类型列至今只有表头没有值，机器不去猜）。
@@ -231,7 +237,11 @@ T4–T6 是图号三对账，出处在《专利法实施细则》：T4 正文声
 | pubmed | 仅生物医学域；跨域回退 CrossRef / web_search |
 | TimesFM | **已拒绝纳入**：源码与 ≤2.5 权重为 Apache-2.0，但 **3.0 预训练权重为 `timesfm-non-commercial-license-v1.0`**，官方 README 明示限非商用非生产用途、"Commercial or production use of the default pretrained weights is not permitted"——与产品商业属性冲突。（出处 google-research/timesfm README "License notice for pretrained weights" 一节，2026-09-25 实测；如需Apache-2.0 路线只能用 ≤2.5 权重并复核其能力是否够用） |
 | 论文 / 报告插图 | 用 chart-gen；专利附图一律代码手绘，禁止 AI 生成 |
-| 本机 pandoc（Word 交付物） | 未安装 → `regen_docx.py` 以退出码 2 打印安装指引且**不转任何文件**；装法 `brew install pandoc`，或跨平台 `pip install pypandoc-binary`（自带 pandoc 二进制约 25 MB，其许可为 GPL-2.0，对外分发前需按产品方合规口径评估；实测脚本可经 pypandoc 解析到该内置二进制，无需再改 PATH） |
+| 本机 pandoc（Word 交付物） | 未安装 → `regen_docx.py` 以退出码 2 打印安装指引且**不转任何文件**；装法 `brew install pandoc`，或跨平台 `pip install pypandoc-binary`（自带 pandoc 二进制，其许可为 GPL-2.0，对外分发前需按产品方合规口径评估；体积不是"约"：
+  `curl -sS https://pypi.org/pypi/pypandoc-binary/json` 2026-09-27 读数——1.17 版两个 macOS 轮子
+  （`macosx_10_9_x86_64` 与 `macosx_11_0_arm64`）都是 **25.55 MB**，Linux aarch64 36.87 MB、
+  win_amd64 40.89 MB，逐行读数落 `.codebuddy/attest/r53_pypi_macos.txt`；
+  脚本可经 pypandoc 解析到该内置二进制、无需再改 PATH，这一条由 `test_regen_docx` 的 pypandoc 档钉住） |
 | 本机 python-docx（转换后复核） | 未安装 → 同样以退出码 2 提示、不转任何文件；装法 `pip install python-docx`（注意导入名是 `docx`，包名不是） |
 | 本机 matplotlib（专利附图） | 未安装 → `scripts/patent_figure.py` 以退出码 2 说明并拒绝出图；**禁止**因此改用 AI 生成图充当专利附图，改跑 `python3 tests/test_scripts.py` 复核环境 |
 

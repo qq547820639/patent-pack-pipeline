@@ -32,7 +32,8 @@ FIRST_TIME_CTX = re.compile(
     r'(首次[^，。；\n]{0,12}(公开|报道|提出|实现|发明|采用|研制|研发|量产|交付|达到|实现于)'
     r'|(?:技术|方案|装置|系统|方法|产品)[^，。；\n]{0,8}首次)')
 # 占位判据分三条适用域。把 §6 的三字段式样当全局唯一式样会误伤自家模板：
-# 2026-09-25 实测照 templates §0 写的交底书被判 R2 违规，而【待填】【待回填】【占位】
+# 2026-09-25 某次观察（当场未留命令；这个形状今天由 test_scripts 的 R2b 三态档钉住）：
+# 照 templates §0 写的交底书被判 R2 违规，而【待填】【待回填】【占位】
 # 【待团队补充：对象】等分别是 templates / companion-papers / grant-application 规定的写法。
 PLACEHOLDER_TOKEN = re.compile(r'【[^】]*】')
 PLACEHOLDER_KIND = re.compile(r'^【(?:待[^】]{0,60}|占位)】$')          # R2b：须为 待*/占位 标记
@@ -42,7 +43,8 @@ CONFIRM3_SHAPE = re.compile(r'^【待设计方确认：[^｜】]+｜[^｜】]+�
 # "待确认问题单"是本项目自有节名——两者都不能判红，否则门禁与自家规则打架。
 BARE_TODO = re.compile(r'\b(?:TODO|FIXME|XXX)\b')
 # 权利要求区内的注释式占位（§4：占位说明须移至说明书）。
-# 括号内允许有说明文字——实测「（待确认：减振件型号）」这类写法才是真实形态，
+# 括号内允许有说明文字——「（待确认：减振件型号）」这类写法才是真实形态（某次观察、未留命令，
+# 由 test_scripts 的 R2c 三字段档复算），
 # 只匹配紧邻括号的（待确认）会漏判。
 CLAIM_ANNOTATION = re.compile(
     r'[（(][^（）()]{0,40}(?:待确认|待补充|待定|TBD|TODO|FIXME)[^（）()]{0,40}[）)]')
@@ -156,7 +158,8 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
         if nums:
             notes.append(f'文书含 {len(nums)} 个公开号，未给 --search-report，R5 未核（不折算合规也不折算违规）')
     # R6 商标/型号禁令（铁律 4）：须由调用方给出本案的型号/商标清单，
-    # 不自动猜——实测 IP67、M5、45#钢 这类标准/规格写法会被模式匹配误伤。
+    # 不自动猜——IP67、M5、45#钢 这类标准/规格写法会被模式匹配误伤
+# （语料就在常驻用例里：tests/test_scripts.py 的 "紧固件按 M5 螺纹、防护等级 IP67、材料 45#钢" 那一档）。
     for term in (brand_terms or []):
         if not term:
             continue

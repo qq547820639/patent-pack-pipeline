@@ -14,8 +14,10 @@
 | **yuandian_law 插件（元典法律数据库）** | S12 法规适用性分析 | 中国大陆法律/法规/司法解释/案例的语义+关键词检索与效力核验 | 法规适用性分析的中国法规主通道；仅覆盖中国大陆法域 |
 | **legal:legal-research 技能** | S12 | 法条效力核验、类案检索、域外法律 | 与 yuandian_law 互补 |
 | **tianyancha 插件（天眼查）** | S2/FTO | **专利权人工商实体核查**——专利登记主体不明时按工商主体名补查（如"虎贝尔"类品牌 vs 登记公司名不一致场景）、竞品企业工商/知识产权/司法信息 | 企业信息仅作情报，不作法律结论 |
-| **CNIPA 著录检索工具**（外部仓库 handsomestWei/patent-disclosure-skill 的 patent-search 包，Playwright） | S2/FTO | CNIPA 公布公告高级查询（发明人/申请人/分类号/名称字段） | **本环境 epub.cnipa.gov.cn 不可达（2026-09-04 实测超时）**——在 CNIPA 可达环境直接复用；不可达时回退 web_search+二手库并声明局限 |
-| **scholar 插件** | S2 现有技术排查、论文引用池 | 学术论文检索（标题/作者/摘要/引用数/年份）、作者画像 | **本环境曾不可达（serper.dev 连接失败）——调用前先用一条探测查询验证；失败立即回退 CrossRef API / arXiv API / web_search，并在排查报告中注明实际通道** |
+| **CNIPA 著录检索工具**（外部仓库 handsomestWei/patent-disclosure-skill 的 patent-search 包，Playwright） | S2/FTO | CNIPA 公布公告高级查询（发明人/申请人/分类号/名称字段） | **本环境 epub.cnipa.gov.cn 不可达（2026-09-04 起三次复核一致，最后一次 2026-09-27：
+  `curl -m 20` 退 `code=000 time=20.00s`，命令与口径见 `hard-rules §2.1`）**——在 CNIPA 可达环境直接复用；不可达时回退 web_search+二手库并声明局限 |
+| **scholar 插件** | S2 现有技术排查、论文引用池 | 学术论文检索（标题/作者/摘要/引用数/年份）、作者画像 | **本环境曾不可达（serper.dev 连接失败；那是一次观察、当场未留命令，今天没有重测——
+  所以它的正确用法不是"相信它坏了"，是下面这条探测纪律）——调用前先用一条探测查询验证；失败立即回退 CrossRef API / arXiv API / web_search，并在排查报告中注明实际通道** |
 | **pubmed 插件** | S2（生物医学/康复/临床方向） | PubMed/PMC 文献检索与元数据、OA 全文获取 | 仅生物医学域可用；跨域（机器人/材料）回退 CrossRef/web_search |
 | **CrossRef API** | S2 全程 | DOI 核验（`curl -s "https://api.crossref.org/works?query=..."`） | 默认通道，零依赖 |
 | **arXiv API** | S2 | 预印本核验 | 预印本条目必须标"预印本" |
