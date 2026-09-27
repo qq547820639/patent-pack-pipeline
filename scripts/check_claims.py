@@ -140,13 +140,28 @@ def mark_set(docs):
 # Q6 的档位（hard-rules §4）。细则没有任何条数区间，这是房内口径，别冒法条。
 TYPE_BANDS = {'发明': (7, 10), '实用新型': (4, 8)}
 UNION_BAND = (4, 10)          # 类型没告知时的兜底：两型区间的并，仍能抓"太少/太多"
+# 《专利法实施细则》第四十四条（六）点的就是这三类：类别不明确或者难以确定 → 不予受理。
+# 这份清单由本模块一处持有，`rebuild_package.py` 的 P8 import 它（两处各抄一份迟早漂）。
+PATENT_TYPES = ('发明', '实用新型', '外观设计')
+
+
+def type_of(cell):
+    """从一格文本里认专利类别；认不出返回 None，不猜。
+    按名字长短从长往短试：类别名之间今天互不为子串，但"某类的写法里含另一类三个字"
+    这种形状一旦出现，长名先赢才不会被短名抢走。"""
+    txt = (cell or '').strip()
+    for key in sorted(PATENT_TYPES, key=len, reverse=True):
+        if key in txt:
+            return key
+    return None
 
 
 def band_of(ptype):
-    """返回 (下界, 上界, 命中的类型键)。ptype 只认包含"发明"/"实用新型"的写法，认不出一律走并集。"""
-    for key, band in TYPE_BANDS.items():
-        if key in (ptype or ''):
-            return band[0], band[1], key
+    """返回 (下界, 上界, 命中的类型键)。认不出、或认成外观设计（没有从属条数档位这说）时走并集。"""
+    key = type_of(ptype)
+    if key in TYPE_BANDS:
+        band = TYPE_BANDS[key]
+        return band[0], band[1], key
     return UNION_BAND[0], UNION_BAND[1], None
 
 

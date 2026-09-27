@@ -430,13 +430,77 @@ def test_rebuild_package():
             os.remove(os.path.join(pdir, '02_申请文件', f))
         v = rp.shape_violations(pdir)
         assert_(any(x.startswith('P7') for x in v), f'02_申请文件 真是空目录时 P7 没抓到: {v}', None)
+        # P8／P9：类型列要落在三类里（第四十四条（六）），实用新型必须有附图（同条（一））。
+        # 表由夹具自己写，不从判据里取表头——取了常量，改名时夹具跟着改，
+        # "填错类型会不会真拦住"那条断言就永远不红。
+        def mktbl(tag, cells, png=0, media=0, broken_docx=False):
+            p = mkshape(tag)
+            lines = ['# 交付包', '', '## 专利清单',
+                     '| 编号 | 类型 | 名称 | 附图/视图 | 定位 |',
+                     '|---|---|---|---|---|']
+            for i, c in enumerate(cells or [], 1):
+                lines.append(f'| {i} | {c} | 锁扣 | 图1 | 结构 |')
+            open(os.path.join(p, 'README.md'), 'w', encoding='utf8').write('\n'.join(lines) + '\n')
+            fig = os.path.join(p, '02_申请文件', 'figures')
+            os.makedirs(fig, exist_ok=True)
+            for i in range(png):
+                open(os.path.join(fig, f'图{i + 1}.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
+            if media or broken_docx:
+                dz = os.path.join(p, '02_申请文件', '申请文件.docx')
+                if broken_docx:
+                    open(dz, 'wb').write(b'not a zip')
+                else:
+                    import zipfile as _zf
+                    with _zf.ZipFile(dz, 'w') as z:
+                        z.writestr('word/document.xml', '<w:document/>')
+                        for i in range(media):
+                            z.writestr(f'word/media/image{i + 1}.png', 'x' * 20)
+            return p
+
+        def shape(tag, cells, **kw):
+            return rp.shape_state(mktbl(tag, cells, **kw))
+
+        b, n = shape('P89_清单无行', None)
+        assert_(b == [] and any('一张专利都没列' in x for x in n),
+                f'清单没列专利时被折成合规或误判红: {b} / {n}', None)
+        b, n = shape('P89_发明有图', ['发明'], png=1)
+        assert_(b == [] and n == [], f'合规清单被 P8/P9 误伤: {b} / {n}', None)
+        b, n = shape('P89_实用新型无图', ['实用新型'])
+        assert_(any(x.startswith('P9') and '全包找不到一张图' in x for x in b)
+                and not any(x.startswith('P8') for x in b),
+                f'实用新型零图未被 P9 抓到（或牵连误报了 P8）: {b} / {n}', None)
+        b, _ = shape('P89_实用新型有png', ['实用新型'], png=1)
+        assert_(b == [], f'有 png 的实用新型仍被 P9 判红: {b}', None)
+        b, _ = shape('P89_实用新型docx内嵌', ['实用新型'], media=1)
+        assert_(b == [], f'图只在 docx 的 word/media 里就被当成没图（C4 同一条理由）: {b}', None)
+        b, _ = shape('P89_类型写产品', ['产品'], png=1)
+        assert_(any(x.startswith('P8') and '不是 发明／实用新型／外观设计' in x for x in b),
+                f'类别写成「产品」没被 P8 抓到: {b}', None)
+        b, _ = shape('P89_类型空', [''], png=1)
+        assert_(any(x.startswith('P8') and '没写类型' in x for x in b),
+                f'空类型没被 P8 抓到: {b}', None)
+        # 底稿的占位「【待填写：发明/实用新型】」里真含着"发明"两个字：
+        # 先认类别后认占位会把"还没定"读成"定了发明"，那种包两头都不红。
+        b, n = shape('P89_类型占位', ['【待填写：发明/实用新型】'], png=1)
+        assert_(b == [] and any('还是占位' in x and '未判' in x for x in n),
+                f'占位被当成已声明类别，或没说清这是未判: {b} / {n}', None)
+        b, n = shape('P89_实用新型docx读不动', ['实用新型'], broken_docx=True)
+        assert_(b == [] and any(x.startswith('P9 未判') for x in n),
+                f'docx 读不动时 P9 猜成"没图"、或干脆不吭声: {b} / {n}', None)
+
         # 形状判据必须走得到真入口：main() 打完包后要能报出来（否则 shape 只在单元里活着）
         rpk = mkshape('形状包_走main', drop='05_法规与裁决')
         r = run([PY, f'{S}/rebuild_package.py', rpk])
         assert_(r.returncode == 1 and 'P5' in r.stdout and '05_法规与裁决' in r.stdout,
                 f'缺段包从 main() 出去时没被判红点名: {show(r)}', r)
+        r = run([PY, f'{S}/rebuild_package.py', mktbl('P89_走main红', ['实用新型'])])
+        assert_(r.returncode == 1 and 'P9' in r.stdout,
+                f'零图的实用新型从 main() 出去时没被点名: {show(r)}', r)
+        r = run([PY, f'{S}/rebuild_package.py', mktbl('P89_走main未判', ['【待填写】'])])
+        assert_(r.returncode == 0 and 'note' in r.stdout and '占位' in r.stdout,
+                f'未判没随 main() 打印：退 0 就等于宣称核过了: {show(r)}', r)
     print('PASS rebuild_package（P1 截断 / P2 换字 / P3 CRC 单报 / 名单差集 / 合规包零误报 / '
-          'P5–P7 各成对且从 main() 走得到 / rc=2 三档）')
+          'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):
@@ -2343,7 +2407,11 @@ def test_check_claims():
                 ('实用新型3', 3, ['--type', '实用新型'], True),
                 ('实用新型8', 8, ['--type', '实用新型'], False),
                 ('不给类型2', 2, [], True),                    # 并集 4–10 也拦得住"太薄"
-                ('不给类型5', 5, [], False)):                  # 并集内、只一型容得下 → 绿＋说明
+                ('不给类型5', 5, [], False),                   # 并集内、只一型容得下 → 绿＋说明
+                # 这两档才是"分型有没有真分对"的判别量：5 在实用新型档内、发明档外，
+                # 9 反过来。只测 3／8 那种两边同判的数，把 --type 读错型也照样全绿。
+                ('实用新型5', 5, ['--type', '实用新型'], False),
+                ('实用新型9', 9, ['--type', '实用新型'], True)):
             r = run([PY, f'{S}/check_claims.py', q6pkg(tag, ndep)] + flags)
             # 红与"部分未判"的 note 都以 `→ Q6` 收尾，只看这个子串会把未判读成判红——
             # 开火与否必须按"这一行是不是违规行"来断。
