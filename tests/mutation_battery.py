@@ -86,7 +86,10 @@ MUTS = {
          '权要里「或类似物」未被 Q10 抓到'),
         ('Q11 句号位点判据关掉（一项里写满句号也照过）', CQ,
          '        for li, ln in ilines:', '        for li, ln in ():',
-         ('权要一行里结尾之前的句号未被 Q11 抓到', '多行权项里非结尾那行的句号未被 Q11 抓到')),
+         # 三条原告都是"只有 Q11 关掉才会红"的档：两条 md 位点档、一条本轮新增的 Word 档
+         # （docx 面在 test_check_claims 里排在 md 档之前，所以它先红——第 38 轮实测 MISRED 后补进名字表）。
+         ('权要一行里结尾之前的句号未被 Q11 抓到', '多行权项里非结尾那行的句号未被 Q11 抓到',
+          'Word 件的句号位点读数不符')),
         # 判严方向：指南那句是"只允许在结尾处使用句号"（划界），不是"每项必须以句号收尾"（义务）。
         # 把划界写成义务的注入必须由**反向控制**（权项结尾不带句号仍须全绿）抓住，
         # 而不是由合规档抓住——OK 那份每项都以句号收尾，判严了它照样全绿。
@@ -219,16 +222,35 @@ MUTS = {
          '说明书里的引用语与宣传语未被 R11/R10 各点一条'),
         ('R10 说明书面关掉（第三张面没人看）', IRON,
          "            for w in COMMERCIAL:\n                if w in ln:\n"
-         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,",
+         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + 1 + off,",
          "            for w in COMMERCIAL:\n                if False:\n"
-         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,",
+         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + 1 + off,",
          '说明书里的引用语与宣传语未被 R11/R10 各点一条'),
+        # 区域退化（单变量）：只把 R11 那一圈的行源从"说明书区域"换成"整份文书"，
+        # R10 说明书面仍留在 dbody 上——第一版臂改的是 doc_region 那一行，两支面一起越域，
+        # 结果先红的落在第 34 轮那条"R10 越出两节"控制上，电池读成 MISRED（红因归错条款）。
+        # 第二版直接换成 enumerate(lines) 又 MISRED 一次：区域外那行的下标一起变，
+        # 先红的是本轮那条绝对坐标档（它数的是 specdoc 那一行，索引一漂位点就错）。
+        # 所以改成"区域行原样在前、区域外补在后面"：区域命中的下标一个不动，
+        # 只有出域的那句新增开火——它咬的正是常驻那条出域档（第 38 轮之前那条按
+        # `'→ R11' not in` 写、按构造永真，无论怎么退化都抓不到——见提交说明）。
+        ('R11 说明书面区域退化成全文（别的节里的引用语也判）', IRON,
+         '        for off, ln in enumerate(dbody):',
+         '        for off, ln in enumerate(dbody + [l for l in lines if l not in dbody]):',
+         '「说明书」区域之外被 R11/R10 越域判了'),
         # 这条打的是**量具**：常驻里那把现推 R 号的尺子若退回只认一位，R10 会被折成 R1，
         # "号有断档"从此看不见——与第 26 轮契约取号那次同源，只是这次咬的是测试自己。
         ('R 号提取器退回只认一位（R10 被折成 R1，断档永远看不见）', TS,
          r'''    return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d{1,2})", src)})''',
          r'''    return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d)", src)})''',
          ('R 号提取器把两位数判据号读错了', '门禁自报规则区间与实际判据')),
+        # 文档侧取号不剥 URL 的 %XX 转义：`%E5%AE%A1` 会被 \b 读成判据号 E5，
+        # 契约当场把 README 判成"文档虚指"（第 38 轮真踩过，读数是 文档虚指=['E5','E6']）。
+        # 这一支臂打的是量具自己：剥转义那一步被拿掉时，常驻里的 URL 探针档必须红。
+        ('文档侧取号不剥百分号转义（URL 里的 %E5 被当成判据号）', TS,
+         "        return set(re.findall(DOC_RE, re.sub(PCT_ESC, '', t)))",
+         '        return set(re.findall(DOC_RE, t))',
+         '文档侧取号不认两位数或误收 0 号'),
         ('--all 只扫顶层（不递归）', IRON, '        for dp, _, fs in os.walk(root):',
          '        for dp, _, fs in [(root, [], [f for f in os.listdir(root)\n'
          '                              if os.path.isfile(os.path.join(root, f))])]:',

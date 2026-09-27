@@ -128,7 +128,12 @@ def read_any(path):
 
 
 def claims_body(text):
-    """返回权利要求书节的 (起始行号, 该节正文行)；找不到节返回 (None, [])。"""
+    """返回权利要求书节的 (起始行号, 该节正文行)；找不到节返回 (None, [])。
+
+    起始行号是**1-based**（节标题自己那一行），与 check_iron_rules.section_body 同一口径——
+    今天全仓的 `路径:行号` 都按 1-based 报，这里返回 0-based 会让整族位点短一行，
+    把 reviewer 指到上一行去（常驻的绝对坐标档 qabs 钉住它）。
+    """
     lines = text.splitlines()
     start = None
     for i, ln in enumerate(lines):
@@ -142,7 +147,7 @@ def claims_body(text):
         if NEXT_SECTION_M.match(ln):
             break
         body.append(ln)
-    return start, body
+    return start + 1, body
 
 
 def split_items(body):

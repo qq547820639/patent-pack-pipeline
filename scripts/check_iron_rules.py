@@ -236,12 +236,12 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
         for off, ln in enumerate(dbody):
             m = CLAIMS_QUOTE_REF.search(ln)
             if m:
-                findings.append(Finding('R11 说明书引用语', path, dstart + off,
+                findings.append(Finding('R11 说明书引用语', path, dstart + 1 + off,
                                         f'说明书里用"{m.group(0)}"指回权利要求'
                                         '——细则第二十条三款：不得使用该类引用语', ln.strip()[:60]))
             for w in COMMERCIAL:
                 if w in ln:
-                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,
+                    findings.append(Finding('R10 说明书宣传用语', path, dstart + 1 + off,
                                             f'商业性宣传用语「{w}」——细则第二十条三款：'
                                             '说明书里不得使用商业性宣传用语', ln.strip()[:60]))
 

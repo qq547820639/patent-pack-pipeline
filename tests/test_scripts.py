@@ -225,6 +225,15 @@ def test_new_product_package():
                 '骨架底稿未通过 V1–V6，或未如实报出"条目 0 条"', rv)
         ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
         assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
+        # 生产侧也要过 Q 族：骨架那份说明书底稿没有真权项，正确读数是一句"未判"，
+        # 既不该判红（新判据与生产底稿打架会在这里点名），也不许被折成"核过了"。
+        rq = run([PY, f'{S}/check_claims.py', d])
+        # 缺席断言不能写 `'→ Q' not in stdout`：那条"未判"注记自己就写着 `→ Q1–Q11 未判`，
+        # 这样写会被门禁的复述挡住（永假）。只数非 note 的违规行。
+        qfired = [ln for ln in rq.stdout.splitlines()
+                  if '→ Q' in ln and not ln.lstrip().startswith('note ')]
+        assert_(rq.returncode == 0 and 'Q1–Q11 未判' in rq.stdout and not qfired,
+                f'新生成的包在权利要求形状门禁上的读数不对: {show(rq)}', rq)
         # EVT 底稿在场，且骨架就能被 E1–E4 真判一次（有判定列的表，空行合法）
         evt = os.path.join(d, 'TESTX_专利交付包', '04_EVT验证', 'EVT_TESTX.md')
         assert_(os.path.isfile(evt), f'缺 EVT 报告底稿（E1–E4 没有载体）: {r.stdout}', r)
@@ -1619,26 +1628,46 @@ def test_check_iron_rules():
 
         # R11＋R10 说明书面（细则 20 条三款，整份说明书区域）：双禁档各点各的、
         # 区域跨过 ### 小节（层级止于 ≤2 级）、引用语写在别的节不算、合规说明书零误报。
+        # 缺席断言一律按本族**真输出形状**写：iron 族打印的是 `FAIL <判据名> 路径:行: …`，
+        # 报文里今天没有 "→" 这个字符（`check_iron_rules.py` 全份输出 grep -c "→" == 0）。
+        # 原先这两条写的是 `'→ R11' not in …`——按构造永真，等于第 37 轮那两条反向控制没验过。
         write(d, abstract=IRON_OK_ABSTRACT)
-        open(os.path.join(d, 'specdoc.md'), 'w', encoding='utf8').write(
-            '# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
-            '如权利要求1所述的装置，性价比极高。\n')
+        SPEC_BAD = ('# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
+                    '如权利要求1所述的装置，性价比极高。\n')
+        open(os.path.join(d, 'specdoc.md'), 'w', encoding='utf8').write(SPEC_BAD)
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specdoc.md')])
         assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout
                 and 'R10 说明书宣传用语' in r.stdout and '细则第二十条三款' in r.stdout,
                 f'说明书里的引用语与宣传语未被 R11/R10 各点一条: {show(r)}', r)
+        # 绝对坐标档：真行号由测试自己 enumerate 夹具文件算出，不抄门禁的读数——
+        # 门禁报的行号与它差一行，这一档就红（Q 族同形状的一条在 test_check_claims 里）。
+        real_spec = [i for i, ln in enumerate(SPEC_BAD.splitlines(), 1) if '如权利要求1所述' in ln]
+        assert_(len(real_spec) == 1, f'夹具里"{real_spec}"处才算得出真行号，档位空转', None)
+        hits = [ln for ln in r.stdout.splitlines() if 'R11 说明书引用语' in ln]
+        assert_(len(hits) == 1 and f'specdoc.md:{real_spec[0]}:' in hits[0],
+                f'R11 报的位点不是触发行（真行号 {real_spec[0]}）: {show(r)}', r)
         open(os.path.join(d, 'specok.md'), 'w', encoding='utf8').write(
             '# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
             '装置包括框架与弹臂。\n')
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specok.md')])
-        assert_(r.returncode == 0 and '→ R11' not in r.stdout and '→ R10' not in r.stdout,
+        assert_(r.returncode == 0 and 'R11 说明书引用语' not in r.stdout
+                and 'R10 说明书宣传用语' not in r.stdout,
                 f'合规说明书被 R11/R10 误伤: {show(r)}', r)
-        open(os.path.join(d, 'specscope.md'), 'w', encoding='utf8').write(
-            '# 申请文件\n### 技术领域\n如权利要求1所述的装置，性价比极高。\n'
-            '## 说明书\n装置包括框架。\n')
+        # 出域档必须配一份"同一批字节、只把「## 说明书」标题补回去"的正向档：
+        # 没有它，"没开火"可能只是因为这份文书压根没进判据的域（读不到区域时它什么都不报）。
+        SPEC_OUT = ('# 申请文件\n### 技术领域\n如权利要求1所述的装置，性价比极高。\n'
+                    '## 说明书\n装置包括框架。\n')
+        open(os.path.join(d, 'specscope.md'), 'w', encoding='utf8').write(SPEC_OUT)
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specscope.md')])
-        assert_('→ R11' not in r.stdout and '→ R10' not in r.stdout.replace('摘要/简要说明', ''),
+        assert_(r.returncode == 0 and 'R11 说明书引用语' not in r.stdout
+                and 'R10 说明书宣传用语' not in r.stdout,
                 f'「说明书」区域之外被 R11/R10 越域判了: {show(r)}', r)
+        open(os.path.join(d, 'specscope_hit.md'), 'w', encoding='utf8').write(
+            SPEC_OUT.replace('# 申请文件\n', '# 申请文件\n## 说明书\n', 1))
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specscope_hit.md')])
+        assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout,
+                f'出域档的前提不成立：同样这批字节补上「## 说明书」后也没开火，'
+                f'那条"出域不判"是空转: {show(r)}', r)
 
         # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
         # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）
@@ -1769,6 +1798,13 @@ def test_docs_scripts_contract():
                   r'^\s+([RCFVEGKNQTP][1-9]\d?)\s',
                   r'\u2192 ([NVEGKT][1-9]\d?)(?!\d)')
     DOC_RE = r'\b([RCFVEGKNQTP][1-9]\d?)\b'
+    # 文档里的 URL 常带百分号转义（中文链接），`%E5%AE%A1` 里的 "E5" 前后都是非单词字符，
+    # \b 会把它当成一个判据号——第 38 轮 README 写 CNIPA 指南链接时被自己的契约判成
+    # "文档虚指 E5/E6"。取号前先剥掉 %XX：剥了只会少看见转义垃圾，真引用没人用 URL 表达。
+    PCT_ESC = r'%[0-9A-Fa-f]{2}'
+
+    def _doc_tokens(t):
+        return set(re.findall(DOC_RE, re.sub(PCT_ESC, '', t)))
 
     def _extract_scripts(src):
         out = set()
@@ -1785,10 +1821,19 @@ def test_docs_scripts_contract():
     _got = _extract_scripts(_probe)
     assert_({'R9', 'R10', 'T3', 'V12', 'V3'} == _got,
             f'提取器对两位数漏判、或把 0 号读成判据: {sorted(_got)}', None)
-    _got_doc = set(re.findall(DOC_RE, 'R10 与 R9 并列，`T3` 也提一次；R1 单独出现也算；'
-                                      'P0/R0 这类优先级与占位号不算'))
+    _got_doc = _doc_tokens('R10 与 R9 并列，`T3` 也提一次；R1 单独出现也算；'
+                           'P0/R0 这类优先级与占位号不算；'
+                           '链接 …/attach/0/%E4%B8%93%E5%88%A9%E5%AE%A1%E6%9F%A5%E6%8C%87%E5%8D%97.pdf'
+                           ' 里夹着的转义垃圾不算判据号')
     assert_({'R10', 'R9', 'T3', 'R1'} == _got_doc,
             f'文档侧取号不认两位数或误收 0 号: {sorted(_got_doc)}', None)
+    # 正向对照：不剥 %XX 时那串 URL 确实会被读成两个号——没有这一条，上面"URL 不算号"
+    # 可能只是那串文本本来就取不出号（空转）。注意别把这两个号的字面写进被扫的文本里，
+    # 那样它们会作为真 token 被取到，反向档立刻自指失效（本轮实测踩过一次）。
+    _raw_url_tokens = set(re.findall(DOC_RE, '%E4%B8%93%E5%88%A9%E5%AE%A1%E6%9F%A5%E6%8C%87%E5%8D%97'))
+    assert_({'E4', 'E5', 'E6'} == _raw_url_tokens,
+            f'百分号转义的正向对照不成立（裸 DOC_RE 读到 {sorted(_raw_url_tokens)}），'
+            f'剥转义那一步无从证明它咬过东西', None)
 
     defined_rules, flags_by_script = set(), {}
     rule_home = {}
@@ -1798,7 +1843,7 @@ def test_docs_scripts_contract():
             rule_home.setdefault(t, set()).add(name)
         defined_rules |= found
         flags_by_script[name] = set(re.findall(r"add_argument\('(--[a-z\-]+)'", s))
-    doc_rules = set(re.findall(DOC_RE, doctxt))
+    doc_rules = _doc_tokens(doctxt)
     assert_(doc_rules == defined_rules,
             f'判据 token 不对齐 文档虚指={sorted(doc_rules - defined_rules)} '
             f'文档漏写={sorted(defined_rules - doc_rules)}（脚本判据须全部有文档出处，反之亦然）')
@@ -2928,6 +2973,25 @@ def test_check_claims():
             r = run([PY, f'{S}/check_claims.py', bad_doc])
             assert_(r.returncode == 1 and '引用了在后的' in r.stdout and '→ Q3' in r.stdout,
                     f'Word 件里的向后引用未被 Q3 抓到: {show(r)}', r)
+            # Q11 在 Word 面上是另一种形状：docx_text 把一个 w:p 折成一行，所以
+            # "一项拆成两段、首段以分号或逗号收尾"必须不判，"同一段里两个句号"必须开火。
+            # 这两档都不看退码——只有一项从属时 Q6 一定开火，拿 rc 断言会把归因搅浑。
+            for tag, paras, want in (
+                    ('q11wred', ('1. 一种装置，包括躯干框架（1）。所述锁扣本体（2）铰接。',
+                                 '2. 根据权利要求 1 所述的装置，其特征在于：弹臂为钛合金。'), True),
+                    ('q11wgreen', ('1. 一种装置，包括躯干框架（1），',
+                                   '   所述锁扣本体（2）与所述框架铰接。',
+                                   '2. 根据权利要求 1 所述的装置，其特征在于：弹臂为钛合金。'), False)):
+                wdir = os.path.join(d, tag)
+                os.makedirs(wdir)
+                doc = Document()
+                doc.add_heading('权利要求书', level=2)
+                for x in paras:
+                    doc.add_paragraph(x)
+                doc.save(os.path.join(wdir, '说明书.docx'))
+                r = run([PY, f'{S}/check_claims.py', wdir])
+                assert_(('→ Q11' in r.stdout) == want,
+                        f'Word 件的句号位点读数不符（{tag} 期望开火={want}）: {show(r)}', r)
             open(os.path.join(bad_doc, '坏件.docx'), 'wb').write(b'not a zip')
             r = run([PY, f'{S}/check_claims.py', bad_doc])
             assert_(r.returncode == 2 and '输入不可用' in r.stdout and 'Traceback' not in r.stderr,
@@ -3084,6 +3148,28 @@ def test_check_claims():
                     and f':{n0 + want_off}:' in hits[0],
                     f'Q11 报的行号没跟着触发句号那一行走（{tag} 档应报抬头行 {n0} 之后第 {want_off} 行）'
                     f': {show(r)}', r)
+
+        # 绝对坐标档：真行号由测试自己 enumerate 夹具文本算出，既不抄门禁的读数、
+        # 也不像上面 A／B 档那样借另一条判据（Q6）当原点——那一档只钉得住"报的行随触发行移动"，
+        # 钉不住整体偏一行。Q 族的 where 今天按 0-based 报（实测：触发行真号 4、门禁报 3），
+        # 所以这一档在改之前必须是红的。
+        ABS = ('# 说明书\n## 权利要求书\n'
+               '1. 一种锁扣装置，包括躯干框架（1）。所述锁扣本体（2）与所述框架铰接。\n'
+               '2. 根据权利要求 1 所述的锁扣装置，其特征在于：所述弹臂为钛合金。\n'
+               '3. 根据权利要求 1 所述的锁扣装置，其特征在于：例如弹臂为铜。\n' + TBL)
+        p = os.path.join(d, 'qabs')
+        mkpkg(p, ABS)
+        real_q11 = [i for i, ln in enumerate(ABS.splitlines(), 1) if '。所述锁扣本体' in ln]
+        real_q9 = [i for i, ln in enumerate(ABS.splitlines(), 1) if '例如弹臂为铜' in ln]
+        assert_(len(real_q11) == 1 and len(real_q9) == 1,
+                f'夹具不自洽：Q11 触发点 {real_q11} 处、Q9 触发点 {real_q9} 处，档位会空转', None)
+        r = run([PY, f'{S}/check_claims.py', p])
+        h11 = [ln for ln in r.stdout.splitlines() if '→ Q11' in ln]
+        h9 = [ln for ln in r.stdout.splitlines() if '→ Q9' in ln]
+        assert_(len(h11) == 1 and f':{real_q11[0]}:' in h11[0],
+                f'Q11 报的位点不是触发行真号 {real_q11[0]}: {show(r)}', r)
+        assert_(len(h9) == 1 and f':{real_q9[0]}:' in h9[0],
+                f'Q9 报的位点不是触发行真号 {real_q9[0]}: {show(r)}', r)
 
         # 作用域：三条都判在权项之内——同一批词与同一批句号写在说明书节里，一律不许开火
         # （与 q8scope 同一形状的控制，只是原告换成指南那三句的词表）。
