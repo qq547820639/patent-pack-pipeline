@@ -111,7 +111,11 @@ DESIGN_SECTION = '简要说明'
 # P12：细则第二十条一款列的五节，二款要求"按照前款规定的方式和顺序撰写…并在每一部分前面写明标题"
 # ⇒ 判的是**节标题**（不是正文里提到这几个词），且必须在**同一份**说明书里齐。
 # 「附图说明」是条件项（20 条（四）"说明书有附图的，对各幅附图作简略说明"），单独按有无图定。
-SPEC_SECTIONS = ('技术领域', '背景技术', '发明内容', '附图说明', '具体实施方式')
+# 五节名的**定义**在判据侧 check_iron_rules（R11/R10 的说明书区域与 P12 判的是同一份法条清单），
+# 这里从 `_cir` 取而不是另抄一份：箭头只能 rebuild_package → check_iron_rules（本文件第 93 行
+# 已经 `_cir = _load('check_iron_rules')`，反方向 `_load('rebuild_package')` 就是循环导入）。
+# "同一个对象"由 tests/test_scripts.py 的 `is` 断言钉住——两份各自可改的元组迟早分叉，== 看不见。
+SPEC_SECTIONS = _cir.SPEC_SECTIONS
 SPEC_UNCONDITIONAL = ('技术领域', '背景技术', '发明内容', '具体实施方式')
 SPEC_FIG_SECTION = '附图说明'
 _PAREN = re.compile(r'[（(].*?[）)]')

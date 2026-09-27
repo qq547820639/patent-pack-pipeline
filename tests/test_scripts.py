@@ -1644,7 +1644,9 @@ def test_check_iron_rules():
                 f'正文里的「简要说明：」内联写法被当成一个节来判了: {show(r)}', r)
 
         # R11＋R10 说明书面（细则 20 条三款，整份说明书区域）：双禁档各点各的、
-        # 区域跨过 ### 小节（层级止于 ≤2 级）、引用语写在别的节不算、合规说明书零误报。
+        # 区域按《专利法实施细则》第二十条一款那五节的**节名**认，不锚标题层级
+        # （扁平的 `##` 模板与嵌套的 `###` 小节都要开火，落点形状的成对档见下面的
+        #  test_iron_spec_region_shapes）、引用语写在别的节不算、合规说明书零误报。
         # 缺席断言一律按本族**真输出形状**写：iron 族的违规行是 `FAIL <判据名> 路径:行: …`，
         # 违规行里没有 "→"。原先这两条写的是 `'→ R11' not in …`——按构造永真，
         # 等于第 37 轮那两条反向控制没验过。
@@ -1673,9 +1675,12 @@ def test_check_iron_rules():
         assert_(r.returncode == 0 and 'R11 说明书引用语' not in r.stdout
                 and 'R10 说明书宣传用语' not in r.stdout,
                 f'合规说明书被 R11/R10 误伤: {show(r)}', r)
-        # 出域档必须配一份"同一批字节、只把「## 说明书」标题补回去"的正向档：
+        # 出域档必须配一份"同一批字节、只把节名换成区域内那一节"的正向档：
         # 没有它，"没开火"可能只是因为这份文书压根没进判据的域（读不到区域时它什么都不报）。
-        SPEC_OUT = ('# 申请文件\n### 技术领域\n如权利要求1所述的装置，性价比极高。\n'
+        # 出域那个名字用「权利要求书」而不是随便哪一节——"如权利要求1所述的…"在那一节是法条
+        # **要求**的写法，区域把它吞进来就是把假阴性修成假阳性（第 39 轮区域按节名认之后，
+        # 「### 技术领域」已在域内，这一档的对偶只能换成权利要求书／摘要／标记说明那一类节名）。
+        SPEC_OUT = ('# 申请文件\n## 权利要求书\n如权利要求1所述的装置，性价比极高。\n'
                     '## 说明书\n装置包括框架。\n')
         open(os.path.join(d, 'specscope.md'), 'w', encoding='utf8').write(SPEC_OUT)
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specscope.md')])
@@ -1683,10 +1688,10 @@ def test_check_iron_rules():
                 and 'R10 说明书宣传用语' not in r.stdout,
                 f'「说明书」区域之外被 R11/R10 越域判了: {show(r)}', r)
         open(os.path.join(d, 'specscope_hit.md'), 'w', encoding='utf8').write(
-            SPEC_OUT.replace('# 申请文件\n', '# 申请文件\n## 说明书\n', 1))
+            SPEC_OUT.replace('## 权利要求书', '## 具体实施方式', 1))
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specscope_hit.md')])
         assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout,
-                f'出域档的前提不成立：同样这批字节补上「## 说明书」后也没开火，'
+                f'出域档的前提不成立：同样这批字节把节名换成「具体实施方式」后也没开火，'
                 f'那条"出域不判"是空转: {show(r)}', r)
 
         # ── R12／R13（《专利审查指南》2023 第二部分第二章 §2.2.6 与 §2.4，第 39 轮）──────────
@@ -1916,6 +1921,245 @@ def test_check_iron_rules():
     print(f'PASS check_iron_rules（R{_rn[0]}–R{_rn[-1]} 各条成对必红必绿 + 三态 + rc=2 + --all 四档；'
           f'摘要 {n_ok}/{n_over} 字；R12/R13 三面括号方向各有正反档 + 号集门 + 包级号集 + '
           f'两张出域档都配了入域正向档）')
+
+
+# ---------- R11／R10 说明书面：区域的"落点形状"夹具（模块级，探针与常驻档共用同一批字节） ----------
+
+# 主理人 2026-09-28 复现用的那一句：真产物里【待填写】占位与引用语写在同一行，
+# 一句话同时踩中细则第二十条三款的两条禁令（引用语 + 商业性宣传语），所以每档都要求两条各点一次。
+SPECREG_SENT = '【待填写】如权利要求1所述的装置，性价比极高。'
+
+# 生产扁平形状：与 `new_product_package.py`→`rebuild_package.py` 落盘的
+# `02_申请文件/说明书_*.md` 逐节同形——摘要／权利要求书／说明书／五节／图中标记说明**全是 `##`**
+# （本机 14 份真工件普查无一例外，另见下方"生产侧真工件"档现造一份）。
+# 违规句落在 `## 具体实施方式` 底下：区域若按"止于下一个 ≤2 级标题"划，
+# `## 说明书` 那块就只剩它底下那一行占位，这一档在改前 rc=0、零开火。
+SPECREG_FLAT = '\n'.join([
+    '# E2E 申请文件（说明书骨架）',
+    '',
+    '（骨架期对照表只有表头：N2–N4 报"未判"而不是判红，填了行才会被判。）',
+    '',
+    '## 说明书摘要',
+    # 摘要里登记过的标记**必须**带括号（第 39 轮的 R13）——这份夹具是 R11/R10 的效力对照，
+    # 要求"去掉那一句后整份干净"，所以摘要面自己得先按 R13 的写法摆好；
+    # 具体实施方式那一面方向相反（R12 要求不加括号），两面的方向在这一份夹具里同时在场。
+    '【待填写】本装置包括躯干框架（1）与锁扣本体（2）。',
+    '## 权利要求书',
+    # 越界捕手（第一只）：这一行**逐字含着 R11 的形状**「如权利要求1所述…」。扁平形状里
+    # `## 权利要求书` 不是任何块的内部，所以区域只要肯吞到它外面去（例如退回"整篇都是区域"）
+    # 这一档立刻开火。细则 20 条三款禁的是**说明书**里用这类引用语，权利要求之间的引用是
+    # 22～25 条要求的东西，两张面各归各的判点，不许由 R11 一处判两边的写法。
+    # 另一只捕手在下面"`# 说明书` 底下夹 `## 权利要求书`"那一档——`SPEC_REGION_STOP` 只在
+    # "某个块的范围里出现 Stop 节名"时才起作用，那种罩法只有 1 级标题做得到，所以两档都要在。
+    '【待填写】如权利要求1所述的装置，所述躯干框架与锁扣本体连接。',
+    '## 说明书',
+    '【待填写：骨架期占位，取自交底书】',
+    '## 技术领域',
+    '【待填写】可穿戴设备与人体外骨骼。',
+    '## 背景技术',
+    '【待填写：最接近的在先技术与本案区别特征】',
+    '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。',
+    '## 发明内容',
+    '【待填写】',
+    '## 附图说明',
+    '（逐幅写：图 N 为……；N 从 1 起顺序编号，一幅一行）',
+    '## 具体实施方式',
+    SPECREG_SENT,
+    '## 图中标记说明',
+    '| 标记 | 名称 | 所在图号 |',
+    '|---|---|---|',
+    '| 1 | 躯干框架 | 图1 |',
+]) + '\n'
+
+# 第二处同名节：真产物里 `## 附图说明` 出现两次（一次模板占位、一次 rebuild 追加的真内容，
+# 见 .codebuddy/attest/r69prod/说明书_E2E.md 的第 18 行与第 28 行）。
+# 区域按节名认时只取第一处，等于这一整块又回到看不见的位置上。
+SPECREG_FLAT_SECOND = SPECREG_FLAT + '\n'.join([
+    '',
+    '## 附图说明',
+    '图1 为本装置主视图，图2 为锁扣处局部放大图。',
+    SPECREG_SENT,
+]) + '\n'
+
+# 旧嵌套形状（`## 说明书` + `### 小节`）：第 39 轮之前唯一被走过的形态，改后必须照旧开火。
+SPECREG_NESTED = '\n'.join([
+    '# 申请文件',
+    '## 说明书',
+    '【待填写】本装置包括躯干框架。',
+    '### 技术领域',
+    '可穿戴设备。',
+    '### 背景技术',
+    '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。',
+    '### 具体实施方式',
+    SPECREG_SENT,
+]) + '\n'
+
+# 既没有「说明书」标题、也没有那五节任何一节的文书 ⇒ 区域为空 ⇒ 三态走"不适用"，
+# 既不判红也不许新增一条"未判"噪声行。
+SPECREG_NOREGION = '\n'.join([
+    '# 检索关键词与 IPC 分类建议',
+    'A61F5/00',
+    SPECREG_SENT,
+]) + '\n'
+
+
+def _specreg_true_pos(text):
+    """测试自己数出来的 1-based 真行号——位点断言的原点，绝不抄门禁读数。"""
+    return [i for i, ln in enumerate(text.splitlines(), 1) if ln == SPECREG_SENT]
+
+
+def _specreg_fired(out, tag):
+    """从门禁输出里取某条判据报出的行号（iron 族真输出形状：`FAIL <判据名> 路径:行: 报文`）。
+    只用它与 `_specreg_true_pos` 对账，不用它反推期望值。"""
+    return [int(m.group(1)) for ln in out.splitlines() if tag in ln
+            for m in [re.search(r':(\d+): ', ln)] if m]
+
+
+def test_iron_spec_region_shapes():
+    """R11／R10 说明书面**按落点形状**成对判：生产扁平／旧嵌套／越界节名静默／第二处同名节。
+
+    第 39 轮的假阴性是"区域按标题层级划"造成的：生产模板把《专利法实施细则》第二十条一款那五节
+    全写成 `##`，于是"止于下一个 ≤2 级标题"的说明书区域在生产包上只剩一行占位，
+    R11 与 R10 说明书面在生产形态上基本不开火。修法把区域改成按**法条自己列举的节名**认，
+    所以这里的档位必须两极配对：区域内那一节改名字即静默（防把假阴性修成假阳性），
+    区域外的节名（权利要求书／说明书摘要／图中标记说明）必须静默（法条在那几件文书上另有判点）。
+    另配一档"生产侧真工件"——手写夹具全绿时生产形态可能从没被走过，这是本仓的纪律。
+    """
+    def one(d, name, text):
+        p = os.path.join(d, name)
+        open(p, 'w', encoding='utf8').write(text)
+        return run([PY, f'{S}/check_iron_rules.py', p])
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 生产扁平形状：`## 具体实施方式` 底下那句必须被 R11 与 R10 各点一条，位点=测试数出的那一行
+        want = _specreg_true_pos(SPECREG_FLAT)
+        assert_(len(want) == 1, f'夹具里违规句不止一处（{want}），这一档空转', None)
+        r = one(d, '扁平.md', SPECREG_FLAT)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want
+                and '细则第二十条三款' in r.stdout,
+                f'生产扁平形状（五节全 `##`）里「## 具体实施方式」下那句未被 R11/R10 各点一条，'
+                f'期望位点 {want} 且只此一处: {show(r)}', r)
+        # ① 的效力对照：同一份字节补一份"合规版"必须整条门禁放行，
+        # 否则"开火"可能来自夹具里别的既有违规（R2/R9 之类）而不是这一句。
+        one(d, '扁平合规.md', SPECREG_FLAT.replace(SPECREG_SENT, '【待填写】装置包括框架与弹臂。'))
+        r0 = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '扁平合规.md')])
+        assert_(r0.returncode == 0, f'扁平夹具去掉那一句后并不干净，①的开火归因不成立: {show(r0)}', r0)
+
+        # ② 旧嵌套形状照旧开火（修新不许忘旧），位点同样由测试自己数
+        want2 = _specreg_true_pos(SPECREG_NESTED)
+        r = one(d, '嵌套.md', SPECREG_NESTED)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want2
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want2,
+                f'旧嵌套形状（`## 说明书` + `###` 小节）不再被 R11/R10 抓住，期望位点 {want2}: {show(r)}', r)
+        # 既有射程不许因为"改按节名认"而缩掉：`##说明书`（井号后无空格）一直是
+        # SPEC_DOC_HEAD 的 `\s*` 在认的，今天仍要在它底下开火。
+        NOSPACE = '# 申请文件\n##说明书\n' + SPECREG_SENT + '\n'
+        r = one(d, '无空格标题.md', NOSPACE)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == _specreg_true_pos(NOSPACE),
+                f'无空格标题 `##说明书` 的既有射程丢了（期望位点 {_specreg_true_pos(NOSPACE)}）: {show(r)}', r)
+
+        # ④ 违规句写在**第二处同名节**里必须开火：期望位点是两处（第一处同名节 + 第二处），
+        # 只报第一处＝区域只并了第一次命中的块，等于第二处整块仍然看不见。
+        want4 = _specreg_true_pos(SPECREG_FLAT_SECOND)
+        assert_(len(want4) == 2, f'④ 夹具应当有两处同名节落点，实数 {want4}', None)
+        r = one(d, '第二处同名节.md', SPECREG_FLAT_SECOND)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want4,
+                f'第二处同名节（生产包里 `## 附图说明` 出现两次）里的违规句未被逐块报出，'
+                f'期望 {want4}: {show(r)}', r)
+        assert_(_specreg_fired(r.stdout, 'R10 说明书宣传用语') == want4,
+                f'第二处同名节的宣传语未被 R10 说明书面逐块报出，期望 {want4}: {show(r)}', r)
+
+        # ③ 同一批字节把节名换成区域外的节，必须**静默**（防把假阴性修成越界假红）。
+        # 三份都只换标题那一行、正文一字不动：区域若"层级优先/见名就并"，这几档就会翻红。
+        for sec in ('权利要求书', '说明书摘要', '图中标记说明', '说明书附图', '简要说明'):
+            r = one(d, f'换名{sec}.md', SPECREG_FLAT.replace('## 具体实施方式', f'## {sec}'))
+            assert_(not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                    and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                    f'节名换成「{sec}」后区域把它吞进来了（该节由别的判据按别的节判）: {show(r)}', r)
+        # ③ 的正向对照：换回来的那一个节名（具体实施方式）就是①，见上——
+        # 这里再补一条"换名只换了标题、正文没变"的自证，免得换名档把句子里的字也换掉了。
+        assert_(SPECREG_SENT in SPECREG_FLAT.replace('## 具体实施方式', '## 权利要求书'),
+                '③ 的夹具不是"同一批字节"：正文被一起换掉了', None)
+        # 层级不救场的那一族：`# 说明书` 一级标题底下的 `## 权利要求书` 只能靠**节名**止住
+        # （级数比它深的标题一律不停），所以这一档单独钉"区域看的是 SPEC_REGION_STOP 那份名单"。
+        L1 = ('# 说明书\n本发明公开一种装置，包括躯干框架。\n## 权利要求书\n' + SPECREG_SENT + '\n'
+              '## 具体实施方式\n装置包括框架与弹臂。\n')
+        r = one(d, '一级说明书夹权要.md', L1)
+        assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                f'「# 说明书」底下那一节「## 权利要求书」被并进区域了（越界假红）: {show(r)}', r)
+        # 同一批字节只把那个节名换成区域内的「附图说明」必须开火，位点=测试自己数的第 4 行
+        r = one(d, '一级说明书夹权要_hit.md', L1.replace('## 权利要求书', '## 附图说明'))
+        assert_(r.returncode == 1 and _specreg_fired(r.stdout, 'R11 说明书引用语') == [4],
+                f'换成「## 附图说明」后也没在它那一块里开火，上一条"权要不入域"是空转: {show(r)}', r)
+
+        # 三态：既无「说明书」标题也无那五节 ⇒ 区域空 ⇒ 不判红，也不新增"未判"噪声行
+        r = one(d, '无区域.md', SPECREG_NOREGION)
+        assert_(r.returncode == 0
+                and not [ln for ln in r.stdout.splitlines() if '说明书引用语' in ln
+                         or '说明书宣传用语' in ln],
+                f'区域为空时被折成违规、或新长出"未判"提示行: {show(r)}', r)
+        # 同一批字节补一个区域内的节名 ⇒ 必须开火（没有这条，上面那条静默可能只是判据没接上）
+        r = one(d, '无区域补节.md', SPECREG_NOREGION.replace(
+            '# 检索关键词与 IPC 分类建议', '# 检索关键词与 IPC 分类建议\n## 技术领域'))
+        assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout,
+                f'补上「## 技术领域」后仍不开火，上一条"区域为空不判"是空转: {show(r)}', r)
+
+        # 共享常量的依赖方向：五节名的**定义**住在判据侧（check_iron_rules），
+        # rebuild_package 从 `_cir` 取（反方向 `_load('rebuild_package')` 就是循环导入）。
+        # 钉"同一个对象"而不是"相等"——两份各自可改的元组迟早分叉，等号看不见分叉。
+        _rs = importlib.util.spec_from_file_location('rp_specreg', f'{S}/rebuild_package.py')
+        rp = importlib.util.module_from_spec(_rs)
+        _rs.loader.exec_module(rp)
+        assert_(rp.SPEC_SECTIONS is rp._cir.SPEC_SECTIONS,
+                'rebuild_package.SPEC_SECTIONS 不是 check_iron_rules 那份对象（有人另抄了一份，'
+                '两端会各自漂移——生产侧五节与区域五节就不是同一件事了）', None)
+        assert_(rp.SPEC_SECTIONS == ('技术领域', '背景技术', '发明内容', '附图说明', '具体实施方式'),
+                f'五节名与《专利法实施细则》第二十条一款对不上: {rp.SPEC_SECTIONS}', None)
+        # 区域函数自己也不许在函数体里另抄一份节名（那是同一处分叉的第二个入口），
+        # 且判据侧那份字面量**只能有一处定义**——两处各写一遍就又是两份会各自漂移的清单。
+        _isrc = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
+        assert_('def spec_doc_blocks' in _isrc, '区域函数不在了，R11/R10 说明书面靠什么划区域', None)
+        _fn = _isrc.split('def spec_doc_blocks', 1)[1].split('\ndef ', 1)[0]
+        assert_('SPEC_SECTIONS' in _fn, '区域函数没引用共享常量 SPEC_SECTIONS，它用的是哪份清单', None)
+        _lits = [ln for ln in _isrc.splitlines() if ln.startswith('SPEC_SECTIONS = (')]
+        assert_(len(_lits) == 1,
+                f'判据侧的「SPEC_SECTIONS = (」字面量有 {len(_lits)} 处，'
+                f'区域与 P12 判的就不是同一份清单了', None)
+
+    # ---------- 生产侧真工件：手写夹具全绿不等于生产形态被走过 ----------
+    # 临时目录开在 worktree 内（仓库纪律：主树正被别的批跑占用，产物不落主树、不落 /tmp 之外的共享处）。
+    work = tempfile.mkdtemp(prefix='specreg_prod_', dir=ROOT)
+    try:
+        pkg = os.path.join(work, 'SPECREG_专利交付包')
+        r = run([PY, f'{S}/new_product_package.py', 'SPECREG', work])
+        assert_(r.returncode == 0 and os.path.isdir(pkg), f'骨架生成失败: {show(r)}', r)
+        spec = os.path.join(pkg, '02_申请文件', '说明书_SPECREG.md')
+        assert_(os.path.isfile(spec), f'生产侧没落出 02_申请文件/说明书_*.md: {show(r)}', r)
+        txt = open(spec, encoding='utf8').read()
+        r = run([PY, f'{S}/check_iron_rules.py', spec])
+        assert_(r.returncode == 0, f'生产骨架开箱即红，下面"注入即红"的归因不成立: {show(r)}', r)
+        heads = [i for i, ln in enumerate(txt.splitlines(), 1) if ln.strip() == '## 具体实施方式']
+        assert_(len(heads) == 1, f'真工件里「## 具体实施方式」标题数出 {heads} 处，档位空转', None)
+        inj = '\n'.join(txt.splitlines()[:heads[0]] + [SPECREG_SENT]
+                        + txt.splitlines()[heads[0]:]) + '\n'
+        open(spec, 'w', encoding='utf8').write(inj)
+        r = run([PY, f'{S}/check_iron_rules.py', spec])
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == [heads[0] + 1]
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == [heads[0] + 1],
+                f'生产真工件的「## 具体实施方式」里塞违规句未被 R11 抓到，'
+                f'期望位点 {heads[0] + 1}（测试自己数的行号）: {show(r)}', r)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    print('PASS 说明书区域落点形状（生产扁平／旧嵌套／越界节名静默／第二处同名节／三态不折叠 '
+          '+ 共享常量同对象 + 生产真工件开火）')
 
 
 def test_battery_crash_attribution():
@@ -4098,6 +4342,7 @@ if __name__ == '__main__':
              test_check_figures_colour,
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
+             test_iron_spec_region_shapes,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
