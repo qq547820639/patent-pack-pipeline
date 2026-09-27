@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""权利要求结构门禁 Q1–Q11：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
+"""权利要求结构门禁 Q1–Q12：把 hard-rules §4 里"形状可机判"的那几条从人记变成实跑。
 
 法源逐字对过《专利法实施细则》（2023 修订，国务院令第 769 号）正文：
   第二十二条「权利要求书有几项权利要求的，应当用阿拉伯数字顺序编号」
@@ -58,9 +58,15 @@ Q9–Q11 的法源是《专利审查指南》（2023，国家知识产权局令�
      形式要求（1）"分行和分小段处只可用分号或逗号"）。
      **只判"结尾之前出现句号"，不判"结尾没有句号"**——指南那句话是给句号划界，
      不是设定"每项必须以句号收尾"的义务，反过来判会造出一条法条里没有的禁令。
+  Q12 权项编号前不得冠"权利要求"或"权项"（指南第一部分第一章 §4.4 逐字：
+     「应当用阿拉伯数字顺序编号，编号前不得冠以"权利要求"或者"权项"等词」；前半句由 Q1 判）。
+     这条同时补上一个此前静默的形状：通篇写成"权利要求1、权利要求2、…"的权要书，
+     CLAIM_ITEM 一行都解析不出，旧顺序下整族报"无项未判"而 Q12 是唯一看得见它的判据——
+     所以节面三条（Q7／Q8／Q12）现在都在"无项早退"之前跑。
 
-三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q11 全部未判（有的交付形态把权要交给代理机构写）；
-      有节但一行权项都解析不出 ⇒ Q1–Q11 全部未判（连权项都没有，谈不上形状），并说清读到了什么；
+三态：交付包里没有可识别的"权利要求书"节 ⇒ Q1–Q12 全部未判（有的交付形态把权要交给代理机构写）；
+      有节但一行权项都解析不出 ⇒ Q1–Q6、Q9–Q11 未判（连权项都没有，谈不上项内形状），并说清读到了什么；
+      但 Q7／Q8／Q12 判在整节文本面上，这一档它们照判——注记里点名是哪几条没判，不写"整族未判"。
       没有标记对照表 ⇒ Q5 未判（括号形状没有可对照的号集）。
       Q9–Q11 判在**每一项权项之内**，所以它们和"有没有解析出权项"同生死；
       Q7／Q8 判在整节文本面，权项切不出来时照判。
@@ -117,6 +123,12 @@ VAGUE_TERMS = ('例如', '最好是', '尤其是', '必要时')
 # ——所以只收"约＋数字"这一种形状和「或类似物」这一个逐字短语；另两个词登记为不判，理由同上。
 APPROX_SHAPE = re.compile(r'约\s*[0-9０-９]')
 APPROX_PHRASE = '或类似物'
+# Q12：《专利审查指南》第一部分第一章 §4.4（PDF p26／印刷页 1-10，书内页 22）逐字
+# 「权利要求书有几项权利要求的，应当用阿拉伯数字顺序编号，编号前不得冠以"权利要求"或者"权项"等词。」
+# 后半句是这一条的全部内容，前半句（顺序编号）已由 Q1 判；
+# 形状上这类行不会被 CLAIM_ITEM 解析成权项（它以"权"字起头），所以 Q1 常常照样绿——
+# 也就是说：**不判这一句，整份"权利要求1、权利要求2…"的权要书会读成"一行权项都没解析出"而未判**。
+CLAIM_NUM_PREFIX = re.compile(r'^\s*(?:权利要求|权项)\s*\d{1,3}\s*[.、．]')
 
 
 def read_any(path):
@@ -224,26 +236,35 @@ def check_text(path, text, name2num, marks_found, ptype=None):
     bad, notes, seen = [], [], set()
     cstart, body = claims_body(text)
     if cstart is None:
-        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q11 未判'
+        return [], [f'{path}: 没有「权利要求书」节 → Q1–Q12 未判'
                     f'（权要由代理机构撰写时本就没有这一节）'], seen
-    items = split_items(body)
-    if not items:
-        return [], [f'{path}: 有权利要求书节但一行权项都没解析出（不以「N.」起头？）'
-                    f' → Q1–Q11 未判（有节却无项，整族都判不起）'], seen
     where = lambda off: f'{path}:{cstart + 1 + off}'
 
-    # Q7／Q8：判在**这一节内**的文本面；与权项解析无关（就算一行权项都切不出来，
-    # 这两条也判得动——所以放在 items 的早退之后、用 body 直接扫）。
-    seen_q78 = set()
+    # Q7／Q8／Q12：判在**这一节内**的文本面，与权项解析无关。
+    # 这段必须在 `if not items` 之前跑——注释一直写着"就算一行权项都切不出来也判得动"，
+    # 而代码把它放在早退之后，那句是假的；第 39 轮加 Q12 时才撞上：一份通篇写成
+    # "权利要求1、权利要求2、…"的权要书，CLAIM_ITEM 一行都解析不出，整族读成"无项未判"，
+    # 而 Q12 恰恰是唯一看得见这种写法的那一条。顺序换过来之后这条红才出得来。
     for off, ln in enumerate(body):
         if CLAIM_IMAGE.search(ln):
             bad.append(f'{where(off)}: 权利要求书里出现插图（md 图片语法／docx 嵌入对象折算行）'
                        f' → Q7（第二十二条一款"不得有插图"）')
-            seen_q78.add('Q7')
+            seen.add('Q7')
         if CLAIM_FIG_REF.search(ln) or CLAIM_SPEC_REF.search(ln):
             bad.append(f'{where(off)}: 权利要求书里用"如图…所示／如说明书…部分所述"指回别的文书'
                        f' → Q8（第二十二条一款；正确写法是把标记放进括号，见 Q5）')
-            seen_q78.add('Q8')
+            seen.add('Q8')
+        if CLAIM_NUM_PREFIX.search(ln):
+            bad.append(f'{where(off)}: 权项编号「{ln.strip()[:12]}…」前冠了"权利要求／权项"字样'
+                       f' → Q12（指南第一部分第一章 §4.4"编号前不得冠以\'权利要求\'或者\'权项\'等词"）')
+            seen.add('Q12')
+
+    items = split_items(body)
+    if not items:
+        # 节面三条（Q7/Q8/Q12）已经判过，不能跟着整族说"未判"——说整族就是假话。
+        return bad, notes + [
+            f'{path}: 有权利要求书节但一行权项都没解析出（不以「N.」起头？）'
+            f' → Q1–Q6、Q9–Q11 未判（有节却无项，那几条判不起）'], seen
 
     # Q9／Q10／Q11：这三条的主语都是"权利要求中／每一项权利要求"，所以判在**每一项之内**，
     # 与 Q7／Q8 那张整节文本面分开——节标题下面写了"例如"而权项没写，不该报某一项的位点。
@@ -380,7 +401,6 @@ def check_text(path, text, name2num, marks_found, ptype=None):
                          f'不当附图标记处理，Q5 未核（不折成合规）')
     else:
         notes.append(f'{path}: 文书里没有「标记｜名称」对照表 → Q5 未判')
-    seen |= seen_q78          # Q7/Q8 与权项解析无关，但"实判判据集合"必须把它们记进去
     return bad, notes, seen
 
 
@@ -401,12 +421,12 @@ def check_package(root, ptype=None):
             notes += n
             seen |= s
     if not hit:
-        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q11 未判')
+        notes.append(f'{root}: 包内没有任何文书带「权利要求书」节 → Q1–Q12 未判')
     return bad, notes, seen
 
 
 def main():
-    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q11（只接目录）')
+    ap = argparse.ArgumentParser(description='权利要求结构门禁 Q1–Q12（只接目录）')
     ap.add_argument('targets', nargs='+', help='交付包目录')
     ap.add_argument('--type', default=None,
                     help='本案专利类型（发明／实用新型），决定 Q6 的从属条数档位；'
@@ -434,7 +454,7 @@ def main():
         judged += 1 if seen else 0
         total += len(bad)
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 Q1–Q11，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 Q1–Q12，判据见脚本 docstring）；实判 {judged} 个包')
     sys.exit(1 if total else 0)
 
 

@@ -225,14 +225,26 @@ def test_new_product_package():
                 '骨架底稿未通过 V1–V6，或未如实报出"条目 0 条"', rv)
         ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
         assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
+        # 第 39 轮那两条标记括号判据在骨架上的正确读数：说明书底稿**有**「说明书摘要」与
+        # 「具体实施方式」两个区域，而那张「标记｜名称」表只有表头没有行 ⇒ 号集为空 ⇒
+        # 必须说"未判"，既不判红也不冒充核过（生产侧的三态，与 R12/R13 夹具档同一口径）。
+        assert_('R12/R13 未判（看不见不等于合规）' in ri.stdout,
+                '骨架包上 R12/R13 没走"未判"三态（空表被折成合规，或被折成违规）', ri)
         # 生产侧也要过 Q 族：骨架那份说明书底稿没有真权项，正确读数是一句"未判"，
         # 既不该判红（新判据与生产底稿打架会在这里点名），也不许被折成"核过了"。
         rq = run([PY, f'{S}/check_claims.py', d])
-        # 缺席断言不能写 `'→ Q' not in stdout`：那条"未判"注记自己就写着 `→ Q1–Q11 未判`，
+        # 缺席断言不能写 `'→ Q' not in stdout`：三态注记自己就写着 `→ Q…未判`
+        # （骨架这份是 `→ Q1–Q6、Q9–Q11 未判（有节却无项，那几条判不起）`），
         # 这样写会被门禁的复述挡住（永假）。只数非 note 的违规行。
+        # 注记文案第 39 轮改过一次：节面三条 Q7／Q8／Q12 现在排在"无项早退"之前，
+        # 骨架那份「权利要求书」节只有一行【待填写…】⇒ 走的是"有节却无项"那一档，
+        # 不再是"没有权利要求书节 → Q1–Q12 未判"。断言按门禁此刻的真读数写。
         qfired = [ln for ln in rq.stdout.splitlines()
                   if '→ Q' in ln and not ln.lstrip().startswith('note ')]
-        assert_(rq.returncode == 0 and 'Q1–Q11 未判' in rq.stdout and not qfired,
+        assert_(rq.returncode == 0
+                and '有权利要求书节但一行权项都没解析出' in rq.stdout
+                and '→ Q1–Q6、Q9–Q11 未判（有节却无项，那几条判不起）' in rq.stdout
+                and not qfired,
                 f'新生成的包在权利要求形状门禁上的读数不对: {show(rq)}', rq)
         # EVT 底稿在场，且骨架就能被 E1–E4 真判一次（有判定列的表，空行合法）
         evt = os.path.join(d, 'TESTX_专利交付包', '04_EVT验证', 'EVT_TESTX.md')
@@ -1085,6 +1097,10 @@ def test_check_iron_rules_docx():
         r = run([PY, f'{S}/check_iron_rules.py', naked])
         assert_(r.returncode == 0 and '未识别到节标题样式' in r.stdout,
                 f'无节标题的 docx 未报三态: {show(r)}', r)
+        # 那句注记点名的判据清单也是自述：第 39 轮加了 R12/R13（都按节判），
+        # 抄旧的"R3/R4/R10"就是把"看不见"说成"只影响那三条"。清单现抄自门禁此刻的真读数。
+        assert_('→ R3/R4/R10/R12/R13（按节判的判据）未核' in r.stdout,
+                f'docx 未核注记点名的判据清单不对: {show(r)}', r)
 
         # 损坏 docx 与带 DTD 的 document.xml 都必须 rc=2 说清成因，不折成"零违规"
         broken = os.path.join(d, '坏件.docx')
@@ -1413,7 +1429,8 @@ def rule_span(src):
 
 
 def test_check_iron_rules():
-    """铁律门禁 R1–R5：每条判据各自成对（注入即红 / 合规必绿），外加三态与输入不可用档。"""
+    """铁律门禁 R1–R13（区间由 rule_span 从脚本源码现推，见函数尾那行自述）：
+    每条判据各自成对（注入即红 / 合规必绿），外加三态与输入不可用档。"""
     def gate(d, report=True, extra=None):
         cmd = [PY, f'{S}/check_iron_rules.py', os.path.join(d, '交底书.md')]
         if report:
@@ -1628,9 +1645,12 @@ def test_check_iron_rules():
 
         # R11＋R10 说明书面（细则 20 条三款，整份说明书区域）：双禁档各点各的、
         # 区域跨过 ### 小节（层级止于 ≤2 级）、引用语写在别的节不算、合规说明书零误报。
-        # 缺席断言一律按本族**真输出形状**写：iron 族打印的是 `FAIL <判据名> 路径:行: …`，
-        # 报文里今天没有 "→" 这个字符（`check_iron_rules.py` 全份输出 grep -c "→" == 0）。
-        # 原先这两条写的是 `'→ R11' not in …`——按构造永真，等于第 37 轮那两条反向控制没验过。
+        # 缺席断言一律按本族**真输出形状**写：iron 族的违规行是 `FAIL <判据名> 路径:行: …`，
+        # 违规行里没有 "→"。原先这两条写的是 `'→ R11' not in …`——按构造永真，
+        # 等于第 37 轮那两条反向控制没验过。
+        # （第 38 轮这条注释还写着"全份输出 grep -c → == 0"，第 39 轮起不成立：
+        #  R12/R13 那句"未判"注记与 docx 那句"未核"注记都带 "→"。所以缺席断言只数违规行，
+        #  见下面 R12／R13 那一档的 iron_hits()。）
         write(d, abstract=IRON_OK_ABSTRACT)
         SPEC_BAD = ('# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
                     '如权利要求1所述的装置，性价比极高。\n')
@@ -1668,6 +1688,176 @@ def test_check_iron_rules():
         assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout,
                 f'出域档的前提不成立：同样这批字节补上「## 说明书」后也没开火，'
                 f'那条"出域不判"是空转: {show(r)}', r)
+
+        # ── R12／R13（《专利审查指南》2023 第二部分第二章 §2.2.6 与 §2.4，第 39 轮）──────────
+        # 同一张「标记｜名称」对照表管三面三种括号方向：权利要求书**必须**把标记放进括号
+        # （那一面归 check_claims 的 Q5）、具体实施方式**不得**加括号（R12）、
+        # 摘要**应当**加括号（R13）。三面各配必红／必绿两档，外加"号集来自哪张表"这一档。
+        # 缺席断言按 iron 族的**真输出形状**写。本轮真跑一次得到的原样一行（路径截长）：
+        #   FAIL R13 摘要标记未加括号 /tmp/…/摘要标记裸写.md:3: 摘要里「支架3」的标记 3 没放进括号——…
+        # 违规行里没有 "→"；上面第 38 轮那条注释"全份输出 grep -c → == 0"从本轮起**不成立**
+        # （新加的"未判"注记自己就写着 `→ R12/R13 未判`），所以这里按违规行前缀数，
+        # 并逐条钉"违规行自己不含 →"，不再拿整份输出说事。
+        MARKS_TBL = ('## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n'
+                     '| 2 | 锁扣本体 | 1 |\n| 3 | 支架 | 1 |\n| 4 | 弹性件 | 2 |\n')
+        # 表外自由数字：3 是组数、5 是行程、2020 是年份、11 是步骤号。号集只认表里登记过的
+        # 「名称↔号」对，把表外数字当标记就是把这两把尺子做成假红制造机（与 Q5 同一条防线）。
+        NUM_DECOY = '共 3 组，行程 5mm，2020 年定型。'
+
+        def wdoc(name, content):
+            p = os.path.join(d, name + '.md')
+            open(p, 'w', encoding='utf8').write(content)
+            return p
+
+        def iron_of(p):
+            return run([PY, f'{S}/check_iron_rules.py', p])
+
+        def iron_hits(out, rule):
+            """本族违规行 = 以两个空格 + FAIL + 判据号开头的那些行（note 行不算）。"""
+            return [ln for ln in out.splitlines() if ln.startswith(f'  FAIL {rule}')]
+
+        def real_line(text, needle):
+            """needle 在夹具里的**真 1-based 行号**，由测试自己数——不抄门禁的读数。"""
+            got = [i for i, ln in enumerate(text.splitlines(), 1) if needle in ln]
+            assert_(len(got) == 1, f'夹具不自洽：「{needle}」命中 {got} 行，这一档会空转', None)
+            return got[0]
+
+        # 合规合面档：摘要加括号、具体实施方式不加括号，两面各按各的方向写在同一份文书里。
+        # 这一档必须全绿，它本身就是"两面的括号方向相反"的证据——哪一面把方向抄反，
+        # 这里当场多出一条红（变异电池「R12 与 R13 方向互换」那一臂咬的就是它）。
+        IRON_MARKS_OK = ('# 申请文件\n## 说明书摘要\n'
+                         '本发明公开一种锁扣装置，包括支架（3）。' + NUM_DECOY + '\n'
+                         '## 具体实施方式\n'
+                         '支架3通过弹性件与锁扣本体2连接。' + NUM_DECOY + '\n' + MARKS_TBL)
+        p = wdoc('两面合规', IRON_MARKS_OK)
+        r = iron_of(p)
+        assert_(r.returncode == 0 and not iron_hits(r.stdout, 'R12')
+                and not iron_hits(r.stdout, 'R13'),
+                f'两面各按各的方向写的合规档没能全绿（两面的括号方向相反，抄反哪一面都在这里红）: '
+                f'{show(r)}', r)
+        assert_('R12/R13 未判' not in r.stdout,
+                f'包里明明有对照表却报"未判"，号集根本没读到那张表: {show(r)}', r)
+
+        # R13 两面：摘要里裸写标记必红；写成括号式＋表外自由数字必绿
+        R13_BAD = ('# 申请文件\n## 说明书摘要\n'
+                   '本发明公开一种锁扣装置，包括支架3。' + NUM_DECOY + '\n' + MARKS_TBL)
+        p = wdoc('摘要标记裸写', R13_BAD)
+        r = iron_of(p)
+        hits = iron_hits(r.stdout, 'R13')
+        n13 = real_line(R13_BAD, '包括支架3。')
+        assert_(r.returncode == 1 and len(hits) == 1,
+                f'R13 摘要裸写标记那一档开火数不对（应为恰好一条）: {show(r)}', r)
+        assert_(hits[0].startswith('  FAIL R13 摘要标记未加括号 ')
+                and f'摘要标记裸写.md:{n13}:' in hits[0] and '→' not in hits[0],
+                f'R13 的输出形状或位点不对（真行号 {n13}，形状该是 '
+                f'"FAIL R13 摘要标记未加括号 路径:行: 成因"）: {show(r)}', r)
+        assert_('指南 §2.4' in hits[0], f'R13 没把法源写到那一行上: {show(r)}', r)
+        R13_OK = R13_BAD.replace('包括支架3。', '包括支架（3）。')
+        p = wdoc('摘要标记加括号', R13_OK)
+        r = iron_of(p)
+        assert_(r.returncode == 0 and not iron_hits(r.stdout, 'R13'),
+                f'摘要里已加括号的标记、或"共 3 组／5mm／2020 年"这类表外数字被 R13 判红了: '
+                f'{show(r)}', r)
+
+        # R12 两面：紧跟技术名称不加括号（＋表外数字）必绿；写成加括号必红。
+        # 这一对刻意把**合规档排在必红档之前**（与上面 R13 那对的顺序相反），理由是：
+        # 套件遇红即停，而"号集放宽"那支变异（丢掉"必须是表里登记过的名称↔号对"这根锚，
+        # 任何括号数字都当标记）让必红档照样红、只是条数变多——若把必红档排在前面，
+        # 那一臂的第一红就落在"开火数不对"上，读不出这把尺子已经越界咬到表外数字了。
+        # 表外加括号的数字（步骤 11）也算假红：号集不认它，它就不是附图标记。
+        R12_OK = ('# 申请文件\n## 具体实施方式\n'
+                  '支架3通过弹性件与锁扣本体2连接。' + NUM_DECOY + '\n'
+                  '上述步骤（11）中，锁扣本体先行到位。\n' + MARKS_TBL)
+        p = wdoc('实施方式标记裸写', R12_OK)
+        r = iron_of(p)
+        assert_(r.returncode == 0 and not iron_hits(r.stdout, 'R12'),
+                f'具体实施方式里不加括号的标记、或"（11）"这类表外加括号数字被 R12 判红了: '
+                f'{show(r)}', r)
+        R12_BAD = ('# 申请文件\n## 具体实施方式\n'
+                   '支架（3）通过弹性件与锁扣本体2连接。' + NUM_DECOY + '\n' + MARKS_TBL)
+        p = wdoc('实施方式标记加括号', R12_BAD)
+        r = iron_of(p)
+        hits = iron_hits(r.stdout, 'R12')
+        n12 = real_line(R12_BAD, '支架（3）通过弹性件')
+        assert_(r.returncode == 1 and len(hits) == 1,
+                f'R12 具体实施方式加括号那一档开火数不对（应为恰好一条）: {show(r)}', r)
+        assert_(hits[0].startswith('  FAIL R12 具体实施方式标记加括号 ')
+                and f'实施方式标记加括号.md:{n12}:' in hits[0] and '→' not in hits[0],
+                f'R12 的输出形状或位点不对（真行号 {n12}，形状该是 '
+                f'"FAIL R12 具体实施方式标记加括号 路径:行: 成因"）: {show(r)}', r)
+        assert_('指南 §2.2.6' in hits[0], f'R12 没把法源写到那一行上: {show(r)}', r)
+
+        # 号集门：包内没有那张「标记｜名称」表 ⇒ 两条都未判（看不见不等于合规）；
+        # 同一批违例文本配上表 ⇒ 立刻翻红。这一对才是"翻判决的是那张表、不是文字"的证据，
+        # 只测前一半的话，"未判"可能只是判据压根没接线。
+        BOTH_BAD = ('# 申请文件\n## 说明书摘要\n本发明公开一种锁扣装置，包括支架3。\n'
+                    '## 具体实施方式\n支架（3）通过弹性件与锁扣本体2连接。\n')
+        p = wdoc('无表违例', BOTH_BAD)
+        r = iron_of(p)
+        assert_(r.returncode == 0
+                and 'R12/R13 未判（看不见不等于合规）' in r.stdout
+                and not iron_hits(r.stdout, 'R12') and not iron_hits(r.stdout, 'R13'),
+                f'包内没有对照表时 R12/R13 没走"未判"三态（红或静默都不对）: {show(r)}', r)
+        BOTH_BAD_TBL = BOTH_BAD + MARKS_TBL
+        p = wdoc('有表违例', BOTH_BAD_TBL)
+        r = iron_of(p)
+        h13, h12 = iron_hits(r.stdout, 'R13'), iron_hits(r.stdout, 'R12')
+        assert_(r.returncode == 1 and len(h13) == 1 and len(h12) == 1,
+                f'同一批违例文本配上对照表后 R12/R13 没各判一条（翻判决的该是那张表）: '
+                f'{show(r)}', r)
+        assert_(f'有表违例.md:{real_line(BOTH_BAD_TBL, "包括支架3。")}:' in h13[0]
+                and f'有表违例.md:{real_line(BOTH_BAD_TBL, "支架（3）通过弹性件")}:' in h12[0],
+                f'R12/R13 报的位点不是各自触发那一行的真号: {show(r)}', r)
+
+        # 号集是**包级**事实：那张表常写在另一份文书的附图说明节里。
+        # 两半都要钉：分两份扫 ⇒ 红；只扫摘要那份 ⇒ 未判。缺后一半的话，
+        # "包级"可能只是"整包里恰好哪份都有表"的假象。
+        pkg = os.path.join(d, '包级号集')
+        os.makedirs(pkg, exist_ok=True)
+        only_abs = '# 申请文件\n## 说明书摘要\n本发明公开一种锁扣装置，包括支架3。\n'
+        open(os.path.join(pkg, '甲_摘要.md'), 'w', encoding='utf8').write(only_abs)
+        open(os.path.join(pkg, '乙_对照表.md'), 'w', encoding='utf8').write('# 附图\n' + MARKS_TBL)
+        r = run([PY, f'{S}/check_iron_rules.py', pkg, '--all'])
+        hits = iron_hits(r.stdout, 'R13')
+        assert_(r.returncode == 1 and len(hits) == 1
+                and f'甲_摘要.md:{real_line(only_abs, "包括支架3。")}:' in hits[0],
+                f'对照表写在另一份文书时 R13 没判红（号集不是包级事实，摘要侧永远看不见表）: '
+                f'{show(r)}', r)
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(pkg, '甲_摘要.md')])
+        assert_(r.returncode == 0 and 'R12/R13 未判' in r.stdout and not iron_hits(r.stdout, 'R13'),
+                f'只扫摘要那份文书时该报"未判"（包级号集的另一半：单看这份确实看不见表）: '
+                f'{show(r)}', r)
+
+        # 作用域：R12 只吃「具体实施方式」区域、R13 只吃摘要区域。
+        # 每张出域档都配一份"同一批字节、只把区域标题换掉"的入域正向档，
+        # 否则"没开火"可能只是没进域（第 38 轮那条 R11 出域档就是这么补的正向对照）。
+        R12_OUT = '# 申请文件\n## 技术领域\n支架（3）用于支撑锁扣本体。\n' + MARKS_TBL
+        p = wdoc('加括号在技术领域', R12_OUT)
+        r = iron_of(p)
+        assert_(r.returncode == 0 and not iron_hits(r.stdout, 'R12'),
+                f'「具体实施方式」区域之外的加括号标记被 R12 判了: {show(r)}', r)
+        p = wdoc('加括号在实施方式', R12_OUT.replace('## 技术领域', '## 具体实施方式'))
+        r = iron_of(p)
+        assert_(r.returncode == 1 and len(iron_hits(r.stdout, 'R12')) == 1,
+                f'出域档的前提不成立：同一批字节把标题换成「具体实施方式」后 R12 也没开火，'
+                f'那条"出域不判"是空转: {show(r)}', r)
+        R13_OUT = '# 申请文件\n## 权利要求书\n1. 一种锁扣装置，包括支架3。\n' + MARKS_TBL
+        p = wdoc('裸标记在权利要求书', R13_OUT)
+        r = iron_of(p)
+        assert_(r.returncode == 0 and not iron_hits(r.stdout, 'R13'),
+                f'权利要求书正文里的裸标记被 R13 判了（那一面的括号方向归 Q5 管）: {show(r)}', r)
+        p = wdoc('裸标记在摘要', R13_OUT.replace('## 权利要求书', '## 说明书摘要'))
+        r = iron_of(p)
+        assert_(r.returncode == 1 and len(iron_hits(r.stdout, 'R13')) == 1,
+                f'出域档的前提不成立：同一批字节把标题换成「说明书摘要」后 R13 也没开火，'
+                f'那条"权要正文不判"是空转: {show(r)}', r)
+        # "未判"提示只在文书真有那两个区域时才出：一节都没有 ⇒ 提示行本身成了噪声
+        # （与 R10／R11"没有那一节就不适用"同口径，也是上面两档出域控制的前提）。
+        p = wdoc('两面都不在', '# 申请文件\n## 技术领域\n装置包括支架与锁扣本体。\n')
+        r = iron_of(p)
+        assert_(r.returncode == 0 and 'R12/R13 未判' not in r.stdout,
+                f'文书里既没有摘要也没有具体实施方式，却还是报了 R12/R13 的"未判"提示: '
+                f'{show(r)}', r)
 
         # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
         # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）
@@ -1724,7 +1914,8 @@ def test_check_iron_rules():
     # 抄一份就是一份会过期的假账（tooling-pitfalls §10 同条）。
     _rn = rule_span(open(f'{S}/check_iron_rules.py', encoding='utf8').read())
     print(f'PASS check_iron_rules（R{_rn[0]}–R{_rn[-1]} 各条成对必红必绿 + 三态 + rc=2 + --all 四档；'
-          f'摘要 {n_ok}/{n_over} 字）')
+          f'摘要 {n_ok}/{n_over} 字；R12/R13 三面括号方向各有正反档 + 号集门 + 包级号集 + '
+          f'两张出域档都配了入域正向档）')
 
 
 def test_battery_crash_attribution():
@@ -2804,7 +2995,7 @@ def test_search_report_docx_channel():
 
 
 def test_check_claims():
-    """权利要求形状门禁 Q1–Q11：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
+    """权利要求形状门禁 Q1–Q12：每条各一支开火夹具 + 一支合规 + 三态 + docx 通道。
 
     合规档必须先过：Q4/Q5 这种"两支互斥"的判据一旦把合规写法也判红，整套就是永久红灯。
     q4 档刻意写成"引用号都在前"，让它只点亮 Q4——同档撞两支判据时，读数说不清是谁在咬。
@@ -2920,7 +3111,7 @@ def test_check_claims():
         os.makedirs(p)
         open(os.path.join(p, '交底书.md'), 'w', encoding='utf8').write('# 交底书\n暂无权要。\n')
         r = run([PY, f'{S}/check_claims.py', p])
-        assert_(r.returncode == 0 and 'Q1–Q11 未判' in r.stdout,
+        assert_(r.returncode == 0 and 'Q1–Q12 未判' in r.stdout,
                 f'没有权利要求书节被折成合规或未上报: {show(r)}', r)
         # 三态的另一半：有节却一行权项都没解析出。未判的理由必须是「无项」而不是「无节」，
         # 否则读者按提示回去找那一节，会发现节好好地在那里。
@@ -3043,6 +3234,69 @@ def test_check_claims():
         r = run([PY, f'{S}/check_claims.py', p])
         assert_('→ Q8' not in r.stdout,
                 f'说明书节里的"如图…所示"被 Q8 越域判了（Q 只吃权要节）: {show(r)}', r)
+
+        # ── Q12（《专利审查指南》2023 第一部分第一章 §4.4：编号前不得冠"权利要求"或"权项"）──
+        # 这条与 Q7／Q8 同属**节面**判据：判在整节的文本面上，与权项切不切得出来无关。
+        # Q1 管那句话的前半句（顺序编号），Q12 只管后半句（不得冠词）——
+        # 光秃秃的「1.」编号是法定形状，判严了就是把指南没写的禁令造出来。
+        def qhits(out, rule):
+            return [ln for ln in out.splitlines() if ln.startswith('  ')
+                    and not ln.startswith('  note ') and f'→ {rule}（' in ln]
+
+        def real_line(text, needle):
+            """needle 在夹具里的真 1-based 行号，由测试自己数——不抄门禁的读数。"""
+            got = [i for i, ln in enumerate(text.splitlines(), 1) if needle in ln]
+            assert_(len(got) == 1, f'夹具不自洽：「{needle}」命中 {got} 行，这一档会空转', None)
+            return got[0]
+
+        Q12_BAD = ('# 说明书\n## 权利要求书\n'
+                   '权利要求1、一种锁扣装置，包括躯干框架与锁扣本体。\n'
+                   '权项2、根据权利要求1所述的锁扣装置，其特征在于：所述锁扣本体设有卡齿。\n')
+        p = os.path.join(d, 'q12')
+        mkpkg(p, Q12_BAD)
+        r = run([PY, f'{S}/check_claims.py', p])
+        hits = qhits(r.stdout, 'Q12')
+        assert_(r.returncode == 1 and fired(r.stdout) == {'Q12'} and len(hits) == 2,
+                f'权项编号前冠"权利要求／权项"未被 Q12 抓到（两种冠词各一条）: {show(r)}', r)
+        assert_(f':{real_line(Q12_BAD, "权利要求1、一种锁扣装置")}: 权项编号' in hits[0]
+                and f':{real_line(Q12_BAD, "权项2、根据权利要求1")}: 权项编号' in hits[1],
+                f'Q12 报的位点不是各自触发行（真号 '
+                f'{real_line(Q12_BAD, "权利要求1、")}／{real_line(Q12_BAD, "权项2、")}）: '
+                f'{show(r)}', r)
+        assert_('§4.4' in hits[0], f'Q12 没把指南那句法源带上: {show(r)}', r)
+        # 正向对照的反面：把两个冠词去掉、其余形状不动，必须一条都不红
+        # （这一档也是"判严方向"那个变异臂的合规控制——把 `N.` 本身判红的话它当场翻脸）
+        Q12_CLEAN = ('# 说明书\n## 权利要求书\n'
+                     '1. 一种锁扣装置，包括躯干框架与锁扣本体。\n'
+                     + ''.join(f'{i}. 根据权利要求1所述的锁扣装置，其特征在于：'
+                               f'所述锁扣本体设有卡齿{i}。\n' for i in range(2, 9)) + TBL)
+        p = os.path.join(d, 'q12clean')
+        mkpkg(p, Q12_CLEAN)
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 0 and fired(r.stdout) == set(),
+                f'合规的「N.」顺序编号被 Q12 判红（指南只禁编号前冠词，不禁编号本身）: '
+                f'{show(r)}', r)
+        # 顺序档＝本轮那条结构性改动的回归钉：通篇都冠着"权利要求"的权要书里，
+        # CLAIM_ITEM 一行也解析不出（那些行以"权"字起头），旧顺序下整族被"无项早退"挡在门外、
+        # 报成"Q1–Q12 未判"，而 Q12 恰恰是唯一看得见这种写法的那一条。
+        # 于是两句必须同时出：Q12 的红，和那句点名"哪几条判不起"的注记——只出一句都不算对。
+        Q12_ALLPRE = ('# 说明书\n## 权利要求书\n'
+                      '权利要求1、一种锁扣装置，包括躯干框架与锁扣本体。\n'
+                      '权利要求2、根据权利要求1所述的锁扣装置，其特征在于：所述锁扣本体设有卡齿。\n'
+                      '权利要求3、根据权利要求1所述的锁扣装置，其特征在于：所述弹臂为钛合金。\n')
+        p = os.path.join(d, 'q12allpre')
+        mkpkg(p, Q12_ALLPRE)
+        r = run([PY, f'{S}/check_claims.py', p])
+        assert_(r.returncode == 1 and len(qhits(r.stdout, 'Q12')) == 3,
+                f'通篇冠"权利要求"的权要书里 Q12 没判满三条（节面条目被"无项早退"挡在门外了）: '
+                f'{show(r)}', r)
+        assert_('→ Q1–Q6、Q9–Q11 未判（有节却无项，那几条判不起）' in r.stdout,
+                f'"有节却无项"那档没点名到底是哪几条判不起: {show(r)}', r)
+        assert_('没有「权利要求书」节' not in r.stdout,
+                f'明明读到了节却报"没有权利要求书节"（两档未判混成一档）: {show(r)}', r)
+        # 实判判据那一格也跟着走：一项权项都没解析出，但节面这条判动了，Q12 就该被算进分母
+        assert_('实判判据 1 条' in r.stdout,
+                f'节面判据开了火却没被算进实判分母: {show(r)}', r)
 
         # ── Q9／Q10／Q11（《专利审查指南》2023 第二部分第二章 §3.2.2 与 §3.3）──────────
         # 三条的主语都是"权利要求中／每一项权利要求"，判在**每一项权项之内**：
@@ -3180,9 +3434,10 @@ def test_check_claims():
         assert_(r.returncode == 0 and fired(r.stdout) == set(),
                 f'说明书节里的例如／必要时／约＋数字／行中句号被 Q9–Q11 越域判了（三条只吃权项之内）'
                 f': {show(r)}', r)
-    print('PASS check_claims（Q1–Q11 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
+    print('PASS check_claims（Q1–Q12 各成对 + 合规档同过 + 引用号不当标记 + 三态 + docx 通道 + '
           'Q7 嵌图两通道 + Q8 引用语作用域 + Q9 四词各一档 + Q10 两半各成对（约＋数字／或类似物）'
-          '+ Q11 两种位点／无结尾句号不判红／合规多行权项 + 行号随触发行移动 + Q9–Q11 出域不判 + rc=2）')
+          '+ Q11 两种位点／无结尾句号不判红／合规多行权项 + 行号随触发行移动 + Q9–Q11 出域不判 '
+          '+ Q12 冠词正反档／通篇冠词仍判满（节面条目排在无项早退之前）+ rc=2）')
 
 
 def test_figure_text_channel():

@@ -32,9 +32,31 @@
      ### 小节，section_body 会把区域截在第一个小节。没有说明书区域 ⇒ 不适用（不出提示行）。
   R10 的第三张面：同一区域里的商业性宣传语（同条"也不得使用商业性宣传用语"），
      词表与摘要/简要说明两张面共用 COMMERCIAL，不抄第二份。
+  R12 具体实施方式那一面把登记过的附图标记放进了括号——《专利审查指南》（2023）第二部分第二章
+     §2.2.6 要求标记紧跟在相应技术名称后面、**不加括号**（本机留底逐文本 txt:5506-5510，PDF p156／2-20）。
+     号集只认包内那张「标记｜名称」对照表里真存在的名称↔号对，表外的自由数字（"共 3 组""5mm"
+     "2020 年定型"）不当标记——否则这把尺子只造假红。
+  R13 摘要那一面的附图标记没放进括号——同部分 §2.4「摘要文字部分出现的附图标记应当加括号」
+     （txt:5594，PDF p159／2-23）。与 R12 共用同一张对照表做号集，**两面的方向正好相反**，
+     再和权利要求书那一面（标记必须在括号内，归 check_claims 的 Q5）凑成三面三样。
+     包内没有那张表 ⇒ R12/R13 一起报未判，既不折成违规也不折成合规。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
+import importlib.util as _ilu
+
+_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load(name):
+    """本仓共用件的载入方式与各门禁一致（mdtable 只依赖 stdlib，Python 3.9 裸跑是硬约束）。"""
+    spec = _ilu.spec_from_file_location(name, os.path.join(_DIR, name + '.py'))
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_t = _load('mdtable')
 
 # ---------- 判据参数（改判据只改这一带） ----------
 
@@ -101,6 +123,36 @@ R10_SCOPE = ((ABSTRACT_HEAD, '细则第二十六条：摘要中不得使用商�
 # 起至下一个 ≤2 级标题止。
 SPEC_DOC_HEAD = re.compile(r'^#{1,2}\s*(?:\d+[.、]?\s*)?说明书(?!摘要|附图)')
 CLAIMS_QUOTE_REF = re.compile(r'如权利要求[^，。；\n]{0,24}所述')
+# R12／R13：同一张「标记｜名称」对照表，三面各有自己的写法（第 39 轮，法源已亲验的指南）：
+#   权利要求书 —— 标记**必须**放括号里（细则第二十二条，check_claims 的 Q5 那一头）；
+#   具体实施方式 —— 标记**不得**加括号，且要紧跟技术名称（指南第二部分第二章 §2.2.6，
+#     PDF p156／印刷页 2-20：「…并放在相应的技术名称的后面，不加括号。例如…可以写成
+#     "电阻3通过三极管4的集电极与电容5相连接"，不得写成"3通过4与5连接"」）；
+#   摘要 —— 出现的标记**应当**加括号（同部分 §2.4，PDF p159／2-23：
+#     「此外，摘要文字部分出现的附图标记应当加括号」）。
+# 两面的号集都只认那张表里登记过的「名称↔号」对：表外的自由数字（"拉脱力 90N""2020 年"）
+# 一律不当标记——与 Q5 同一条防线，否则这两把尺子只会造假红。
+SPEC_IMPL_HEAD = re.compile(r'^#{2,4}\s*(?:\d+(?:\.\d+)*[.、]?\s*)?具体实施方式')
+
+
+def mark_map(texts):
+    """包内所有文书里的「名称→标记号」对照表（与 check_claims.mark_set、N3 同一形状）。
+
+    号集取"表里真存在的号"：同名多号时保留第一个（N2 本就禁止同号异名/同名异号，
+    出现多号是那张表自己的缺陷，不归这两条判据重复报）。"""
+    name2num = {}
+    for text in texts:
+        for header, rows in _t.table_blocks(text):
+            jm, jn = _t.col(header, '标记'), _t.col(header, '名称')
+            if jm is None or jn is None:
+                continue
+            for cs in rows:
+                v = (cs[jm] if jm < len(cs) else '').strip()
+                nm = (cs[jn] if jn < len(cs) else '').strip()
+                if v.isdigit() and nm:
+                    name2num.setdefault(nm, v)
+    return name2num
+
 # 300 字这一格的**法源不是细则第二十六条**：本机逐字读到的 769 号令修订后全文里根本没有"300"
 # 这个数（留底 .codebuddy/attest/gz769.htm，页面全文 `'300' in text` 读数 False；
 # 抽取过程见 .codebuddy/attest/r58_law_quotes.log），该条只剩"写明…概要"与
@@ -170,7 +222,7 @@ def doc_region(lines, head_re):
     return None, []
 
 
-def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
+def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None):
     """对单份文书文本跑全部判据，返回 (findings, notes)。notes 为不计入违规的说明行。"""
     findings, notes = [], []
     lines = text.splitlines()
@@ -244,6 +296,42 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
                     findings.append(Finding('R10 说明书宣传用语', path, dstart + 1 + off,
                                             f'商业性宣传用语「{w}」——细则第二十条三款：'
                                             '说明书里不得使用商业性宣传用语', ln.strip()[:60]))
+
+    # R12／R13：同一张「标记｜名称」对照表，三面三种写法（第四面是 check_claims 的 Q5）：
+    #   摘要——标记应当加括号（指南第二部分第二章 §2.4，PDF p159／印刷页 2-23 逐字）；
+    #   具体实施方式——标记紧跟技术名称、**不加**括号（同部分 §2.2.6，PDF p156／2-20 逐字）。
+    # 号集只认表里登记的「名称↔号」对，表外的自由数字（"拉脱力 90N""2020 年"）一律不当标记——
+    # 与 Q5 同一条防线，否则这两把尺子只会造假红。包内没有那张表 ⇒ 两条未判（不折成合规）；
+    # 区域不在本份文书 ⇒ 该条不适用，不出提示行（与 R11 同口径）。
+    r13_start, r13_body = section_body(lines, ABSTRACT_HEAD)
+    r12_start, r12_body = doc_region(lines, SPEC_IMPL_HEAD)
+    if not marks:
+        if r13_start is not None or r12_start is not None:
+            notes.append('文里有摘要／具体实施方式区域，但包内没有「标记｜名称」对照表 '
+                         '→ R12/R13 未判（看不见不等于合规）')
+    else:
+        for nm, num in sorted(marks.items()):
+            bare = re.compile(re.escape(nm) + r'\s*' + re.escape(num) + r'(?![0-9])')
+            pbr = re.compile(re.escape(nm) + r'\s*[（(]\s*' + re.escape(num) + r'\s*[）)]')
+            if r13_start is not None:
+                for off, ln in enumerate(r13_body):
+                    m = bare.search(ln)
+                    if m:
+                        findings.append(Finding(
+                            'R13 摘要标记未加括号', path, r13_start + 1 + off,
+                            f'摘要里「{m.group(0).strip()}」的标记 {num} 没放进括号'
+                            '——指南 §2.4：摘要文字部分出现的附图标记应当加括号',
+                            ln.strip()[:60]))
+            if r12_start is not None:
+                for off, ln in enumerate(r12_body):
+                    m = pbr.search(ln)
+                    if m:
+                        findings.append(Finding(
+                            'R12 具体实施方式标记加括号', path, r12_start + 1 + off,
+                            f'具体实施方式里「{m.group(0).strip()}」给标记 {num} 加了括号'
+                            '——指南 §2.2.6：应放在相应技术名称后面、不加括号'
+                            '（不加括号是这一面的要求，与权利要求书的 Q5 相反）',
+                            ln.strip()[:60]))
 
     if allowed_pub_nos is not None:
         start, body = section_body(lines, BACKGROUND_HEAD)
@@ -457,25 +545,30 @@ def main():
         print(f'型号/商标清单 {len(brands)} 项: {", ".join(brands)}')
 
     total = 0
+    docs = []
     for p in paths:
         try:
-            text = read_text(p)
+            docs.append((p, read_text(p)))
         except Exception as e:
             # 抽不出正文就谈不上判定：说清成因并 rc=2，不折成"这份文书没有违规"
             print(f'输入不可用，未做任何判定: {p}（{type(e).__name__}: {e}）')
             sys.exit(2)
+    # R12/R13 的号集是**包级**事实：那张「标记｜名称」表常写在另一份文书的附图说明节里，
+    # 按单份文书各读各的，摘要侧就永远看不见表、永远报未判。
+    marks = mark_map([t for _, t in docs])
+    for p, text in docs:
         if p.lower().endswith('.docx') and not re.search(r'^#{1,6}\s', text, re.M):
             # 节标题靠 w:pStyle 还原；样式名对不上（非 pandoc 产物）时 R3/R4 根本找不到节，
             # 这时"违规 0"不等于核过，必须说明未核。
-            print(f'  note {p}: 未识别到节标题样式 → R3/R4/R10（按节判的判据）未核')
-        findings, notes = check_text(p, text, allowed, brands)
+            print(f'  note {p}: 未识别到节标题样式 → R3/R4/R10/R12/R13（按节判的判据）未核')
+        findings, notes = check_text(p, text, allowed, brands, marks)
         for note in notes:
             print(f'  note {p}: {note}')
         for f in findings:
             print(str(f))
         total += len(findings)
         print(f'{p}: 违规 {len(findings)}')
-    print(f'合计违规 {total}（规则 R1–R11，判据见脚本 docstring）')
+    print(f'合计违规 {total}（规则 R1–R13，判据见脚本 docstring）')
     sys.exit(1 if total else 0)
 
 
