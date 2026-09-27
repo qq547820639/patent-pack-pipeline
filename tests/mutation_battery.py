@@ -188,8 +188,17 @@ MUTS = {
           # 锚点放宽后一级标题 `# 简要说明` 也会先被 section_body 取走，
           # 于是"简要说明里的宣传语必红"那档同样翻绿——同一件变异的第二个合法原告。
           '简要说明里的宣传语未被 R10 抓住')),
-        ('脚本总结行谎称 R1–R5', IRON, '（规则 R1–R10，判据见脚本 docstring）',
+        ('脚本总结行谎称 R1–R5', IRON, '（规则 R1–R11，判据见脚本 docstring）',
          '（规则 R1–R5，判据见脚本 docstring）', '门禁自报规则区间与实际判据'),
+        ('R11 引用语判据关掉（说明书里"如权利要求…所述"照过）', IRON,
+         '            m = CLAIMS_QUOTE_REF.search(ln)', '            m = None',
+         '说明书里的引用语与宣传语未被 R11/R10 各点一条'),
+        ('R10 说明书面关掉（第三张面没人看）', IRON,
+         "            for w in COMMERCIAL:\n                if w in ln:\n"
+         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,",
+         "            for w in COMMERCIAL:\n                if False:\n"
+         "                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,",
+         '说明书里的引用语与宣传语未被 R11/R10 各点一条'),
         # 这条打的是**量具**：常驻里那把现推 R 号的尺子若退回只认一位，R10 会被折成 R1，
         # "号有断档"从此看不见——与第 26 轮契约取号那次同源，只是这次咬的是测试自己。
         ('R 号提取器退回只认一位（R10 被折成 R1，断档永远看不见）', TS,

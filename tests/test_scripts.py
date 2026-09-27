@@ -1609,11 +1609,36 @@ def test_check_iron_rules():
         # 「简要说明：…」写在正文里不算节（那是 C5 的触发词面，两张面分开判）。
         # 夹具刻意把标签单独成行、宣传语落在**下一行**：锚点若丢了井号，
         # 这一行会被当成节标题，下一行就成了"节内正文"，这把尺子会顺着 C5 的词面开火。
+        # 标题用「文书」而不是「说明书」：R11/R10 的说明书面认 `# 说明书` 区域，
+        # 标题写成说明书的话这句宣传语按 20 条三款就该红——那是另一档的事，不归这里测。
         open(os.path.join(d, '内联不算节.md'), 'w', encoding='utf8').write(
-            '# 说明书\n简要说明：\n本产品销量第一。\n')
+            '# 文书\n简要说明：\n本产品销量第一。\n')
         r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, '内联不算节.md')])
         assert_(r.returncode == 0 and 'FAIL R10' not in r.stdout,
                 f'正文里的「简要说明：」内联写法被当成一个节来判了: {show(r)}', r)
+
+        # R11＋R10 说明书面（细则 20 条三款，整份说明书区域）：双禁档各点各的、
+        # 区域跨过 ### 小节（层级止于 ≤2 级）、引用语写在别的节不算、合规说明书零误报。
+        write(d, abstract=IRON_OK_ABSTRACT)
+        open(os.path.join(d, 'specdoc.md'), 'w', encoding='utf8').write(
+            '# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
+            '如权利要求1所述的装置，性价比极高。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specdoc.md')])
+        assert_(r.returncode == 1 and 'R11 说明书引用语' in r.stdout
+                and 'R10 说明书宣传用语' in r.stdout and '细则第二十条三款' in r.stdout,
+                f'说明书里的引用语与宣传语未被 R11/R10 各点一条: {show(r)}', r)
+        open(os.path.join(d, 'specok.md'), 'w', encoding='utf8').write(
+            '# 申请文件\n## 说明书\n### 技术领域\n可穿戴设备。\n### 具体实施方式\n'
+            '装置包括框架与弹臂。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specok.md')])
+        assert_(r.returncode == 0 and '→ R11' not in r.stdout and '→ R10' not in r.stdout,
+                f'合规说明书被 R11/R10 误伤: {show(r)}', r)
+        open(os.path.join(d, 'specscope.md'), 'w', encoding='utf8').write(
+            '# 申请文件\n### 技术领域\n如权利要求1所述的装置，性价比极高。\n'
+            '## 说明书\n装置包括框架。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'specscope.md')])
+        assert_('→ R11' not in r.stdout and '→ R10' not in r.stdout.replace('摘要/简要说明', ''),
+                f'「说明书」区域之外被 R11/R10 越域判了: {show(r)}', r)
 
         # 门禁自报的规则区间必须与它实际定义的判据一致：总结行谎称 R1–R5 曾经无人核对，
         # 档位由脚本源码现推（不在此硬编码，否则两处各自漂移）

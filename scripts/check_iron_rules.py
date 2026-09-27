@@ -26,6 +26,12 @@
      适用域**只在这两节**：法源两句各管一件文书，扩到全文会把技术比较措辞判红而细则没这么说。
      两节都不在这份文书里 ⇒ 不适用，不出提示行：交底书没有简要说明、说明书没有摘要都是正常形态，
      这与"docx 读不出节标题所以核不动"（下面那条 note 三态）是两件事。
+  R11 说明书文书区域里出现"如权利要求……所述的……"一类引用语
+     （《专利法实施细则》第二十条三款，逐字读自 769 号令修订后全文）。区域是「说明书」
+     标题（≤2 级，负向排除 说明书摘要/附图）起至下一个 ≤2 级标题止——要跨过它的
+     ### 小节，section_body 会把区域截在第一个小节。没有说明书区域 ⇒ 不适用（不出提示行）。
+  R10 的第三张面：同一区域里的商业性宣传语（同条"也不得使用商业性宣传用语"），
+     词表与摘要/简要说明两张面共用 COMMERCIAL，不抄第二份。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -86,6 +92,12 @@ NEXT_SECTION = re.compile(r'^#{1,3}\s')
 # 是为了让"只关掉其中一节"这件事在变异测试里打得中（判据参数集中在这一带，本文件的惯例）。
 R10_SCOPE = ((ABSTRACT_HEAD, '细则第二十六条：摘要中不得使用商业性宣传用语'),
              (BRIEF_DESC_HEAD, '细则第三十一条：简要说明不得使用商业性宣传用语'))
+# 说明书文书区域：细则第二十条三款的两条禁令（禁"如权利要求……所述的……"一类的引用语、
+# 禁商业性宣传语）都作用在**整份说明书**上，要跨过它的 ### 小节——section_body 在任何下个
+# 标题处就断，会把五节里四节漏掉。区域=「说明书」标题（≤2 级；负向排除 说明书摘要/附图）
+# 起至下一个 ≤2 级标题止。
+SPEC_DOC_HEAD = re.compile(r'^#{1,2}\s*(?:\d+[.、]?\s*)?说明书(?!摘要|附图)')
+CLAIMS_QUOTE_REF = re.compile(r'如权利要求[^，。；\n]{0,24}所述')
 # 300 字这一格的**法源不是细则第二十六条**：2023 年 769 号令修订把该条里的字数句删掉了
 # （本机逐字读到修订后全文，见 .codebuddy/attest/r58_law_quotes.log，整条只剩"写明…概要"
 # 与"不得使用商业性宣传用语"两句是可判的）。今天仍然管用的 300 字来自
@@ -127,6 +139,23 @@ def section_body(lines, head_re):
             body = []
             for j in range(i + 1, len(lines)):
                 if NEXT_SECTION.match(lines[j]):
+                    break
+                body.append(lines[j])
+            return i + 1, body
+    return None, []
+
+
+def doc_region(lines, head_re):
+    """层级区域：从 head_re 命中的标题起，到下一个**级数不高于它**的标题止。
+    section_body 在任何下个标题就断——说明书那一份里五节全是 ### 小节，
+    用它会把区域截在「### 技术领域」，四条禁令等于没判。找不到返回 (None, [])。"""
+    for i, ln in enumerate(lines):
+        if head_re.match(ln.strip()):
+            level = len(ln) - len(ln.lstrip('#'))
+            body = []
+            for j in range(i + 1, len(lines)):
+                mj = re.match(r'^(#{1,6})\s', lines[j])
+                if mj and len(mj.group(1)) <= level:
                     break
                 body.append(lines[j])
             return i + 1, body
@@ -189,6 +218,24 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None):
                     findings.append(Finding('R10 摘要/简要说明宣传用语', path,
                                             hstart + 1 + off,
                                             f'商业性宣传用语「{w}」——{ref}', ln.strip()[:60]))
+
+    # R11＋R10 的说明书面：细则第二十条三款"……并不得使用'如权利要求……所述的……'
+    # 一类的引用语，也不得使用商业性宣传用语"。区域是**整份说明书**（跨 ### 小节），
+    # 词表复用 R10 的 COMMERCIAL（一张词表三张面，不抄第二份）；引用语是独立正则。
+    # 没有「说明书」区域 ⇒ 不适用（不出提示行），与 R10 两节的口径一致。
+    dstart, dbody = doc_region(lines, SPEC_DOC_HEAD)
+    if dstart is not None:
+        for off, ln in enumerate(dbody):
+            m = CLAIMS_QUOTE_REF.search(ln)
+            if m:
+                findings.append(Finding('R11 说明书引用语', path, dstart + off,
+                                        f'说明书里用"{m.group(0)}"指回权利要求'
+                                        '——细则第二十条三款：不得使用该类引用语', ln.strip()[:60]))
+            for w in COMMERCIAL:
+                if w in ln:
+                    findings.append(Finding('R10 说明书宣传用语', path, dstart + off,
+                                            f'商业性宣传用语「{w}」——细则第二十条三款：'
+                                            '说明书里不得使用商业性宣传用语', ln.strip()[:60]))
 
     if allowed_pub_nos is not None:
         start, body = section_body(lines, BACKGROUND_HEAD)
@@ -420,7 +467,7 @@ def main():
             print(str(f))
         total += len(findings)
         print(f'{p}: 违规 {len(findings)}')
-    print(f'合计违规 {total}（规则 R1–R10，判据见脚本 docstring）')
+    print(f'合计违规 {total}（规则 R1–R11，判据见脚本 docstring）')
     sys.exit(1 if total else 0)
 
 
