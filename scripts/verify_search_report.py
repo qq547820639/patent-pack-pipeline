@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """检索报告核验门禁：把"已核验"从一句自称变成可机检 + 可在线复算的字段。
 
-判据（V1–V4，文档出处见 references/templates.md §C 与 hard-rules §1/§2）：
+判据（V1–V6，文档出处见 references/templates.md §C 与 hard-rules §1/§2/§2.1）：
   V1 每条已核验条目必须带可机检标识：专利公开号 / DOI / arXiv id 三选一，
      且标识符形状本身合法（公开号沿用 check_iron_rules.PUB_NO，一处定义）。
   V2 每条条目必须填齐：标识符｜关键日期｜核验出处｜核验日期。
@@ -9,6 +9,13 @@
   V3 在线存在性：DOI 走 Crossref、arXiv id 走 arXiv 官方 API。
      源明确说"查无此项"→ 违规；源不可达/超时/DNS 失败 → 一律"未核"三态，
      绝不把网络故障折算成"引用造假"，也不折算成"引用已核验"。
+  V5 检索式形状（hard-rules §2.1 的句法那部分）：按空格切出的语义块须 2–8 个；
+     一整串无空格中文（≥8 个连续汉字）当唯一检索词判红——它容易被源当整句 AND 而零命中；
+     单字块与"检索/增强/系统/方法"这类泛义词块判红（拆到这种词等于没拆）。
+     没写「- 检索式：」或写的是【待填写】占位 ⇒ V5 未判。
+  V6 分类号形状：写了「分类号：」这一行才判，逐个须是 IPC/CPC 形状（A42B3/20 式）；
+     **没有这一行是未判而不是违规**——§2.1 的第二轮是方法建议，不做法式上没要求，
+     判红等于替纪律新增"必须两段式"。"分类号抽得对不对、第二轮收口收得干不干净"是语义判断，归 reviewer。
   V4 arXiv 条目必须在「类型」列写"预印本"（hard-rules §2 第四条）。这条**离线可判**：
      arXiv id 本身就意味着它来自预印本服务器，缺的只是文书上那句声明。
      表里没有「类型」列 → 未判（没有可放标签的地方，不折成违规）；报告里没有 arXiv 条目 → 未判。
@@ -106,6 +113,23 @@ COLS = {'identifier': ('标识符', '公开号', '编号', 'ID'),
 # "V4 未判"（没有可放标签的地方），而不是把它升级成 V2 缺列——那是替纪律新增一条要求。
 REQUIRED = ('identifier', 'key_date', 'source', 'verified_on')
 PREPRINT_WORD = '预印本'
+# V5/V6 的形状（hard-rules §2.1：2–8 个语义块、禁整句长中文当唯一检索词、禁过碎单字/泛义词、
+# 第二轮按 IPC/CPC 分类号收口）。这三条里"对手段是否贴切"是语义判断，归 reviewer；
+# 句法能判的就只有块数、整串中文、碎块与分类号形状——V5/V6 只判这四样。
+QUERY_HEAD = re.compile(r'^\s*[-*]\s*检索式\s*[:：]\s*(.*)$')
+CLASS_HEAD = re.compile(r'^\s*[-*]\s*(?:IPC|CPC|分类号)\s*[:：]\s*(.*)$')
+BLOCK_MIN, BLOCK_MAX = 2, 8
+VAGUE_WORDS = ('检索', '增强', '系统', '方法')
+# 模板 §10 那一行把两条式子写在同一行、以"；"分隔，还带 (S1)/(S2) 前缀与 AND/OR 连接词。
+# 所以先按"；"拆式、去掉 (S1) 标号、再把连接词与纯括号 token 排除在"语义块"之外——
+# 不这么做的第一版会把模板自己的示范行判成"10 个块越界"，那是判据在打自己的范本。
+CLAUSE_SPLIT = re.compile(r'[；;]\s*')
+LABEL = re.compile(r'^[\(（]?S\d+[\)）]?[:：]?\s*', re.I)
+OPERATORS = {'AND', 'OR', 'NOT', '&', '|', '!', '(', ')', '（', '）'}
+IPC_KW = re.compile(r'^(IPC|CPC|ICT)[:：]?$')
+CJK_RUN = re.compile(r'[一-鿿]{8,}')          # 无空格长中文串：容易被源当整句 AND 而零命中
+ONE_CJK = re.compile(r'^[一-鿿]$')
+IPC_FULL = re.compile(r'[ABCDEFGH]\d{2}[A-Z]\d{1,4}(?:/\d{1,4})?\Z')
 
 
 def fetch_json(url):
@@ -191,6 +215,64 @@ def parse_report(text):
     return missing, [(r, idx) for r in rows], len(header)
 
 
+def check_method(path, text):
+    """V5 检索式形状、V6 分类号形状。与「已核验条目」表无关，所以表缺席时也要跑。
+    没写「- 检索式：」→ V5 未判；没写分类号行 → V6 未判（§2.1 是方法建议，
+    没做第二轮不是格式违规，判红等于替纪律新增一条"必须两段式"的要求）。"""
+    bad, notes = [], []
+    qs = [m.group(1).strip() for m in map(QUERY_HEAD.match, text.splitlines()) if m]
+    cs = [m.group(1).strip() for m in map(CLASS_HEAD.match, text.splitlines()) if m]
+    if not qs:
+        notes.append(f'{path}: 报告里没有「- 检索式：」这一行 → V5 未判（不折成合规）')
+    for q in qs:
+        if '【' in q and '】' in q:
+            notes.append(f'{path}: 检索式还是占位「{q}」→ V5 未判（还没写式子，谈不上拆得对不对）')
+            continue
+        if not q:
+            bad.append(f'{path}: 「- 检索式：」是空的——交了报告却没写式子 → V5')
+            continue
+        # 一行里可以并列多条式子（模板 §10 就写着 (S1)…；(S2)…），逐条各数各的块
+        for cl in (x for x in CLAUSE_SPLIT.split(q) if x.strip()):
+            body = LABEL.sub('', cl.strip()).strip()
+            toks = body.split()
+            blocks = [t for t in toks if t.strip('()（）') and t.upper() not in OPERATORS]
+            if len(blocks) == 1 and CJK_RUN.search(blocks[0]):
+                bad.append(f'{path}: 检索式「{cl[:60]}」是一整串无空格中文（{len(blocks)} 块）'
+                           f'——易被当整句 AND 而零命中 → V5（§2.1 拆分纪律）')
+                continue
+            if not (BLOCK_MIN <= len(blocks) <= BLOCK_MAX):
+                bad.append(f'{path}: 检索式「{cl[:60]}」切出 {len(blocks)} 个语义块，'
+                           f'不在 {BLOCK_MIN}–{BLOCK_MAX} 之内（AND/OR 与括号不计块）→ V5')
+            frag = [b for b in blocks if ONE_CJK.match(b) or b in VAGUE_WORDS]
+            if frag:
+                bad.append(f'{path}: 检索式「{cl[:60]}」里有 {len(frag)} 个碎块/泛义词'
+                           f'（{"、".join(frag[:3])}）——拆到这种词等于没拆 → V5')
+    # 分类号候选两处来源：独立的「分类号：」行，以及检索式里挂在 IPC/CPC 关键字后面的 token
+    # （模板 §10 的写法就是 (S2) IPC E04G17/00）。都没写 ⇒ V6 未判——不做法式上没要求两段式。
+    cand, placeholder = [], False
+    for line in cs:
+        if '【' in line and '】' in line:
+            placeholder = True
+            continue
+        cand += [t.strip('()（）,，、') for t in re.split(r'[、,，;；\s]+', line) if t.strip()]
+    for q in qs:
+        toks = q.split()
+        for i, t in enumerate(toks):
+            if IPC_KW.match(t.strip('()（）')) and i + 1 < len(toks):
+                cand.append(toks[i + 1].strip('()（）,，、'))
+    cand = [t for t in cand if t and not ('【' in t and '】' in t)]
+    if placeholder:
+        notes.append(f'{path}: 分类号还是占位 → V6 未判')
+    if not cand:
+        notes.append(f'{path}: 报告里没有分类号（既无「分类号：」行，检索式里也没有 IPC/CPC 项）'
+                     f' → V6 未判（没做第二轮不判红：§2.1 是方法建议）')
+    wrong = [t for t in cand if not IPC_FULL.match(t)]
+    if wrong:
+        bad.append(f'{path}: 分类号 {"、".join(wrong[:3])} 不是 IPC/CPC 形状'
+                   f'（如 A42B3/20、E04G17/00）→ V6')
+    return bad, notes
+
+
 def check_report(path, text, online=True):
     """返回 (违规列表, 未核列表, 在线已核条目数, 表内条目总数)。"""
     bad, notes, checked = [], [], 0
@@ -257,7 +339,7 @@ def check_report(path, text, online=True):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='检索报告核验门禁 V1–V4')
+    ap = argparse.ArgumentParser(description='检索报告核验门禁 V1–V6')
     ap.add_argument('report', nargs='+', help='检索报告 .md 或 .docx（可多份，也可直接传包目录）')
     ap.add_argument('--offline', action='store_true',
                     help='跳过在线核对（V1/V2 照判，V3 一律报未核）')
@@ -286,6 +368,9 @@ def main():
     for p in paths:
         text = read_any(p)
         bad, notes, checked, n_ent = check_report(p, text, online=not args.offline)
+        qb, qn = check_method(p, text)      # V5/V6 不吃表，早退路径也要判
+        bad += qb
+        notes += qn
         if n_ent == 0:
             # 零条目在包骨架底稿期合法，但"一条都没核"与"核完且全部合规"在退出码上
             # 同形——必须把这个数摆出来，别让 rc=0 冒充"已经核过了"
@@ -298,7 +383,7 @@ def main():
         online_ok += checked
         entries += n_ent
         print(f'{p}: 违规 {len(bad)}')
-    print(f'合计违规 {total}（规则 V1–V4，判据见脚本 docstring）；'
+    print(f'合计违规 {total}（规则 V1–V6，判据见脚本 docstring）；'
           f'条目 {entries} 条，在线核成 {online_ok} 条')
     if args.require_online and not args.offline and online_ok == 0:
         print('--require-online 且在线核对 0 条成 → 本次判定不成立（rc=2）')

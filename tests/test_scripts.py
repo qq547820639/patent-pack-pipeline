@@ -222,7 +222,7 @@ def test_new_product_package():
         rv = run([PY, f'{S}/verify_search_report.py', stub, '--offline'])
         assert_(rv.returncode == 0 and '违规 0' in rv.stdout
                 and '已核验条目 0 条' in rv.stdout and '缺列' not in rv.stdout,
-                '骨架底稿未通过 V1–V3，或未如实报出"条目 0 条"', rv)
+                '骨架底稿未通过 V1–V6，或未如实报出"条目 0 条"', rv)
         ri = run([PY, f'{S}/check_iron_rules.py', d, '--all'])
         assert_(ri.returncode == 0, '新生成的包未通过铁律门禁（底稿措辞与 R 判据打架）', ri)
         # EVT 底稿在场，且骨架就能被 E1–E4 真判一次（有判定列的表，空行合法）
@@ -2138,7 +2138,7 @@ def test_check_figure_labels():
 
 
 def test_verify_search_report():
-    """检索报告门禁 V1–V3：默认不碰网络（fetch 被桩替），网络路径另有 live 档。"""
+    """检索报告门禁 V1–V6：默认不碰网络（fetch 被桩替），网络路径另有 live 档。"""
     import importlib.util as ilu
     spec = ilu.spec_from_file_location('verify_search_report',
                                        os.path.join(S, 'verify_search_report.py'))
@@ -2274,6 +2274,52 @@ def test_verify_search_report():
         r = run([PY, f'{S}/verify_search_report.py', good])
         assert_(r.returncode == 0, '默认档（不带 --require-online）受网络故障影响被误判红', r)
 
+    # V5/V6：检索式与分类号的句法形状（§2.1 里机械判得动的部分）。
+    # 第一档刻意直接用 templates §10 那行示范式：判据打自己的范本是最贵的一种假红。
+    with open(os.path.join(ROOT, 'references', 'templates.md'), encoding='utf-8') as f:
+        tpl = [l.strip() for l in f if l.strip().startswith('- 检索式：')][0]
+    def qm(body):
+        return vsr.check_method('检索_X.md', body)
+    b, n = qm(tpl + '\n')
+    assert_(b == [] and n == [], f'模板 §10 的示范检索式被 V5/V6 误伤: {b} / {n}', None)
+    b, n = qm('# 报告\n- 检索式：锁扣 弹性 卡齿 lock mechanism\n'
+              '- 分类号：A42B3/20、A61F5/00\n')
+    assert_(b == [] and n == [], f'合规两段式报告被误伤: {b} / {n}', None)
+    b, _ = qm('# 报告\n- 检索式：一种用于康复训练的锁定装置及其工作方法\n')
+    assert_(any('V5' in x and '一整串无空格中文' in x for x in b),
+            f'整串中文检索式未被 V5 抓到: {b}', None)
+    b, _ = qm('# 报告\n- 检索式：a b c d e f g h i\n')
+    assert_(any('V5' in x and '不在 2–8 之内' in x for x in b),
+            f'块数越界未被 V5 抓到: {b}', None)
+    b, _ = qm('# 报告\n- 检索式：lockmechanism\n')
+    assert_(any('V5' in x and '1 个语义块' in x for x in b),
+            f'单个长块未被 V5 抓到: {b}', None)
+    b, _ = qm('# 报告\n- 检索式：锁扣 方法 系统\n')
+    assert_(any('V5' in x and '碎块/泛义词' in x for x in b),
+            f'泛义词块未被 V5 抓到: {b}', None)
+    b, _ = qm('# 报告\n- 检索式：锁扣 弹性 增\n')
+    assert_(any('V5' in x and '（增）' in x for x in b),
+            f'单字碎块未被 V5 抓到: {b}', None)
+    b, n = qm('# 报告\n- 检索式：【待填写】\n')
+    assert_(b == [] and any('V5 未判' in x and '占位' in x for x in n),
+            f'占位检索式被折成违规或不吭声: {b} / {n}', None)
+    b, _ = qm('# 报告\n- 检索式：\n')
+    assert_(any('V5' in x and '是空的' in x for x in b), f'空检索式没被 V5 抓到: {b}', None)
+    b, n = qm('# 报告\n只有条目表，没有检索式行\n')
+    assert_(b == [] and any('V5 未判' in x for x in n) and any('V6 未判' in x for x in n),
+            f'两行都缺时应双双未判而不是合规: {b} / {n}', None)
+    b, n = qm('# 报告\n- 检索式：锁扣 弹性\n')
+    assert_(b == [] and any('V6 未判' in x for x in n) and not any('V5 未判' in x for x in n),
+            f'V6 未判连带把 V5 也说成未判: {b} / {n}', None)
+    b, _ = qm('# 报告\n- 分类号：42B3、A42B3/20\n')
+    # 只断"坏的那一条被点名、好的一条没进来"：消息里本身举着正例（如 A42B3/20），
+    # 拿"消息里不许出现 A42B3/20"当检验会被判据自己的复述挡住——那是假红的检验形状。
+    assert_(len(b) == 1 and b[0].startswith('检索_X.md: 分类号 42B3 不是')
+            and b[0].count('IPC/CPC 形状') == 1,
+            f'坏分类号没被抓到、或把好的也一起报了: {b}', None)
+    b, _ = qm('# 报告\n- 检索式：(S1) 锁扣 AND 弹性；(S2) IPC 42B3\n')
+    assert_(any('分类号 42B3 不是' in x for x in b),
+            f'检索式里挂在 IPC 后面的坏分类号没人管: {b}', None)
     # ---- live 档：真打 Crossref / arXiv，无网络时如实 SKIP ----
     if orig_fetch('https://api.crossref.org/works/10.1038/nature14539')[0] == 'unreachable':
         print('     SKIP 检索报告 live 档：本机网络到不了核验源，不把"没跑"说成"跑过"')
@@ -2301,7 +2347,9 @@ def test_verify_search_report():
                     '假 arXiv id 未被源判为不存在（控制探针本次正常，判定可信）', None)
         assert_(vsr.verify_online('patent', 'CN110404188A') == 'unreachable',
                 '专利公开号在无源可用时被当成了"核过"', None)
-        print('PASS verify_search_report（V1–V4 成对 + 三态 + 死代理 rc=2 + live 档两源各配控制探针）')
+
+        print('PASS verify_search_report（V1–V6 成对 + 三态 + 模板示范行不误伤 + 死代理 rc=2 '
+              '+ live 档两源各配控制探针）')
 
 
 def test_search_report_docx_channel():
