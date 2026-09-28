@@ -1314,10 +1314,11 @@ MUTS = {
          "        if False:", ('02 目录下无对照表的说明书未判红', '有附图说明节却无对照表未判红')),
         ('N1 判红扩到交底书（该当未判的一侧被误伤）', CN,
          "        if has_fig_section and (FIG_DIR.search(path) or FIG_WORD.search(text)):",
-         "        if has_fig_section:", '交底书被硬判红，或未如实说未判',
+         "        if has_fig_section:",
          # 第 45 轮 r118 整档实测的第一红换了人：#27 让骨架包多一份交底书，N 族域内从 1 份变 2 份，
          # 于是套件里排在前面的那条开箱断言先红——变异仍被抓，只是发言的换了人。
-         '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态'),
+         ('交底书被硬判红，或未如实说未判',
+          '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态')),
         ('识别列改成三列全中（掉列的表就认不出了）', CN,
          "    return (_t.col(header, '名称') is not None or _t.col(header, '所在图号') is not None)",
          "    return _t.col(header, '名称') is not None and _t.col(header, '所在图号') is not None",
