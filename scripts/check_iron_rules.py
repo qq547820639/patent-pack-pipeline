@@ -179,6 +179,11 @@
      值是占位（骨架期无人填）⇒ 「R20 未判」，不折成合规；整份文书没有那一行 ⇒ 不适用，
      连注记都不出（绝大多数文书本就没有发明人字段，注记一 spam 就把"不适用"读成"漏判"）。
      同句里"不得使用笔名或者其他非正式的姓名"没有样本可枚举，明写不做。
+  R21 地址那一行不得被单位名称代替——同段 §4.1.7（txt:751-761＝PDF p24／印刷页 1-8）逐字
+     「地址中可以包含单位名称，但单位名称不得代替地址，例如不得仅填写××省××大学」。判点是那三种
+     并列写法共同的收尾「街道门牌号码」：整行一个数字都没有、又带着法条点名的「大学」，就是它
+     举例禁止的形状。命中集合仍是下界——「浙江省杭州市西湖区」这种无门牌也没单位名的今天不判。
+     占位 ⇒「R21 未判」；文书里没那一行 ⇒ 不适用，不出注记。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -402,6 +407,22 @@ INVENTOR_BANNED = ('课题组', '人工智能')
 def inventor_field(value):
     """发明人那一行的写法（生成器用；INVENTOR_FIELD 认的就是这一串，别处不另抄字面）。"""
     return INVENTOR_FIELD_WRITE + value
+
+
+# ── R21 地址那一行（同上一段的 §4.1.7，txt:751-761＝PDF p24／印刷页 1-8）──
+# 逐字「地址中可以包含单位名称，但单位名称不得代替地址，例如不得仅填写××省××大学」。
+# 判点＝那句并列写法共同的收尾「街道门牌号码」：整行**一个数字都没有**、又带着法条逐字点名的
+# 「大学」，就是它举例禁止的那个形状。命中集合仍是下界——「浙江省杭州市西湖区」（无门牌也没
+# 单位名）今天不判，那是「这族措辞没覆盖」，不是「这份文书读不到字段」。
+ADDRESS_FIELD = re.compile(r'^\s*-\s*地址[:：]\s*(\S.*?)\s*$')
+ADDRESS_FIELD_WRITE = '- 地址：'
+ADDRESS_UNIT = '大学'
+ADDRESS_DIGIT = re.compile(r'\d')
+
+
+def address_field(value):
+    """地址那一行的写法（生成器用，别处不另抄字面）。"""
+    return ADDRESS_FIELD_WRITE + value
 
 
 # ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
@@ -949,6 +970,25 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
                 '（申请人是单位本来合法：同一个词写在申请人行不触发本条）'))
     if r20_placeholder:
         notes.append('发明人那一行还是占位（骨架期无人填），R20 未判（不折成合规）')
+
+    # R21 地址那一行：同一个形状（字段行 + 法条逐字样本），判点从"是不是个人"换成"有没有号码"。
+    r21_placeholder = False
+    for i, raw in enumerate(lines, 1):
+        m3 = ADDRESS_FIELD.match(raw)
+        if not m3:
+            continue
+        val3 = m3.group(1)
+        if PLACEHOLDER_TOKEN.search(val3):
+            r21_placeholder = True
+            continue
+        if ADDRESS_UNIT in val3 and not ADDRESS_DIGIT.search(val3):
+            findings.append(Finding(
+                'R21 地址被单位名称代替', path, i,
+                f'地址「{val3}」带着单位名称「{ADDRESS_UNIT}」却一个数字都没有（街道门牌号码／邮编／'
+                '电话一个都不在）——§4.1.7 逐字：地址中可以包含单位名称，但单位名称不得代替地址，'
+                '例如不得仅填写××省××大学；本国地址那三种并列写法都以「街道门牌号码」收尾'))
+    if r21_placeholder:
+        notes.append('地址那一行还是占位（骨架期无人填），R21 未判（不折成合规）')
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。

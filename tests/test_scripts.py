@@ -6298,6 +6298,101 @@ def test_iron_r20_inventor_is_person():
     print('PASS iron_r20 发明人是个人（两支点名形状各成对 + 申请人行同词不触发 + 占位未判 + 多处都判 + 无字段不适用 + docx 通道）')
 
 
+def test_iron_r21_address_not_unit_name():
+    """R21：地址那一行不得只写单位名称（§4.1.7，txt:751-761＝PDF p24／印刷页 1-8）。
+
+    判点是那句"例如不得仅填写××省××大学"加三种并列写法共同的收尾"街道门牌号码"：
+    带着点名的「大学」又一个数字都没有 ⇒ 违规。命中集合是下界，所以"无数字也无单位名"那一档
+    明确留着当静默对照——它记的是"这族措辞没覆盖"，不是"这条判据没牙"。"""
+    cir = _cir_r16()
+
+    def pkg(tag, addr=None, applicant=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '']
+        if applicant is not None:
+            body.append('- 申请人：' + applicant + '\n')
+        if addr is not None:
+            body.append(cir.address_field(addr) + '\n')
+        p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        open(p, 'w', encoding='utf8').write('\n'.join(body) + '\n')
+        return p
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R21 ')]
+
+    def quiet(out):
+        return not fired(out) and not [x for x in out.splitlines() if ' note ' in x and 'R21' in x]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 合规极：带街道门牌号码
+        p = pkg('ok', addr='浙江省杭州市西湖区文三路 100 号')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and quiet(r.stdout), f'带门牌号码的地址被判红: {show(r)}', r)
+
+        # ② 红极 + 绝对坐标：只有行政区划＋大学，一个数字都没有
+        p = pkg('bad', addr='浙江省浙江大学')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '请求书著录项_E2E.md:3:' in got[0],
+                f'"仅填写××省××大学"那个形状没被 R21 开火或位点不对: {show(r)}', r)
+
+        # ③ 数字这一半的牙：单位名＋门牌号码 ⇒ 静默（法条禁的是"代替地址"，不是出现单位名称）
+        p = pkg('unitnum', addr='浙江大学 100 号')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and quiet(r.stdout),
+                f'单位名称旁写了门牌号码仍被 R21 判红（数字那一半没起作用）: {show(r)}', r)
+
+        # ④ 下界极：无数字也无单位名 ⇒ 今天不判（记的是覆盖边界，不是判据失灵）
+        p = pkg('lower', addr='浙江省杭州市西湖区')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and quiet(r.stdout),
+                f'法条没点名的单位词被 R21 判红（词表越界）: {show(r)}', r)
+
+        # ⑤ 占位极：骨架那行未填 ⇒ 未判
+        p = pkg('ph', addr='【待填写：省市区＋街道门牌号码＋电话】')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R21 未判' in r.stdout,
+                f'占位地址没走未判: {show(r)}', r)
+
+        # ⑥ 极性强对照：同一串字在申请人行合法
+        p = pkg('polarity', applicant='浙江大学')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and quiet(r.stdout),
+                f'同一串写在申请人行被 R21 判红（判点错位）: {show(r)}', r)
+
+        # ⑦ 没有地址行 ⇒ 不适用，连注记都不出
+        p = pkg('none')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and quiet(r.stdout),
+                f'没有地址字段却被 R21 说话: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R21 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r21_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.address_field('浙江省浙江大学').strip())
+            vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '请求书著录项_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上的地址违规没被 R21 抓到: {show(r)}', r)
+    print('PASS iron_r21 地址不被单位名代替（门牌合规 + 仅省加大学开火带位点 + 数字那一半有牙 + 下界静默 + 占位未判 + 申请人行不触发 + 无字段不适用 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6360,7 +6455,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person,
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
