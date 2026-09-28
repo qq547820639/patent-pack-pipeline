@@ -244,33 +244,37 @@ def shape_state(pkg):
                     bad.append('P9 专利清单列了实用新型，可全包找不到一张图'
                                '（图片文件与 docx 内嵌件都是零）——第四十四条（一）'
                                '"说明书（实用新型无附图）"按缺说明书处理，不予受理级')
+            # P13：这一件在，不等于四项齐——细则第三十一条一款列了名称／用途／设计要点／
+            # 指定一幅最能表明设计要点的图片或照片四项，缺哪项点哪项。
+            # 取不到块（节名认得出但块起点找不到，例如只写成一级标题）走未判，不折成"四项全缺"：
+            # 那是判据读不动，不是文书没写。
+            # 第 48 轮把这一支从 P11 那个 `if '外观设计' in declared:` 里提出来各立一支：
+            # 两条规则法源不同（P11 管"这一件交没交"＝第四十四条（一）后段与法 27 条一，
+            # P13 管"四项齐不齐"＝细则 31 条一款），同骑一个守卫时电池里"只关 P11"的臂
+            # 会把 P13 一起关掉，先红的是 P13 的原告——看着像红因不对，其实是守卫没分开。
+            if adocs is not None and '外观设计' in declared and DESIGN_SECTION in aseen:
+                for bf, bset in adocs[0]:
+                    if DESIGN_SECTION not in bset:
+                        continue
+                    bstart, bbody = _cir.section_body(
+                        adocs[2].get(bf, '').splitlines(), _cir.BRIEF_DESC_HEAD)
+                    if bstart is None:
+                        notes.append(f'P13 未判：{bf} 里「{DESIGN_SECTION}」这一节的块取不出来'
+                                     '（节名认得出、块起点找不到——不猜正文）')
+                        continue
+                    btxt = '\n'.join(bbody)
+                    miss = [lab for lab, rex in DESIGN_BRIEF_ITEMS if not rex.search(btxt)]
+                    if miss:
+                        bad.append(f'P13 {bf}：「{DESIGN_SECTION}」缺 {len(miss)} 项：'
+                                   + '／'.join(miss)
+                                   + '——细则第三十一条一款那四项（产品名称／产品用途／设计要点／'
+                                     '指定一幅最能表明设计要点的图片或者照片），'
+                                     '指南 txt:3055-3070 逐字；判的是标签形状，见 DESIGN_BRIEF_ITEMS 旁注')
             if '外观设计' in declared:
                 if adocs is None:
                     notes.append('P11 未判：02_申请文件 目录本身不在（缺段已由 P5 报，'
                                  '这里不重复报成缺件）')
                 else:
-                    # P13：这一件在，不等于四项齐——细则第三十一条一款列了名称／用途／设计要点／
-                    # 指定一幅最能表明设计要点的图片或照片四项，缺哪项点哪项。
-                    # 取不到块（节名认得出但块起点找不到，例如只写成一级标题）走未判，不折成"四项全缺"：
-                    # 那是判据读不动，不是文书没写。
-                    if DESIGN_SECTION in aseen:
-                        for bf, bset in adocs[0]:
-                            if DESIGN_SECTION not in bset:
-                                continue
-                            bstart, bbody = _cir.section_body(
-                                adocs[2].get(bf, '').splitlines(), _cir.BRIEF_DESC_HEAD)
-                            if bstart is None:
-                                notes.append(f'P13 未判：{bf} 里「{DESIGN_SECTION}」这一节的块取不出来'
-                                             '（节名认得出、块起点找不到——不猜正文）')
-                                continue
-                            btxt = '\n'.join(bbody)
-                            miss = [lab for lab, rex in DESIGN_BRIEF_ITEMS if not rex.search(btxt)]
-                            if miss:
-                                bad.append(f'P13 {bf}：「{DESIGN_SECTION}」缺 {len(miss)} 项：'
-                                           + '／'.join(miss)
-                                           + '——细则第三十一条一款那四项（产品名称／产品用途／设计要点／'
-                                             '指定一幅最能表明设计要点的图片或者照片），'
-                                             '指南 txt:3055-3070 逐字；判的是标签形状，见 DESIGN_BRIEF_ITEMS 旁注')
                     if DESIGN_SECTION not in aseen:
                         bad.append(f'P11 02_申请文件 里找不到「{DESIGN_SECTION}」节'
                                    '（md 与 docx 两通道都读过了）——第四十四条（一）后段'
