@@ -2163,6 +2163,254 @@ def test_iron_spec_region_shapes():
           '+ 共享常量同对象 + 生产真工件开火）')
 
 
+# ---------- Word 通道的区域形状档（第 41 轮）：md 那批落点形状在 .docx 上各配一份常驻件 ----------
+
+# 为什么单开一档：md 面的 test_iron_spec_region_shapes 钉的是"区域按细则 20 条一款那五节的**节名**认"，
+# 而 Word 包上同一件事要多穿一层还原——`docx_text()` 按 `w:pStyle` 把标题段还原成 `#` 行
+# （`scripts/check_iron_rules.py:616-620` 那一支 `}pStyle`／`title` 的判断），
+# `_head_split`/`spec_doc_blocks` 才认得出那些节名。
+# 这一层一退化（样式名换了、还原步被删），Word 包上的 R11 与 R10 说明书面就**静默变成看不见**：
+# 门禁照样打"违规 0"。第 40 轮只用四份手工取证件看过一次，没留常驻用例——这一档补的就是那一格。
+#
+# 每一项 = (kind, 级数, 文本)：'h' 走 `doc.add_heading(text, level=级数)`，'p' 走 `doc.add_paragraph(text)`。
+# **一段就是展平后的一行**（docx_text 对每条 w:p 只吐一行：标题段前面拼 `#`×级数＋一个空格，正文段原样，
+# 行尾一个换行），所以"第 k 个写入的段落"＝ docx_text 展平后的第 k 行——位点原点由**写入序**自己算
+# （`_specreg_docx_pos`），不抄门禁打印的行号，也不借别的判据的读数（与 `_specreg_true_pos`／`qabs` 同形状）。
+# 这批夹具**不放 Word 表格**：docx_text 的表格分支一张表要吐多行（表头之外还补一行分隔符），
+# 写入序原点就不成立；表格通道另由 `test_docx_table_channel` 常驻，**格子里嵌的图仍是登记盲区**。
+SPECREG_DOCX_FLAT = [
+    ('h', 1, 'E2E 申请文件（说明书骨架）'),
+    ('h', 2, '说明书摘要'),
+    ('p', None, '【待填写】本装置包括躯干框架（1）与锁扣本体（2）。'),
+    ('h', 2, '权利要求书'),
+    # 与 md 那份 SPECREG_FLAT 同一只越界捕手：这一行逐字含着 R11 的形状，
+    # 九个节同为 Heading 2 时它不该被任何块吞进来。
+    ('p', None, '【待填写】如权利要求1所述的装置，所述躯干框架与锁扣本体连接。'),
+    ('h', 2, '说明书'),
+    ('p', None, '【待填写：骨架期占位，取自交底书】'),
+    ('h', 2, '技术领域'),
+    ('p', None, '【待填写】可穿戴设备与人体外骨骼。'),
+    ('h', 2, '背景技术'),
+    ('p', None, '【待填写：最接近的在先技术与本案区别特征】'),
+    ('p', None, '以上为背景技术的初步检索结果，正式申请前建议由专利代理机构进行专业查新检索。'),
+    ('h', 2, '发明内容'),
+    ('p', None, '【待填写】'),
+    ('h', 2, '附图说明'),
+    ('p', None, '（逐幅写：图 N 为……；N 从 1 起顺序编号，一幅一行）'),
+    ('h', 2, '具体实施方式'),
+    ('p', None, SPECREG_SENT),
+    ('h', 2, '图中标记说明'),
+    ('p', None, '【待填写】标记与名称的对照见附表。'),
+]
+# 效力对照（档⑤）用的那一句合规正文：既不含引用语也不含宣传语，与 SPECREG_SENT 同长度量级。
+SPECREG_DOCX_CLEAN_SENT = '【待填写】装置包括框架与弹臂。'
+# 「# 说明书」罩（Heading 1）底下夹一节（Heading 2）——md 面那条"层级不救场"档的 Word 版：
+# 罩比里面每一节都浅，`jlevel <= level` 那条一级标题规则**停不住任何东西**，
+# 于是 `SPEC_REGION_STOP` 那份名单是唯一防线。上面扁平那批字节钉不到这一层。
+SPECREG_DOCX_L1 = [
+    ('h', 1, '说明书'),
+    ('p', None, '本发明公开一种装置，包括躯干框架。'),
+    ('h', 2, '权利要求书'),
+    ('p', None, SPECREG_SENT),
+    ('h', 2, '具体实施方式'),
+    ('p', None, SPECREG_DOCX_CLEAN_SENT),
+]
+
+
+def _specreg_docx_rename(items, old, new):
+    """只换某个**标题段**的文字，正文一个字不动——"同一批字节"这件事由它自己保证，不靠注释。"""
+    return [(k, lv, new if (k == 'h' and t == old) else t) for k, lv, t in items]
+
+
+def _specreg_docx_relevel(items, level):
+    """把九个节的 Heading 2 全换成指定级数（文档标题那一行不动）：扁平与嵌套两种形状同源同字节。"""
+    return [(k, (level if lv == 2 else lv), t) for k, lv, t in items]
+
+
+def _specreg_docx_pos(items, sent=SPECREG_SENT):
+    """位点原点＝段落写入序：违规句是第 k 个写入的段落，就是展平后的第 k 行（1-based）。"""
+    return [i for i, (_kind, _lv, t) in enumerate(items, 1) if t == sent]
+
+
+def _specreg_docx_diffs(a, b):
+    """两份夹具之间不同的那几段——用来机械自证"出域档只换了标题、没顺手换正文"。"""
+    return [(x, y) for x, y in zip(a, b) if x != y]
+
+
+def _specreg_docx_save(path, items):
+    """按写入序落一份真 .docx；段落数与写入项数不符 ⇒ 载体自己多塞了段，原点作废，当场拒。"""
+    from docx import Document
+    doc = Document()
+    for kind, lv, text in items:
+        if kind == 'h':
+            doc.add_heading(text, level=lv)
+        else:
+            doc.add_paragraph(text)
+    doc.save(path)
+    assert_(len(doc.paragraphs) == len(items),
+            f'python-docx 落盘的段落数 {len(doc.paragraphs)} 与写入项数 {len(items)} 不符，'
+            f'"第 k 段＝第 k 行"的原点不再成立', None)
+    return doc
+
+
+def _specreg_docx_mapped(cir_mod, path, items, want):
+    """原点自证（不是位点读数）：展平后**每段一行**（行数＝段数），且违规句真落在写入序那一行。
+    位点期望值仍然只由 `_specreg_docx_pos` 从写入序算出，这里只核"原点成不成立"。"""
+    lines = cir_mod.docx_text(path).splitlines()
+    assert_(len(lines) == len(items),
+            f'docx_text 把 {len(items)} 段展平成 {len(lines)} 行，第 k 段不再等于第 k 行，'
+            f'写入序原点作废（是不是有表格分支混进来了）', None)
+    for k in want:
+        assert_(lines[k - 1] == SPECREG_SENT,
+                f'写入序第 {k} 段应落在展平后的第 {k} 行，实得 {lines[k - 1]!r}', None)
+
+
+def test_iron_spec_region_shapes_docx():
+    """R11／R10 说明书面的**Word 通道**区域形状常驻档：五档成对（开火侧与静默侧各有对偶）。
+
+    档位（违规句一律是模块级 `SPECREG_SENT`，一句话同时踩细则 20 条三款的两条禁令）：
+      ① 九个节全 Heading 2（生产扁平形状），句在「具体实施方式」那节底下 ⇒ R11 与 R10 说明书面各点一条；
+      ② 同一批字节只把九个节换成 Heading 3（嵌套形状）⇒ 照旧各点一条（修新不许忘旧）；
+      ③ 同一批字节把那一节的**标题**换成「权利要求书」⇒ 零开火（法条在那一节**要求**这种引用语，
+         并进来就是把假阴性修成假阳性）；「附图」／「说明书附图」同理各一档；
+      ④ 「# 说明书」罩（Heading 1）底下夹「## 权利要求书」（Heading 2）⇒ 零开火，
+         同一批字节换成「## 附图说明」⇒ 必须在同一行开火（没有这条对偶，④的静默可能只是判据没跑到）；
+      ⑤ 效力对照：同一批字节把违规句换成合规正文 ⇒ **整条门禁 rc=0**，否则①的开火归因不成立；
+      ⑥ 三态：既无「说明书」标题也无那五节 ⇒ 不判红、也不长出"未判"噪声行，补一个区域内的节名即开火。
+    位点全部按绝对坐标判，原点由段落写入序现算；docx 表格与格子里嵌的图不在本档射程（见上面的夹具注）。
+    """
+    try:
+        import docx  # noqa: F401  python-docx
+    except ImportError:
+        SKIPPED.append('iron_spec_region_shapes_docx')
+        print('SKIP iron_spec_region_shapes_docx（本机无 python-docx，造不出 Word 区域形状夹具）'
+              '——本档未跑过，不得计入通过')
+        return
+    _sp = importlib.util.spec_from_file_location('cir_specreg_docx',
+                                                 os.path.join(S, 'check_iron_rules.py'))
+    cir_mod = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(cir_mod)
+
+    # 夹具形状自证：所谓"九节全 Heading 2"必须数得出来，抄在注释里不算。
+    n_h2 = len([1 for k, lv, _t in SPECREG_DOCX_FLAT if k == 'h' and lv == 2])
+    assert_(n_h2 == 9,
+            f'Word 扁平夹具里 Heading 2 的节数是 {n_h2} 不是 9（细则 20 条一款那五节＋摘要/权要/'
+            f'说明书/图中标记说明），这一档钉的形状已变', None)
+
+    def one(d, name, items, want):
+        p = os.path.join(d, name)
+        _specreg_docx_save(p, items)
+        _specreg_docx_mapped(cir_mod, p, items, want)
+        return run([PY, f'{S}/check_iron_rules.py', p])
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 生产扁平形状（九节全 Heading 2）：句在「具体实施方式」底下，R11 与 R10 各点一条
+        want = _specreg_docx_pos(SPECREG_DOCX_FLAT)
+        assert_(len(want) == 1, f'① 夹具里违规句落点 {want} 不是恰好一处，这一档空转', None)
+        r = one(d, '扁平.docx', SPECREG_DOCX_FLAT, want)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want
+                and '细则第二十条三款' in r.stdout,
+                f'Word 件九个节全 Heading 2（生产扁平形状）时「具体实施方式」底下那句未被 R11/R10 '
+                f'各点一条，期望位点 {want}（段落写入序算出）且只此一处: {show(r)}', r)
+
+        # ② 同一批字节换成 Heading 3 的嵌套形状：照旧各点一条，位点由同一支原点算出（不该漂）
+        items3 = _specreg_docx_relevel(SPECREG_DOCX_FLAT, 3)
+        want3 = _specreg_docx_pos(items3)
+        assert_(want3 == want, f'② 只换了标题级数，落点却从 {want} 漂到 {want3}', None)
+        r = one(d, '嵌套H3.docx', items3, want3)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want3
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want3,
+                f'Word 件九个节换成 Heading 3 后不再被 R11/R10 各点一条（任一层级都认这件事在 '
+                f'Word 通道上丢了），期望位点 {want3}: {show(r)}', r)
+
+        # ③ 同一批字节只把那一节的**标题**换成出域节名 ⇒ 必须静默
+        it_claims = _specreg_docx_rename(SPECREG_DOCX_FLAT, '具体实施方式', '权利要求书')
+        diffs = _specreg_docx_diffs(SPECREG_DOCX_FLAT, it_claims)
+        assert_(len(diffs) == 1 and diffs[0][0][0] == 'h'
+                and diffs[0][0][2] == '具体实施方式' and diffs[0][1][2] == '权利要求书',
+                f'③ 的夹具不是"同一批字节只换标题"，改动面 {len(diffs)} 处', None)
+        r = one(d, '违规在权要.docx', it_claims, want)
+        assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                f'Word 件扁平形状里「权利要求书」那一节的引用语被 R11/R10 说明书面判了'
+                f'（细则 20 条三款禁的是说明书，权要里这类引用语是法条要求的写法）: {show(r)}', r)
+        # ③ 的另外两个出域节名（附图那一件文书归专利法 27 条、摘要归细则 26 条，各有别的判点）
+        for sec in ('附图', '说明书附图'):
+            it = _specreg_docx_rename(SPECREG_DOCX_FLAT, '具体实施方式', sec)
+            assert_(len(_specreg_docx_diffs(SPECREG_DOCX_FLAT, it)) == 1,
+                    f'③/{sec} 的夹具改动面不止标题那一处', None)
+            r = one(d, f'违规在{sec}.docx', it, want)
+            assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                    and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                    f'Word 件里「{sec}」那一节被并进说明书区域了: {show(r)}', r)
+
+        # ④ 「# 说明书」罩底下夹一节：级数救不了场，只有 `SPEC_REGION_STOP` 那份名单说话
+        want_l1 = _specreg_docx_pos(SPECREG_DOCX_L1)
+        assert_(len(want_l1) == 1, f'④ 夹具里违规句落点 {want_l1} 不是恰好一处，这一档空转', None)
+        r = one(d, 'H1罩夹权要.docx', SPECREG_DOCX_L1, want_l1)
+        assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                f'Word 件「# 说明书」罩底下那一节「## 权利要求书」被并进区域了（越界假红，那里用引用语是法条要求的写法）: {show(r)}', r)
+        # ④ 的正向对偶：同一批字节只把那一节的标题换成**区域内**的「附图说明」⇒ 同一行必开火。
+        # 没有这条，上面那条"静默"完全可能只是因为 Word 通道上整条判据根本没跑到。
+        it_hit = _specreg_docx_rename(SPECREG_DOCX_L1, '权利要求书', '附图说明')
+        assert_(len(_specreg_docx_diffs(SPECREG_DOCX_L1, it_hit)) == 1,
+                '④ 的对偶改动面不止标题那一处', None)
+        r = one(d, 'H1罩夹附图说明.docx', it_hit, want_l1)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want_l1
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want_l1,
+                f'罩底下那节换成区域内的「附图说明」后也没在它那一块开火（期望位点 {want_l1}），'
+                f'上一条"权要不入域"是空转: {show(r)}', r)
+        # ④ 的另两个 Stop 名字在 Word 罩法下同样必须静默（名单里每一格都得说话，不只「权利要求书」）
+        it_fatu = _specreg_docx_rename(SPECREG_DOCX_L1, '权利要求书', '说明书附图')
+        r = one(d, 'H1罩夹说明书附图.docx', it_fatu, want_l1)
+        assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                f'Word 件「# 说明书」罩底下那一节「## 说明书附图」被并进区域了（越界假红，'
+                f'附图那一件归专利法第二十七条）: {show(r)}', r)
+        it_fatu2 = _specreg_docx_rename(SPECREG_DOCX_L1, '权利要求书', '附图')
+        r = one(d, 'H1罩夹附图.docx', it_fatu2, want_l1)
+        assert_(r.returncode == 0 and not _specreg_fired(r.stdout, 'R11 说明书引用语')
+                and not _specreg_fired(r.stdout, 'R10 说明书宣传用语'),
+                f'Word 件「# 说明书」罩底下那一节「## 附图」被并进区域了（越界假红）: {show(r)}', r)
+
+        # ⑤ 效力对照：同一批字节把违规句换成合规正文 ⇒ 整条门禁必须 rc=0。
+        # 少了这一档，①／②那些"开火"可能来自夹具里别的既有违规（R2/R9/R13 之类），归因不成立。
+        it_clean = [(k, lv, SPECREG_DOCX_CLEAN_SENT if t == SPECREG_SENT else t)
+                    for k, lv, t in SPECREG_DOCX_FLAT]
+        assert_(_specreg_docx_pos(it_clean) == [], '⑤ 的夹具里违规句没被换掉，效力对照空转', None)
+        r = one(d, '扁平合规.docx', it_clean, [])
+        assert_(r.returncode == 0,
+                f'Word 扁平夹具把违规句换成合规正文后并不干净（rc 不为 0），'
+                f'①②的开火归因不成立: {show(r)}', r)
+
+        # ⑥ 三态：既无「说明书」标题也无那五节 ⇒ 区域为空 ⇒ 不判红、也不新增噪声行
+        NONE = [('h', 1, '检索关键词与 IPC 分类建议'), ('p', None, 'A61F5/00'),
+                ('p', None, SPECREG_SENT)]
+        r = one(d, '无区域.docx', NONE, _specreg_docx_pos(NONE))
+        assert_(r.returncode == 0
+                and not [ln for ln in r.stdout.splitlines()
+                         if '说明书引用语' in ln or '说明书宣传用语' in ln],
+                f'Word 件区域为空时被折成违规、或新长出"未判"提示行: {show(r)}', r)
+        # 同一批字节补一个区域内的节名（Heading 2 的「技术领域」）⇒ 必须开火，位点仍由写入序算
+        NONE2 = [NONE[0], ('h', 2, '技术领域')] + NONE[1:]
+        want6 = _specreg_docx_pos(NONE2)
+        r = one(d, '无区域补节.docx', NONE2, want6)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want6
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want6,
+                f'Word 件补上「技术领域」后仍不在期望位点 {want6} 开火，'
+                f'上一条"区域为空不判"是空转: {show(r)}', r)
+
+    print('PASS 说明书区域落点形状·Word 通道（九节 Heading 2 扁平开火／Heading 3 嵌套开火／'
+          '权利要求书与附图两类出域节名静默／H1 罩下 Stop 名单不吞权要＋同批字节正向对偶开火／'
+          '合规效力对照 rc=0／区域为空三态不折叠；位点原点全部由段落写入序现算）')
+
+
 def test_r7_title_tiers():
     """R7 发明名称字数的三档判决：把法条明确允许的那一侧从"退回修订"里救出来。
 
@@ -4484,7 +4732,7 @@ if __name__ == '__main__':
              test_check_figures_colour,
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
-             test_iron_spec_region_shapes, test_r7_title_tiers,
+             test_iron_spec_region_shapes, test_iron_spec_region_shapes_docx, test_r7_title_tiers,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
