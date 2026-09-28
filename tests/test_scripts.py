@@ -6507,6 +6507,130 @@ def test_iron_r22_r23_headcount_limits():
     print('PASS iron_r22/r23 人数上限（恰好上限静默 + 越界带位点 + 两字段互不混 + 混合各报一条 + 占位未判 + 无字段不适用 + 自报区间含两号 + docx 通道）')
 
 
+def test_iron_r24_representative_membership():
+    """R24：所声明的代表人应当是申请人之一（§4.1.5 txt:727-729＝PDF p23／印刷页 1-7）。
+
+    这一族的四件套与 R19／R20／R21／R22／R23 同一份纪律：判点钉在字段行、两边都是真值才比、
+    任一占位 ⇒ 未判、没声明代表人 ⇒ 不适用（§4.1.5 前半句是法律的默认指定，不是义务形状）。
+    第 ③ 极（代表人＝第二署名申请人必须静默）专防"只比第一行"那种退化——只比第一行时
+    合规样本会判红，越界样本反而处处像在工作。"""
+    cir = _cir_r16()
+    APP_PH = cir.applicant_field('【待填写：单位正式全称或个人姓名、信用代码】')
+    REP_PH = cir.representative_field('【待填写：两人以上申请人且未委托代理时声明其一】')
+
+    def pkg(tag, apps, reps):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n']
+        body += [cir.applicant_field(v) + '\n' for v in (apps if apps is not None else [APP_PH])]
+        body += [cir.representative_field(v) + '\n'
+                 for v in (reps if reps is not None else [REP_PH])]
+        p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        rep_lines = [i for i, ln in enumerate(text.splitlines(), 1)
+                     if ln.startswith('- 代表人：')]
+        return p, rep_lines
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R24 ')]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 开箱形状：代表人与申请人都是占位 ⇒ 未判，既不判红也不折成合规
+        p, _ = pkg('ph', None, None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R24 未判' in r.stdout,
+                f'两边占位没走未判: {show(r)}', r)
+
+        # ② 代表人＝第一署名申请人 ⇒ 静默
+        p, _ = pkg('first', ['甲有限公司', '乙有限公司'], ['甲有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R24 未判' not in r.stdout,
+                f'代表人是第一署名申请人却被判: {show(r)}', r)
+
+        # ③ 代表人＝第二署名申请人 ⇒ 也必须静默（比的是集合，不是第一行）
+        p, _ = pkg('second', ['甲有限公司', '乙有限公司'], ['乙有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'代表人是第二署名申请人却被判红（判据退化成只比第一行）: {show(r)}', r)
+
+        # ④ 越界 + 位点：代表人不在申请人里 ⇒ 红，位点就是代表人那一行
+        p, rep_ln = pkg('bad', ['甲有限公司', '乙有限公司'], ['丙有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1
+                and f'请求书著录项_E2E.md:{rep_ln[0]}:' in got[0]
+                and '丙有限公司' in got[0] and '§4.1.5' in got[0],
+                f'代表人不是申请人却没按那一行开火: {show(r)}', r)
+
+        # ⑤ 两个代表人都不在申请人里 ⇒ 各报一条（第一处不许吃掉第二处）
+        p, rep_ln = pkg('two', ['甲有限公司'], ['丙有限公司', '丁有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 2
+                and all(f':{n}:' in got[i] for i, n in enumerate(rep_ln)),
+                f'两处越界只报出一条或位点不对: {show(r)}', r)
+
+        # ⑥ 代表人真名、申请人却还占位 ⇒ 比不成 ⇒ 未判（不折成违规）
+        p, _ = pkg('half', None, ['甲有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R24 未判' in r.stdout,
+                f'申请人是占位时把真名代表人折成了违规或合规: {show(r)}', r)
+
+        # ⑦ 代表人真名、整份文书没有申请人行 ⇒ 走另一句未判，不猜
+        p, _ = pkg('noapp', [], ['甲有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and '没有申请人那一行可比' in r.stdout,
+                f'缺申请人行时没点名"比不成"（或被判红）: {show(r)}', r)
+
+        # ⑧ 不适用：没声明代表人 ⇒ 不判、连注记都不出（缺席断言绕开合计行那句自报区间）
+        p, _ = pkg('norep', ['甲有限公司'], [])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R24' not in r.stdout.split('合计违规')[0],
+                f'没声明代表人却被说话: {show(r)}', r)
+
+        # ⑨ 自报区间必须含到 R24（号进了 f-string 参数就会静默退回前一号）
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'first', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 24,
+                f'自报区间没把 R24 算进去（多半是号被塞进 f-string 参数）: {show(r)}', r)
+
+        # ⑩ 空白不参与比较：代表人那行末尾多一个空格也算同一个人（与 R19 同一取法）
+        p, _ = pkg('ws', ['甲有限公司'], ['甲有限公司 '])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'只差空白的代表人被当成另一个人: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R24 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r24_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.applicant_field('甲有限公司').strip())
+            doc.add_paragraph(cir.representative_field('丙有限公司').strip())
+            vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '请求书著录项_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上代表人不在申请人之列却没被抓到: {show(r)}', r)
+    print('PASS iron_r24 代表人须为申请人之一（第一／第二署名各一极 + 越界带位点 + 两处各报一条 + '
+          '任一边占位未判 + 缺申请人行未判 + 没声明不适用 + 空白不算两个人 + 自报区间含 R24 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6569,7 +6693,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits,
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

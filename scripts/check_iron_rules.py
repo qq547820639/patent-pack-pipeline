@@ -194,6 +194,13 @@
      （联系人只在"申请人是单位且未委托代理"时才要，本仓不知道本案走哪条路，就不替它假定）。
      同句"填写联系人的还要同时填写通信地址、邮政编码和电话号码"（txt:724-725）今天不判：
      那要跨字段做条件核对，且"地址栏是否含邮编／电话"仍是措辞判断，先把这条记在这儿不装判过。
+  R24 所声明的代表人应当是申请人之一——§4.1.5 txt:727-729（＝PDF p23／印刷页 1-7）逐字
+     「请求书中另有声明的，所声明的代表人应当是申请人之一」。只在 `- 代表人：` 那一行写了声明时判，
+     比对手是同份文书 `- 申请人：` 那些行的值（比较前只剥空白，与 R19 同一取法）。
+     没声明代表人 ⇒ 不适用、连注记都不出：同节前半句"申请人有两人以上且未委托代理的，
+     以第一署名申请人为代表人"是**法律自己的默认指定**，不是申请人的义务形状。
+     代表人或申请人任一边还是占位 ⇒「R24 未判」；声明了代表人却一份文书里找不到申请人行 ⇒
+     也走未判（比不成，不折成违规）。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -493,6 +500,53 @@ def field_line_limits(path, lines):
                 f'联系人写了 {len(hits)} 人（{"、".join(v for _, v in hits)}），'
                 '上限是一人——§4.1.4 逐字「联系人只能填写一人」；位点报越界那一行'))
     return findings, notes
+
+
+# ── R24 所声明的代表人必须是申请人之一（§4.1.5）──
+# §4.1.5 txt:727-729（＝PDF p23／印刷页 1-7，该页页眉 txt:697、页标行 txt:698「（1-7） 19」
+# 抄引文时要跳过）逐字
+# 「申请人有两人以上且未委托专利代理机构的，除本指南另有规定或者请求书中另有声明外，
+# 以第一署名申请人为代表人。请求书中另有声明的，所声明的代表人应当是申请人之一。」
+# 判得动的只有后半句：文书自己声明了代表人，那个名字就得落在同份文书的申请人集合里。
+# 前半句是**法律的默认指定**而不是申请人的义务——没声明代表人时第一署名申请人自动成为
+# 代表人，所以"没有代表人行"不判红、连注记都不出（那是不适用，不是漏判）。
+# 比较前只剥空白，与 R19 同一取法；代表人或申请人任一边还是占位 ⇒ 比不成 ⇒ 未判。
+# 同节"代表人可以代表全体申请人办理手续"与共有权利那份清单（txt:730-733）不判：
+# 那是手续管辖范围，不是文书形状。
+APPLICANT_FIELD = re.compile(r'^\s*-\s*申请人[:：]\s*(\S.*?)\s*$')
+APPLICANT_FIELD_WRITE = '- 申请人：'
+REP_FIELD = re.compile(r'^\s*-\s*代表人[:：]\s*(\S.*?)\s*$')
+REP_FIELD_WRITE = '- 代表人：'
+
+
+def applicant_field(value):
+    """申请人那一行的写法（R24 拿它当代表人的比对手）。"""
+    return APPLICANT_FIELD_WRITE + value
+
+
+def representative_field(value):
+    """代表人那一行的写法（R24 判声明出来的名字在不在申请人里）。"""
+    return REP_FIELD_WRITE + value
+
+
+def representative_membership(path, lines):
+    """R24 代表人 ∈ 申请人。判据号写在 `Finding(` 的字面里，理由见 `field_line_limits` 的注。"""
+    reps = field_hits(REP_FIELD, lines)
+    if not reps:
+        return [], []
+    apps = field_hits(APPLICANT_FIELD, lines)
+    if not apps:
+        return [], ['R24 未判（声明了代表人，这份文书里却没有申请人那一行可比——不猜、不折成违规）']
+    if any(PLACEHOLDER_TOKEN.search(v) for _, v in reps) or \
+       any(PLACEHOLDER_TOKEN.search(v) for _, v in apps):
+        return [], ['R24 未判（代表人或申请人还有占位值，两边比不成——不折成合规也不折成违规）']
+    named = {v.strip() for _, v in apps}
+    findings = [Finding(
+        'R24 代表人不在申请人之列', path, ln_no,
+        f'代表人声明的是「{val}」，同份文书的申请人只有（{"、".join(sorted(named))}）——'
+        '§4.1.5 逐字「所声明的代表人应当是申请人之一」；位点报代表人那一行')
+        for ln_no, val in reps if val.strip() not in named]
+    return findings, []
 
 
 # ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
@@ -1064,6 +1118,11 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     lim_findings, lim_notes = field_line_limits(path, lines)
     findings += lim_findings
     notes += lim_notes
+
+    # R24 代表人须为申请人之一：文书自己声明了代表人才判，没声明是"不适用"不是"漏判"。
+    rep_findings, rep_notes = representative_membership(path, lines)
+    findings += rep_findings
+    notes += rep_notes
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。

@@ -649,6 +649,35 @@ MUTS = {
          '    hits = field_hits(AGENT_FIELD, lines)\n    if hits:\n'
          '        if False:',
          '占位行没走未判'),
+        # ── 第 51 轮 R24 代表人 ∈ 申请人（§4.1.5 txt:727-729＝PDF p23／1-7）──
+        # 每条轴一支"只关自己"的臂：整支不判、退化成只比第一行、两种未判各折成沉默或注记、位点报错行。
+        ('R24 的等值判定整支关掉（代表人不是申请人也照过）', IRON,
+         '        for ln_no, val in reps if val.strip() not in named]',
+         '        for ln_no, val in reps if False]',
+         '代表人不是申请人却没按那一行开火'),
+        ('R24 退化成只比第一署名申请人（第二署名获罪）', IRON,
+         '    named = {v.strip() for _, v in apps}',
+         '    named = {apps[0][1].strip()}',
+         '代表人是第二署名申请人却被判红'),
+        ('R24 把"任一边还是占位"折成可判（占位串彼此比对）', IRON,
+         '    if any(PLACEHOLDER_TOKEN.search(v) for _, v in reps) or \\\n'
+         '       any(PLACEHOLDER_TOKEN.search(v) for _, v in apps):',
+         '    if False:',
+         # 两个合法原告：骨架开箱那档先红——骨架里申请人和代表人两处占位**字面本就不同**，
+         # 折成可判就等于让真包当场判红；常驻档的"占位没走未判"是第二原告。
+         ('两边占位没走未判', '新生成的包未通过铁律门禁')),
+        ('R24 在缺申请人行时把比不成折成沉默', IRON,
+         "    if not apps:\n        return [], ['R24 未判（声明了代表人，这份文书里却没有申请人那一行可比——不猜、不折成违规）']",
+         '    if not apps:\n        return [], []',
+         '缺申请人行时没点名"比不成"（或被判红）'),
+        ('R24 把"没声明代表人"从不适用改成出声（替法条的默认指定造义务）', IRON,
+         '    if not reps:\n        return [], []',
+         "    if not reps:\n        return [], ['R24 未判（没声明代表人）']",
+         '没声明代表人却被说话'),
+        ('R24 的位点退回申请人第一行（获罪的不是声明那一行）', IRON,
+         "        'R24 代表人不在申请人之列', path, ln_no,",
+         "        'R24 代表人不在申请人之列', path, apps[0][0],",
+         '代表人不是申请人却没按那一行开火'),
         # ── 第 46 轮 #33：§4.3 照片禁令判不动的那一面要点名成未判，不能静默消失 ──
         ('非 PNG 位图的未判点名整支关掉（jpg 又变成看不见＝被写成没有）', 'scripts/check_figures.py',
          '            elif low.endswith(RASTER_EXTS):', '            elif False:',
