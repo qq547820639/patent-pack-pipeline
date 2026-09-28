@@ -127,7 +127,7 @@
      生产真包上 R7/R15 走的是"未核"那一支。现在骨架写 `01_交底书/交底书_<产品>.md`，
      §0 那一行由判据侧 `title_field()` 拼（写法常量 `TITLE_FIELD_WRITE` 与 `TITLE_FIELD`
      同源，生成器不另抄字面——抄的那份一漂移，两把尺子在生产包上静默退回未核）。
-     现造包真读数：7 份 md、`合计违规 0（规则 R1–R15，判据见脚本 docstring）`、
+     现造包真读数：7 份 md、`合计违规 0（规则 R1–R16，判据见脚本 docstring）`、
      7 份里只剩 6 份报 `R7 未核`，没报的那一份就是交底书（其余 6 份本就没有该字段，
      仍走未核——三态说的是这份文书有没有可读字段，不是判据覆盖了多少同族措辞）。
      连带两面也现量过：交底书 §4「附图说明」使 N 族域内从 1 份变 2 份，那一份走"未判"（那条对照表判据只管说明书，内部文书不硬判）；§6「权利要求建议稿」进 Q 族
@@ -137,6 +137,17 @@
      自家文档提醒：references/templates.md:14 那条 bullet 正落在本条适用域内（值
      `≤25 字（一般）、硬上限 60，不含商标/型号`，两支都不开火）；谁把它改写成"发明名称：一种化合物"，
      本条就会把自家文档判红。
+  R16 说明书第一页第一行没写明本案发明名称，或名称前冠了"发明名称／名称"字样——
+     《专利审查指南》（2023）第一部分第一章 §4.2 逐字（本机留底 txt:763-767＝PDF p24／
+     印刷页 1-8；抄引文要跳过同页页眉 txt:735-736 那两行）：「说明书第一页第一行应当写明
+     发明名称，该名称应当与请求书中的名称一致，并左右居中。发明名称前面不得冠以"发明名称"
+     或者"名称"等字样。」适用域走**路径轴**（`02_申请文件` 目录，或文件名以「说明书」开头）：
+     正文轴会把交底书吃进来——它 §4 的名字也叫「附图说明」，可它首行是交底书标题，不是法条
+     要求的那一行。名称来源是同包 `01_交底书` 里 R7／R15 读的那一行字段（md 与 docx 两个
+     通道都取）；取不到 ⇒ R16 首行同一性**未判**，既不折成合规也不折成违规。判的是第一条
+     有内容的行（md 开头的空行是排版壳）。同句里"左右居中"与"名称与正文之间空一行"明写不判：
+     两者都是排版属性，文本通道读不到居中、docx_text 又不吐空段落，判红等于把判据的缺席
+     写成文档的违规。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -339,6 +350,58 @@ TITLE_FIELD_WRITE = '   - 发明名称：'
 def title_field(value):
     """按 TITLE_FIELD 认得的写法渲染一行发明名称字段（骨架生成器用，别处不要另拼）。"""
     return TITLE_FIELD_WRITE + value
+
+
+# ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
+# 适用域走**路径轴**而不是正文轴：`02_申请文件` 是包里说明书的法定落位，文件名以「说明书」
+# 开头算第二认法。正文轴不可用——交底书 §4 的名字就叫「附图说明」，正文轴会把交底书也吃进来，
+# 而它的首行是《×× 专利技术交底书》，那不是法条要求的那一行（第 45 轮实测：正文轴会把 24 份
+# 域内件里 2 份交底书一起判红）。
+SPEC_DOC_DIR = '02_申请文件'
+SPEC_DOC_PREFIX = '说明书'
+SPEC_DISCLOSURE_DIR = '01_交底书'
+# 「发明名称：」或「名称：」打头那一支点名的是**冠字**。著录项里那种
+# `   - 发明名称：X` 的字段行不在这一支射程内（那一行由 R7／R15 判），所以前面允许
+# markdown 标题壳与 bullet，但必须紧跟冒号才算冠字。
+SPEC_HEAD_PREFIX = re.compile(r'^\s*(?:#{1,6}\s*)?[-*]?\s*(?:发明名称|名称)\s*[:：]')
+MD_HEAD_SHELL = re.compile(r'^\s*#{1,6}\s+')
+
+
+def spec_doc_scope(path):
+    """这份文书是不是"说明书"那一件——目录归属看 path、文件名兜第二认法。"""
+    norm = path.replace(os.sep, '/')
+    parts = [p for p in norm.split('/') if p]
+    base = parts[-1] if parts else ''
+    return SPEC_DOC_DIR in parts or base.startswith(SPEC_DOC_PREFIX)
+
+
+def case_titles(path):
+    """同包 `01_交底书` 里的本案发明名称集合（逐层往上找，最多四层）。
+
+    返回 None ⇒ 判点没有可比对的名称，调用侧必须走"未判"那一支：
+    法条要求"写明发明名称"，但名称本身在这份交付里读不到时，判红与判绿都是替读者编事实。
+    """
+    names = []
+    d = os.path.dirname(path.replace(os.sep, '/'))
+    for _ in range(4):
+        cand = os.path.join(d, SPEC_DISCLOSURE_DIR) if d else ''
+        if cand and os.path.isdir(cand):
+            for n in sorted(os.listdir(cand)):
+                if not n.endswith(('.md', '.docx')):
+                    continue
+                try:
+                    body = docx_text(os.path.join(cand, n)) if n.endswith('.docx') \
+                        else read_text(os.path.join(cand, n))
+                except Exception:
+                    continue
+                for ln in body.splitlines():
+                    m = TITLE_FIELD.match(ln)
+                    if m:
+                        names.append(re.sub(r'\s', '', m.group(1)))
+            if names:
+                return names
+        d = os.path.dirname(d)
+    return None
 # 25 字是**房内口径**，出处 templates §0；《专利审查指南》同一句里它是**软**上限（见下 TITLE_HARD_MAX）。
 # 超它只出提示行，不折算成违规——本仓模板仍然按 ≤25 要求，那是自家比法条更严的选择。
 TITLE_SOFT_MAX = 25
@@ -730,6 +793,33 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
                                         '逐字：也不得仅使用笼统的词语，致使未给出任何发明信息'))
     if not title_seen:
         notes.append('未找到「发明名称：」字段，R7 未核、R15 未核')
+
+    # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
+    # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。
+    # 同句里"左右居中"与"发明名称与说明书正文之间应当空一行"不判——都是排版属性，
+    # 文本通道读不到居中，Word 通道里"空一行"表现为空段落而 docx_text 不吐空段落，
+    # 拿它们判红等于把判据的缺席写成文档的违规（这一面写在下面的"未核"话术里，不藏）。
+    if spec_doc_scope(path):
+        first = next(((i, ln) for i, ln in enumerate(lines, 1) if ln.strip()), None)
+        if first:
+            fno, fraw = first
+            if SPEC_HEAD_PREFIX.match(fraw):
+                findings.append(Finding(
+                    'R16 说明书首行冠了字样', path, fno,
+                    '说明书第一行以「发明名称：／名称：」起头——《专利审查指南》2023 第一部分'
+                    '第一章 §4.2 逐字：发明名称前面不得冠以"发明名称"或者"名称"等字样'))
+            else:
+                names = case_titles(path)
+                body = re.sub(r'\s', '', MD_HEAD_SHELL.sub('', fraw))
+                if names is None:
+                    notes.append('同包 01_交底书 里读不到「发明名称：」字段，R16 首行同一性未判'
+                                 '（既不折成合规，也不折成违规）')
+                elif body not in names:
+                    findings.append(Finding(
+                        'R16 说明书首行不是本案发明名称', path, fno,
+                        f'首行「{body}」与同包交底书里的发明名称'
+                        f'（{"／".join(names[:3])}）不是同一个——§4.2 逐字：'
+                        '说明书第一页第一行应当写明发明名称，该名称应当与请求书中的名称一致'))
 
     # R8 EVT 投产总则逐字（铁律 5 / EVT 诚实边界）
     if EVT_DIR.search(path) or EVT_SCOPE.search(text):

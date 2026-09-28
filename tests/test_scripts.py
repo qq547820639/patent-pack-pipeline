@@ -5695,7 +5695,10 @@ def test_patent_figure():
     print('PASS patent_figure（F1–F6 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
 
 
-POINTER_RE = re.compile(r'([A-Za-z0-9_./-]+\.(?:py|md|sh)):(\d+)(?:-(\d+))?')
+# 名字必须以 ASCII 字母起头，且前面不能是「词字符或点」：中文文件名（`说明书_E2E.md`）在这个
+# 字符集里只接得上后半截，`_E2E.md`／`E2E.md` 都能起一个匹配，于是断言消息里的样例路径
+# 会被当成文档指针——本档自己造的假目标。负向后视把这类"从中间截一段"的起点全关掉。
+POINTER_RE = re.compile(r'(?<![\w.])([A-Za-z][A-Za-z0-9_./-]*\.(?:py|md|sh)):(\d+)(?:-(\d+))?')
 PTR_ID_RE = re.compile(r'`([A-Za-z_][A-Za-z_0-9]{3,})(?:\(\))?`')
 PTR_LIT_RE = re.compile(r'`([^`\n]{6,})`')
 
@@ -5720,6 +5723,8 @@ def _pointer_findings(files):
         cache = {}
         for i, line in enumerate(text.splitlines(), 1):
             for m in POINTER_RE.finditer(line):
+                if m.start() and line[m.start() - 1] in '\'"':
+                    continue   # 引号里的是样例路径／夹具名（如断言消息里的 `文件.md:1:`），不是文档指针
                 tgt, a, b = m.group(1), int(m.group(2)), m.group(3)
                 c = m.group(3)
                 z = index.get(tgt)
@@ -5805,6 +5810,94 @@ def test_doc_line_pointers():
           f'被引句子所在行；不可解／越界／符号／字面四档控制各自开火）')
 
 
+R16_TITLE = '一种腰部助力外骨骼装置'
+R16_BODY = '\n## 说明书\n正文一句。\n## 技术领域\n可穿戴设备。\n'
+
+
+def _r16_pkg(root, spec_first, title=R16_TITLE, with_disclosure=True):
+    """现搭一个包：`01_交底书` 给名称源、`02_申请文件` 放被判的那份说明书。
+
+    每一档各用一个子目录——`case_titles()` 沿路径往上找四层，共用同一个根时前一档留下的
+    交底书会被"没有名称源"那一档读到（第 45 轮写这一档时就这样假绿过一次）。
+    名称行的写法由判据侧 `title_field()` 出，测试不另拼字面。
+    """
+    cir = _cir_r16()
+    os.makedirs(os.path.join(root, '01_交底书'), exist_ok=True)
+    os.makedirs(os.path.join(root, '02_申请文件'), exist_ok=True)
+    if with_disclosure:
+        open(os.path.join(root, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E 专利技术交底书\n' + cir.title_field(title) + '\n\n'
+            '## 技术领域\n可穿戴设备。\n')
+    open(os.path.join(root, '02_申请文件', '说明书_E2E.md'), 'w', encoding='utf8').write(
+        spec_first + R16_BODY)
+    return root
+
+
+def _cir_r16():
+    sp = importlib.util.spec_from_file_location('cir_r16', f'{S}/check_iron_rules.py')
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    return m
+
+
+def test_iron_r16_spec_first_line():
+    with tempfile.TemporaryDirectory() as d:
+        cases = [
+            ('合规', '# ' + R16_TITLE + '\n', True, 0, None),
+            ('冠字样', '发明名称：' + R16_TITLE + '\n', True, 1, 'R16 说明书首行冠了字样'),
+            ('不是本案名称', '# E2E 申请文件（说明书骨架）\n', True, 1,
+             'R16 说明书首行不是本案发明名称'),
+            ('无名称源', '# E2E 申请文件（说明书骨架）\n', False, 0, None),
+        ]
+        for tag, first, disc, want_rc, want in cases:
+            pk = _r16_pkg(os.path.join(d, tag), first, with_disclosure=disc)
+            args = [os.path.join(pk, '02_申请文件', '说明书_E2E.md')]
+            if disc:
+                args.append(os.path.join(pk, '01_交底书', '交底书_E2E.md'))
+            r = run([PY, f'{S}/check_iron_rules.py'] + args)
+            fired = [ln for ln in r.stdout.splitlines() if ln.startswith('  FAIL R16')]
+            if want:
+                assert_(r.returncode == want_rc and len(fired) == 1
+                        and want in fired[0] and '说明书_E2E.md:1:' in fired[0],
+                        f'「{tag}」那一档 R16 没开火或位点不在首行: {show(r)}', r)
+            else:
+                assert_(r.returncode == 0 and not fired, f'「{tag}」那一档被 R16 误判红: {show(r)}', r)
+            if tag == '无名称源':
+                assert_('R16 首行同一性未判' in r.stdout,
+                        f'没有名称源时 R16 没走"未判"三态（既没折成合规也没折成违规，但也没说话）: '
+                        f'{show(r)}', r)
+
+        # 适用域那一根轴：交底书自己的首行不是法条说的那一行，走正文轴（它 §4 也叫「附图说明」）
+        # 会把 24 份域内件里的交底书一起判红——这一档钉的正是"域按路径划"这个选择。
+        pk = _r16_pkg(os.path.join(d, '轴'), '# ' + R16_TITLE + '\n')
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(pk, '01_交底书', '交底书_E2E.md')])
+        assert_(r.returncode == 0
+                and not any(ln.startswith('  FAIL R16') for ln in r.stdout.splitlines()),
+                f'R16 把交底书的首行也判了（适用域该走路径轴）: {show(r)}', r)
+
+        # Word 通道：同一只越界必须在 docx 上开火。位点是 docx_text 展平后的第一行。
+        try:
+            import docx
+        except ImportError:
+            SKIPPED.append('iron_r16_docx')
+            print('PASS iron_r16（四档 md 极 + 适用域轴；Word 通道档缺 python-docx，未跑）')
+            return
+        pk = _r16_pkg(os.path.join(d, 'w'), '# ' + R16_TITLE + '\n')
+        doc = docx.Document()
+        doc.add_heading('E2E 申请文件（说明书骨架）', level=1)
+        doc.add_heading('说明书', level=2)
+        doc.add_paragraph('正文一句。')
+        vp = os.path.join(pk, '02_申请文件', '说明书_E2E.docx')
+        doc.save(vp)
+        r = run([PY, f'{S}/check_iron_rules.py', vp,
+                 os.path.join(pk, '01_交底书', '交底书_E2E.md')])
+        fired = [ln for ln in r.stdout.splitlines() if ln.startswith('  FAIL R16')]
+        assert_(r.returncode == 1 and len(fired) == 1
+                and 'R16 说明书首行不是本案发明名称' in fired[0] and ':1:' in fired[0],
+                f'Word 说明书上的首行不一致没被 R16 判到首行: {show(r)}', r)
+    print('PASS iron_r16 说明书首行（合规极 + 冠字支 + 不一致支 + 无名称源未判 + 交底书不入域 + Word 通道）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
@@ -5821,7 +5914,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers]
+             test_doc_line_pointers, test_iron_r16_spec_first_line]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}
