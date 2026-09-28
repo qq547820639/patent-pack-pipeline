@@ -6225,7 +6225,12 @@ def test_iron_r20_inventor_is_person():
         for v in inventor_lines:
             body.append(cir.inventor_field(v) + '\n')
         if applicant is not None:
-            body.append('- 申请人：' + applicant + '\n')
+            body.append(cir.applicant_field(applicant) + '\n')
+            # 这份底稿一进 R25 的适用域（文件名字轴），有申请人栏就要求四件齐；
+            # 补齐另外两栏，这一档的读数才只属于 R20——不然极性对照先被 R25 判红，原告换人。
+            body.append(cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n')
+            body.append(cir.postal_field('310012') + '\n')
+            body.append(cir.credit_code_field('91330100MA2AB1CD3E') + '\n')
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
         open(p, 'w', encoding='utf8').write('\n'.join(body) + '\n')
         return p
@@ -6314,7 +6319,13 @@ def test_iron_r21_address_not_unit_name():
             '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
         body = ['# ' + R16_TITLE, '']
         if applicant is not None:
-            body.append('- 申请人：' + applicant + '\n')
+            body.append(cir.applicant_field(applicant) + '\n')
+            # 同 R20 那一档：底稿里写了申请人栏，R25 就要看四件齐。这里 addr 可能就是被测的那一串，
+            # 所以只在没传 addr 时补一条合规地址，邮编与代码一律补真值——让读数只属于 R21。
+            if addr is None:
+                body.append(cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n')
+            body.append(cir.postal_field('310012') + '\n')
+            body.append(cir.credit_code_field('91330100MA2AB1CD3E') + '\n')
         if addr is not None:
             body.append(cir.address_field(addr) + '\n')
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
@@ -6528,6 +6539,11 @@ def test_iron_r24_representative_membership():
         body += [cir.applicant_field(v) + '\n' for v in (apps if apps is not None else [APP_PH])]
         body += [cir.representative_field(v) + '\n'
                  for v in (reps if reps is not None else [REP_PH])]
+        # 底稿里写了申请人栏就进 R25 的适用域（四件齐）：补齐地址／邮政编码／代码三栏的真值，
+        # 这一档的读数才只属于 R24。加在代表人行**之后**，不动上面各行的行号。
+        body += [cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n',
+                 cir.postal_field('310012') + '\n',
+                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n']
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
         text = '\n'.join(body) + '\n'
         open(p, 'w', encoding='utf8').write(text)
@@ -6620,6 +6636,9 @@ def test_iron_r24_representative_membership():
             doc = docx.Document()
             doc.add_paragraph(R16_TITLE)
             doc.add_paragraph(cir.applicant_field('甲有限公司').strip())
+            doc.add_paragraph(cir.address_field('浙江省杭州市西湖区文三路 100 号').strip())
+            doc.add_paragraph(cir.postal_field('310012').strip())
+            doc.add_paragraph(cir.credit_code_field('91330100MA2AB1CD3E').strip())
             doc.add_paragraph(cir.representative_field('丙有限公司').strip())
             vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
             doc.save(vp)
@@ -6629,6 +6648,157 @@ def test_iron_r24_representative_membership():
                     f'Word 件上代表人不在申请人之列却没被抓到: {show(r)}', r)
     print('PASS iron_r24 代表人须为申请人之一（第一／第二署名各一极 + 越界带位点 + 两处各报一条 + '
           '任一边占位未判 + 缺申请人行未判 + 没声明不适用 + 空白不算两个人 + 自报区间含 R24 + docx 通道）')
+
+
+def test_iron_r25_applicant_bibliographic_set():
+    """R25：中国申请人那四件著录项在底稿里得各有其一（§4.1.3.1 txt:662-663＝PDF p22／1-6）。
+
+    与 R19／R20／R21／R22／R23／R24 同一族，但三态换了一格：这条判的是**栏位在不在**，
+    所以缺栏＝违规（底稿少一栏＝请求书那一栏没人负责抄）、栏在值占位＝未判、有真值＝这一件判过。
+    第 ⑦⑧ 两大专属极：没申请人行时不许出声（不适用），以及**文件名字轴**——
+    交底书与说明书里同样写一行 `- 申请人：` 也不许响，那条轴一放宽就是成片假红。"""
+    cir = _cir_r16()
+    PH = {
+        'name': cir.applicant_field('【待填写：单位正式全称或个人姓名、信用代码】'),
+        'addr': cir.address_field('【待填写：省市区＋街道门牌号码＋电话】'),
+        'zip': cir.postal_field('【待填写：申请人所在地邮政编码】'),
+        'code': cir.credit_code_field('【待填写：单位代码；个人改用「身份证件号码」那一栏】'),
+    }
+    REAL = {
+        'name': cir.applicant_field('甲有限公司'),
+        'addr': cir.address_field('浙江省杭州市西湖区文一西路 100 号'),
+        'zip': cir.postal_field('310012'),
+        'code': cir.credit_code_field('91330100MA2AB1CD3E'),
+    }
+
+    def draft(tag, cells=None, extra=(), name=None):
+        """写一份著录项底稿（文件名由判据侧常量拼，别在这儿抄字面）。"""
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        cells = cells if cells is not None else PH
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n']
+        for key in ('name', 'addr', 'zip', 'code'):
+            if key in cells:
+                body.append(cells[key] + '\n')
+        body += [ln + '\n' for ln in extra]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        app_ln = [i for i, ln in enumerate(text.splitlines(), 1)
+                  if ln.startswith('- 申请人：')]
+        return p, app_ln
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R25 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R25 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 开箱形状：四栏都在、值全占位 ⇒ 只出未判，不判红
+        p, _ = draft('ph')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '名称或者姓名' in judged(r.stdout)[0],
+                f'四栏占位没走未判: {show(r)}', r)
+
+        # ② 四件真值齐 ⇒ 这条一句话都不出
+        p, _ = draft('full', REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'四件齐却被说话: {show(r)}', r)
+
+        # ③ 缺邮政编码栏 ⇒ 违规、点名那一件、位点是申请人那一行
+        cells = dict(REAL)
+        del cells['zip']
+        p, app = draft('nozip', cells)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '邮政编码' in got[0]
+                and f'请求书著录项_E2E.md:{app[0]}:' in got[0] and '§4.1.3.1' in got[0],
+                f'缺邮政编码栏没按申请人那一行点名: {show(r)}', r)
+
+        # ④ 只邮政编码退回占位（其余真值）⇒ 未判里只列那一件
+        cells = dict(REAL, zip=PH['zip'])
+        p, _ = draft('zipph', cells)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and len(judged(r.stdout)) == 1 and '邮政编码' in judged(r.stdout)[0]
+                and '地址' not in judged(r.stdout)[0],
+                f'单格占位的未判没只列那一件: {show(r)}', r)
+
+        # ⑤ 二选一：用「身份证件号码」替掉「统一社会信用代码」⇒ 静默
+        p, _ = draft('idno', REAL,
+                     extra=['- 身份证件号码：330106199001011234'])
+        cells = dict(REAL)
+        del cells['code']
+        p2, _ = draft('idno2', cells, extra=['- 身份证件号码：330106199001011234'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        r2 = run([PY, f'{S}/check_iron_rules.py', p2])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and r2.returncode == 0 and not fired(r2.stdout) and not judged(r2.stdout),
+                f'「或者身份证件号码」那支没被认成同一件（两栏都在={show(r)}／只留身份证={show(r2)}）', r2)
+
+        # ⑥ 并存：邮政编码占位 + 信用代码那支整栏没有 ⇒ 既报缺栏又出未判
+        cells = dict(REAL, zip=PH['zip'])
+        del cells['code']
+        p, _ = draft('both', cells)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '统一社会信用代码或者身份证件号码' in fired(r.stdout)[0]
+                and len(judged(r.stdout)) == 1,
+                f'缺栏与占位并存时两本账少了一本: {show(r)}', r)
+
+        # ⑦ 不适用：底稿里没有申请人那一行 ⇒ 四件一条都不许提
+        cells = dict(PH)
+        del cells['name']
+        p, _ = draft('noapp', cells)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'没有申请人行却被要求凑齐四件: {show(r)}', r)
+
+        # ⑧ 文件名字轴有牙：同一份内容换成说明书那个文件名 ⇒ 立刻静默
+        p, _ = draft('axis', PH, name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了（假红面）: {show(r)}', r)
+
+        # ⑨ 自报区间含到 R25（号进了 f-string 参数就会静默退回前一号）
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 25,
+                f'自报区间没把 R25 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R25 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r25_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            for key in ('name', 'addr'):
+                doc.add_paragraph(REAL[key].strip())
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '邮政编码' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件的底稿缺邮政编码却没被抓到: {show(r)}', r)
+    print('PASS iron_r25 申请人著录项四件齐（全占位未判 + 真值静默 + 缺栏点名带位点 + 单格占位只列那一件 + '
+          '信用代码／身份证件号码二选一 + 缺栏与占位并存两本账 + 无申请人行不适用 + 文件名字轴不误伤 + '
+          '自报区间含 R25 + docx 通道）')
 
 
 def test_check_figures_raster_three_state():
@@ -6693,7 +6863,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership,
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

@@ -265,7 +265,8 @@ def request_doc(name):
              '这里另抄一份字面，副本漂移就正好从这两行进来。）\n',
              _c.title_field(DISCLOSURE_TITLE) + '\n',
              # 细则第十九条一款把这九项逐个点名（行政法规库合并全文，逐字见 references/hard-rules.md）；
-             # 骨架期只有名称是判得动的，其余按法条顺序留标签，将来加判据时标签不必再造。
+             # 判得动的那几处各有判据（名称 R19／发明人 R20／地址 R21／人数 R22·R23／代表人 R24／
+             # 四件齐 R25），其余按法条顺序留标签，将来加判据时标签不必再造。
              # 括号里只留"待填写＋一句话"（R2b 的 `待[^】]{0,60}` 上限 60 字，超了自家门禁就判红），
              # 长一点的说明写在括号外的正文行里——那是给人看的，不是占位。
              '## 申请人／发明人\n'
@@ -273,9 +274,14 @@ def request_doc(name):
              + _c.applicant_field('【待填写：单位正式全称或个人姓名、信用代码】') + '\n'
              + _c.representative_field('【待填写：两人以上申请人且未委托代理时声明其一】') + '\n'
              + _c.address_field('【待填写：省市区＋街道门牌号码＋电话】') + '\n'
+             + _c.postal_field('【待填写：申请人所在地邮政编码】') + '\n'
+             + _c.credit_code_field('【待填写：单位代码；个人改用「身份证件号码」那一栏】') + '\n'
              + _c.contact_field('【待填写：单位且未委托代理时填一人】') + '\n'
              + '指南 §4.1.2 逐字要求发明人应当是个人，请求书中不得填写单位或者集体，以及人工智能名称'
                '（R20 读的就是上面那一行）；申请人是单位本来合法，同一个词写在下面那行不触发 R20。\n'
+             + '指南 §4.1.3.1 逐字要求中国申请人「应当填写其名称或者姓名、地址、邮政编码、'
+               '统一社会信用代码或者身份证件号码」——R25 判的就是这四件在底稿里各有一栏，'
+               '骨架期四栏都是占位，开箱读数是未判而不是合规；代码与身份证件号码两支任有一支即算齐。\n'
              + '指南 §4.1.5 逐字要求"所声明的代表人应当是申请人之一"——R24 比的就是 `- 代表人：` 与'
                '`- 申请人：` 两组行的值；骨架期两边都是占位，开箱读数是未判而不是合规。\n'
              + '## 专利代理\n'
@@ -310,7 +316,7 @@ def main(name, parent):
     fd_dir = os.path.join(root, '02_申请文件')
     with open(os.path.join(fd_dir, f'说明书_{name}.md'), 'w', encoding='utf8') as f:
         f.write(spec_doc(name))
-    with open(os.path.join(fd_dir, f'请求书著录项_{name}.md'), 'w', encoding='utf8') as f:
+    with open(os.path.join(fd_dir, f'{_c.REQUEST_DRAFT_NAME}_{name}.md'), 'w', encoding='utf8') as f:
         f.write(request_doc(name))
     td_dir = os.path.join(root, '01_交底书')
     with open(os.path.join(td_dir, f'交底书_{name}.md'), 'w', encoding='utf8') as f:

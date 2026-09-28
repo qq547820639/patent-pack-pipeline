@@ -192,8 +192,10 @@
   R23 联系人只能一人——§4.1.4 txt:723-725（＝PDF p23／印刷页 1-7）逐字「联系人只能填写一人」。
      同样数 `- 联系人：` 的行数；占位行 ⇒「R23 未判」；没那个字段 ⇒ 不适用不出注记
      （联系人只在"申请人是单位且未委托代理"时才要，本仓不知道本案走哪条路，就不替它假定）。
-     同句"填写联系人的还要同时填写通信地址、邮政编码和电话号码"（txt:724-725）今天不判：
-     那要跨字段做条件核对，且"地址栏是否含邮编／电话"仍是措辞判断，先把这条记在这儿不装判过。
+     同句"填写联系人的还要同时填写通信地址、邮政编码和电话号码"（txt:724-725）里的**邮政编码**
+     那一栏，第 52 轮由 R25 补上了（申请人侧四件齐）；**联系人的通信地址与电话仍不判**：
+     底稿只有一栏 `- 地址：`，分不清那是申请人的地址还是联系人的地址，要判得先给联系人单开栏——
+     栏名是房内口径不是法条措辞，先把这条记在这儿不装判过。
   R24 所声明的代表人应当是申请人之一——§4.1.5 txt:727-729（＝PDF p23／印刷页 1-7）逐字
      「请求书中另有声明的，所声明的代表人应当是申请人之一」。只在 `- 代表人：` 那一行写了声明时判，
      比对手是同份文书 `- 申请人：` 那些行的值（比较前只剥空白，与 R19 同一取法）。
@@ -201,6 +203,15 @@
      以第一署名申请人为代表人"是**法律自己的默认指定**，不是申请人的义务形状。
      代表人或申请人任一边还是占位 ⇒「R24 未判」；声明了代表人却一份文书里找不到申请人行 ⇒
      也走未判（比不成，不折成违规）。
+  R25 申请人那套著录项四件得各有其一——§4.1.3.1 txt:662-663（＝PDF p22／印刷页 1-6）逐字
+     「申请人是中国单位或者个人的，应当填写其名称或者姓名、地址、邮政编码、统一社会信用代码或者
+     身份证件号码」。判的是**本仓那件著录项底稿有没有给这四件各留一栏**（底稿少一栏＝请求书那一栏
+     没人负责抄，后果是 txt:667 的补正级）。适用域走**文件名字轴** `请求书著录项*`：交底书 §0 那行是
+     `- 申请人（建议）：`，不是同一栏，按正文轴会把交底书一起吃进来。
+     三态：整栏不存在 ⇒ 判红「缺栏」；栏在而值是占位 ⇒「R25 未判」；有真值 ⇒ 这一件判过（两者可并存）。
+     「统一社会信用代码或者身份证件号码」是**二选一**，两栏任有一栏即算齐，不硬要两栏都在。
+     同节"个人不得使用笔名""单位应当使用正式全称并与公章一致"（txt:664-667）明写不做——
+     本仓没有可比对的人名表与机构名录，与 R20 那半句、R15 第三支同一盲区。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -547,6 +558,72 @@ def representative_membership(path, lines):
         '§4.1.5 逐字「所声明的代表人应当是申请人之一」；位点报代表人那一行')
         for ln_no, val in reps if val.strip() not in named]
     return findings, []
+
+
+# ── R25 中国申请人的四件著录项在底稿里得各有其一（§4.1.3.1）──
+# §4.1.3.1 txt:662-663（＝PDF p22／印刷页 1-6，该页页眉 txt:659、页标行 txt:660「18 （1-6）」
+# 抄引文要跳过）逐字「申请人是中国单位或者个人的，应当填写其名称或者姓名、地址、邮政编码、
+# 统一社会信用代码或者身份证件号码」。
+# 判的是**本仓那件著录项底稿有没有给这四件各留一栏**：底稿是抄进 CNIPA 请求书表格的数据清单，
+# 少一栏就等于表格上那一栏没人负责填——这是补正级（txt:667「不符合规定的，审查员应当发出补正通知书」）。
+# 适用域走**文件名字轴**：只有 `请求书著录项*` 那件入域。正文轴不可用——交底书 §0 写的是
+# `- 申请人（建议）：`（带"（建议）"，本身就不是同一栏），拿它当申请人栏会把交底书一起吃进来。
+# 三态：四件里哪一件**整栏不存在** ⇒ 违规（缺栏）；栏在、值是占位 ⇒ 该件未判（填没填判不了）；
+# 有真值 ⇒ 这一件判过。两种结局可以同一份文书里并存。
+# "或者身份证件号码"是一支**二选一**：两栏任有一栏即算齐，不硬要两栏都在。
+# 同节另两句**明写不做**（txt:664-667）：个人不得用笔名／非正式姓名、单位要用正式全称并与公章一致——
+# 本仓没有可比对的人名表与机构名录，与 R20 那半句、R15 第三支同一盲区。
+REQUEST_DRAFT_NAME = '请求书著录项'
+POSTAL_FIELD = re.compile(r'^\s*-\s*邮政编码[:：]\s*(\S.*?)\s*$')
+POSTAL_FIELD_WRITE = '- 邮政编码：'
+CREDIT_UNIQ_FIELD = re.compile(r'^\s*-\s*统一社会信用代码[:：]\s*(\S.*?)\s*$')
+CREDIT_UNIQ_FIELD_WRITE = '- 统一社会信用代码：'
+CREDIT_ID_FIELD = re.compile(r'^\s*-\s*身份证件号码[:：]\s*(\S.*?)\s*$')
+
+
+def postal_field(value):
+    """邮政编码那一栏的写法（R25 数的是栏位有没有，值由 R25 走三态）。"""
+    return POSTAL_FIELD_WRITE + value
+
+
+def credit_code_field(value):
+    """统一社会信用代码那一栏的写法（个人改用「身份证件号码」栏，R25 两支任有一支即算齐）。"""
+    return CREDIT_UNIQ_FIELD_WRITE + value
+
+
+def is_request_draft(path):
+    """这件文书是不是请求书著录项底稿（文件名字轴，与 R16 的路径轴同一类选择）。"""
+    return REQUEST_DRAFT_NAME in os.path.basename(path)
+
+
+def applicant_bibliographic_set(path, lines):
+    """R25 四件齐：缺栏判红、占位未判。判据号写在 `Finding(` 字面里，理由见 `field_line_limits` 的注。"""
+    if not is_request_draft(path):
+        return [], []
+    apps = field_hits(APPLICANT_FIELD, lines)
+    if not apps:
+        return [], []
+    items = [
+        ('名称或者姓名', apps),
+        ('地址', field_hits(ADDRESS_FIELD, lines)),
+        ('邮政编码', field_hits(POSTAL_FIELD, lines)),
+        ('统一社会信用代码或者身份证件号码',
+         field_hits(CREDIT_UNIQ_FIELD, lines) + field_hits(CREDIT_ID_FIELD, lines)),
+    ]
+    miss = [label for label, hits in items if not hits]
+    ph = [label for label, hits in items
+          if hits and any(PLACEHOLDER_TOKEN.search(v) for _, v in hits)]
+    findings, notes = [], []
+    if miss:
+        findings.append(Finding(
+            'R25 申请人著录项缺栏', path, apps[0][0],
+            '底稿里有「- 申请人：」那一栏，却没有 ' + '、'.join(miss) + ' 那一栏——'
+            '§4.1.3.1（txt:662-663＝PDF p22／1-6）逐字「申请人是中国单位或者个人的，应当填写其'
+            '名称或者姓名、地址、邮政编码、统一社会信用代码或者身份证件号码」；'
+            '底稿少一栏＝请求书那一栏没人负责抄，位点报申请人那一行'))
+    if ph:
+        notes.append('R25 未判（' + '、'.join(ph) + ' 还是占位——填没填判不了，不折成合规）')
+    return findings, notes
 
 
 # ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
@@ -1123,6 +1200,11 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     rep_findings, rep_notes = representative_membership(path, lines)
     findings += rep_findings
     notes += rep_notes
+
+    # R25 申请人那套著录项四件齐：只在著录项底稿那件上判（文件名字轴）。
+    set_findings, set_notes = applicant_bibliographic_set(path, lines)
+    findings += set_findings
+    notes += set_notes
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。
