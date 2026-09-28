@@ -2711,6 +2711,130 @@ def test_r7_title_tiers():
     print('PASS r7_title_tiers（25/26 与 60/61 两根轴各成对 + 未核三态未折叠 + docx 通道照判）')
 
 
+def test_iron_r15_title_words():
+    """R15 发明名称的两支用词禁令（《专利审查指南》第一部分第一章 §4.1.1 除字数句外的另两句）。
+
+    每支都要"该开火"与"法条明写允许／法条没点名的那一侧不开火"两极齐全：只有一极的判据
+    与永真或永假在终端上同形。位点一律由本档自己数行号（绝对坐标），不采信门禁的相对说法。
+    最后一档"多个发明名称行"钉的是第 44 轮把 `break` 摘掉那一步——留着 break 时
+    "第一行合规、第二行藏违规"在两把尺子里一起消失，读数与真判过完全同形。
+    """
+    VAGUE_FIRE = [('钛支架及其他', '及其他'), ('化合物及其类似物', '及其类似物')]
+    VAGUE_SILENT = ['锁扣本体及其装配方法', '一种躯干框架的锁扣装置']
+    GENERIC_FIRE = ['一种化合物', '装置', '组合物和方法', '一种装置与方法']
+    GENERIC_SILENT = ['一种躯干框架的锁扣装置', '一种处理的方法',
+                      '用于支架的装置及方法和组合物',
+                      '一种系统']   # 下界档：「系统」不在指南逐字点名的四个笼统词里，本条不判
+
+    def named_doc(dirpath, fname, titles, body=()):
+        """按行序写一份交底书，返回 (路径, {名称: 本档自己数出的 1-based 行号})。"""
+        lines = ['# 专利技术交底书', '', '## 0. 著录项目（建议稿）']
+        nums = {}
+        for title in titles:
+            lines.append('   - 发明名称：' + title)
+            nums.setdefault(title, len(lines))
+        lines.extend(body)
+        p = os.path.join(dirpath, fname)
+        with open(p, 'w', encoding='utf8') as fobj:
+            fobj.write('\n'.join(lines) + '\n')
+        return p, nums
+
+    def r15_lines(r):
+        return [l for l in r.stdout.splitlines() if l.startswith('  FAIL R15')]
+
+    with tempfile.TemporaryDirectory() as d:
+        for title, word in VAGUE_FIRE:
+            p, nums = named_doc(d, '含糊%s.md' % word, [title])
+            r = run([PY, f'{S}/check_iron_rules.py', p])
+            fails = r15_lines(r)
+            assert_(r.returncode == 1 and len(fails) == 1,
+                    f'含糊词「{word}」那一支没按一条红判：rc={r.returncode} FAIL={fails}', r)
+            assert_('含糊词' in fails[0] and word in fails[0] and '4.1.1' in fails[0],
+                    f'含糊词的违规文案没点出命中的那个词或法源：{fails[0]}', r)
+            m = re.search(re.escape(p) + r':(\d+):', fails[0])
+            assert_(m and int(m.group(1)) == nums[title],
+                    f'R15 位点不对：判据给「{fails[0]}」，本档数到第 {nums[title]} 行', r)
+
+        for title in VAGUE_SILENT + GENERIC_SILENT:
+            p, _n = named_doc(d, '静默%s.md' % title[:6], [title])
+            r = run([PY, f'{S}/check_iron_rules.py', p])
+            fails = r15_lines(r)
+            assert_(r.returncode == 0 and not fails,
+                    f'「{title}」是法条允许侧或没点名的下界档，却被 R15 判红：FAIL={fails}', r)
+
+        for title in GENERIC_FIRE:
+            p, nums = named_doc(d, '笼统%s.md' % title[:6], [title])
+            r = run([PY, f'{S}/check_iron_rules.py', p])
+            fails = r15_lines(r)
+            assert_(r.returncode == 1 and len(fails) == 1,
+                    f'纯笼统「{title}」没判出恰好一条红：rc={r.returncode} FAIL={fails}', r)
+            assert_('纯笼统' in fails[0] and '笼统的词语' in fails[0],
+                    f'纯笼统的违规文案没引到法源那句（致使未给出任何发明信息）：{fails[0]}', r)
+            m = re.search(re.escape(p) + r':(\d+):', fails[0])
+            assert_(m and int(m.group(1)) == nums[title],
+                    f'R15 位点不对：判据给「{fails[0]}」，本档数到第 {nums[title]} 行', r)
+
+        # 适用域只在那一行字段：别处（正文／别的节）出现同样的词，本条不判
+        p, _n = named_doc(d, '域外.md', ['一种躯干框架的锁扣装置'],
+                          body=['', '## 1. 技术领域', '   本发明涉及钛支架及其他材料的连接。'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not r15_lines(r),
+                f'适用域漏到正文（含糊词出现在技术领域节却被判红）：{r15_lines(r)}', r)
+
+        # 多实例档：违规行在第二处时必须照样开火（旧实现 break 在第一处 ⇒ 这一档读成"核过了"）
+        ok_first, bad_first = VAGUE_FIRE[0][0], GENERIC_FIRE[0]
+        p, nums = named_doc(d, '两行先合规.md', ['一种躯干框架的锁扣装置', ok_first])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        fails = r15_lines(r)
+        assert_(r.returncode == 1 and len(fails) == 1 and f':{nums[ok_first]}:' in fails[0],
+                f'第二处发明名称的违规没被判出（判据停在第一处）：FAIL={fails} 应命中第 {nums[ok_first]} 行', r)
+        p, nums = named_doc(d, '两行先违规.md', [bad_first, '一种躯干框架的锁扣装置'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        fails = r15_lines(r)
+        assert_(r.returncode == 1 and len(fails) == 1 and f':{nums[bad_first]}:' in fails[0],
+                f'第一处违规、第二处合规时位点被挪到后一行：FAIL={fails}', r)
+        p, nums = named_doc(d, '两行长名.md', ['锁' * 25, '锁' * 61])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        r7 = [l for l in r.stdout.splitlines() if l.startswith('  FAIL R7')]
+        assert_(r.returncode == 1 and len(r7) == 1 and f':{nums["锁" * 61]}:' in r7[0],
+                f'R7 与 R15 同用一个循环，字段判据没跟着走到第二处：FAIL={r7}', r)
+
+        # 未核三态：整份没有那一行 ⇒ 一条 note 同时报 R7 与 R15，既不折成违规也不折成合规
+        p = os.path.join(d, '无字段.md')
+        with open(p, 'w', encoding='utf8') as fobj:
+            fobj.write('# 专利技术交底书\n\n## 0. 著录项目（建议稿）\n   - 申请人：某单位\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and '未找到「发明名称：」字段，R7 未核、R15 未核' in r.stdout
+                and not r15_lines(r),
+                f'缺字段时 R15 的未核三态被改动：rc={r.returncode} FAIL={r15_lines(r)}', r)
+
+        try:
+            from docx import Document
+        except ImportError:
+            SKIPPED.append('r15_title_words_docx')
+            print('PASS r15_title_words（两支各成对 + 适用域 + 多实例 + 未核三态；docx 档未跑——本机无 python-docx）')
+            return
+        for title, kind in ((GENERIC_FIRE[0], '纯笼统'), (VAGUE_FIRE[0][0], '含糊词')):
+            paras = ['专利技术交底书', '## 0. 著录项目（建议稿）', '   - 发明名称：' + title,
+                     '   - 申请人：某单位']
+            dx = os.path.join(d, 'Word%s.docx' % kind)
+            doc = Document()
+            for txt in paras:
+                doc.add_paragraph(txt)
+            doc.save(dx)
+            ln = next(i for i, txt in enumerate(paras, 1) if '发明名称' in txt)
+            r = run([PY, f'{S}/check_iron_rules.py', dx])
+            fails = r15_lines(r)
+            assert_(r.returncode == 1 and len(fails) == 1 and kind in fails[0],
+                    f'docx 通道上 R15「{kind}」那支没开火（抽取后那一行没吃上本条）：'
+                    f'rc={r.returncode} FAIL={fails}', r)
+            m = re.search(re.escape(dx) + r':(\d+):', fails[0])
+            assert_(m and int(m.group(1)) == ln,
+                    f'docx 通道 R15 位点不对：判据给「{fails[0]}」，按段落序数到第 {ln} 行', r)
+    print('PASS r15_title_words（含糊词／纯笼统两支各成对 + 下界档不判 + 适用域只在字段行 + '
+          '两处字段各自开火 + 未核三态 + docx 通道照判）')
+
+
 def test_battery_crash_attribution():
     """电池分类器自身的六条控制：崩溃与断言红不许互相冒充，且崩溃要能报出落点。
 
@@ -5132,7 +5256,7 @@ if __name__ == '__main__':
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_iron_spec_region_shapes, test_iron_spec_region_shapes_docx,
-             test_iron_r14_illustration, test_r7_title_tiers,
+             test_iron_r14_illustration, test_r7_title_tiers, test_iron_r15_title_words,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
