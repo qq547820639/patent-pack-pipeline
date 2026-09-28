@@ -5695,6 +5695,116 @@ def test_patent_figure():
     print('PASS patent_figure（F1–F6 各自成对 + 跨图同号 + 三态 + rc=2；真 matplotlib 出图）')
 
 
+POINTER_RE = re.compile(r'([A-Za-z0-9_./-]+\.(?:py|md|sh)):(\d+)(?:-(\d+))?')
+PTR_ID_RE = re.compile(r'`([A-Za-z_][A-Za-z_0-9]{3,})(?:\(\))?`')
+PTR_LIT_RE = re.compile(r'`([^`\n]{6,})`')
+
+
+def _pointer_findings(files):
+    """`x.py:N[-M]` 这类行指针必须落在它自己说的那件事上。files = {路径: 全文}。
+
+    四条判子（缺一不可，控制档逐条开火）：
+      不可解 —— 目标名在跟踪清单里找不到（裸名按 basename 解析，因为文档里常只写文件名）；
+      越界   —— 行号落在目标文件行数之外（"文件被删/被截"与"指针写错"在这里同形，都算错）；
+      符号   —— 引用句里用反引号点了标识符，却没有一个出现在所指区间内；
+      字面   —— 引用句里点了 ≥6 字且含中日韩的字面，其前 6 字不在所指区间内。
+    已知读不到的（本档如实报，不折算成"核过"）：既没点标识符也没点字面的指针
+    （例如只写"那一节"或指向章节号），今天只判前两条。
+    """
+    index = {}
+    for path in files:
+        index.setdefault(os.path.basename(path), path)
+        index[path] = path
+    out = []
+    for path, text in sorted(files.items()):
+        cache = {}
+        for i, line in enumerate(text.splitlines(), 1):
+            for m in POINTER_RE.finditer(line):
+                tgt, a, b = m.group(1), int(m.group(2)), m.group(3)
+                c = m.group(3)
+                z = index.get(tgt)
+                if z is None:
+                    out.append('%s:%d 指针目标不可解 %s' % (path, i, tgt))
+                    continue
+                if z not in cache:
+                    cache[z] = files[z].splitlines()
+                lines = cache[z]
+                last = int(c) if c else a
+                if not lines or not (1 <= a <= len(lines) and 1 <= last <= len(lines)):
+                    out.append('%s:%d 指针越界 %s:%s（文件 %d 行）'
+                               % (path, i, tgt, m.group(2), len(lines)))
+                    continue
+                span = '\n'.join(lines[a - 1:max(a, last)])
+                ids = PTR_ID_RE.findall(line)
+                if ids and not any(s in span for s in ids):
+                    out.append('%s:%d 指针落点没有它点名的符号 %s ← %r'
+                               % (path, i, tgt, ids))
+                    continue
+                lits = [x for x in PTR_LIT_RE.findall(line)
+                      if any(u'\u4e00' <= ch <= u'\u9fff' for ch in x)]
+                if lits and not any(x[:6] in span for x in lits):
+                    out.append('%s:%d 指针字面落点对不上 %s ← %r'
+                               % (path, i, tgt, lits[:2]))
+    return out
+
+
+def _pointer_corpus():
+    """按目录枚举，不用 `git ls-files`：变异电池把工作副本 copy 进临时目录时**不带 .git**，
+    依赖 git 的常驻会在电池里读成"取不到清单"，于是每支臂都误红（第 45 轮落地前查到的）。"""
+    out = {}
+    for d, exts in ((os.path.join(ROOT, 'scripts'), '.py'),
+                    (os.path.join(ROOT, 'tests'), '.py'),
+                    (os.path.join(ROOT, 'references'), '.md')):
+        if not os.path.isdir(d):
+            continue
+        for n in sorted(os.listdir(d)):
+            if n.endswith(exts):
+                out['%s/%s' % (os.path.basename(d), n)] = open(
+                    os.path.join(d, n), encoding='utf8').read()
+    for n in ('README.md', 'SKILL.md'):
+        fp = os.path.join(ROOT, n)
+        if os.path.isfile(fp):
+            out[n] = open(fp, encoding='utf8').read()
+    return out
+
+
+def test_doc_line_pointers():
+    files = _pointer_corpus()
+    hits = _pointer_findings(files)
+    n_ptr = sum(len(POINTER_RE.findall(t)) for t in files.values())
+    assert_(not hits, f'跟踪面里有 {n_ptr} 处行指针，其中 {len(hits)} 处对不上码: {hits[:6]}', None)
+
+    # 四条判子各配一支"必须开火"，再配一支"合规不许开火"——
+    # 全绿的普查若读不出这五种形状，它就不是判据，只是把现状抄了一遍。
+    def _cited(tgt, spec, tail):
+        # 指针形状自己拼：源码里不出现连续的「名字＋冒号＋数字」，
+        # 否则这条常驻会把自己档里的控制件扫成真违规（量具自引用那一类坑）。
+        return 'see `%s%s%s` %s\n' % (tgt, chr(58), spec, tail)
+
+    good = {'a.py': 'def target_thing():\n    pass\n',
+            'ok.md': _cited('a.py', '1', '即 `target_thing` 的定义')
+                   + _cited('a.py', '1-2', '即 `target_thing` 的区间写法')}
+    assert_(_pointer_findings(good) == [],
+            '合规指针被误判（含区间写法），这条判据在假红', None)
+    cases = {
+        '越界': {'a.py': 'def target_thing():\n    pass\n',
+                 'b.md': _cited('a.py', '9', '即 `target_thing`')},
+        '不可解': {'b.md': _cited('nope.py', '2', '即 `target_thing`')},
+        '符号不在所指行': {'a.py': 'def target_thing():\n    pass\n',
+                          'b.md': _cited('a.py', '2', '讲 `target_thing` 在别处')},
+        '字面不在所指行': {'a.py': 'first\nsecond\n',
+                          'b.md': _cited('a.py', '1', '那句 `third line 内容`')},
+    }
+    kinds = {'越界': '越界', '不可解': '不可解',
+             '符号不在所指行': '符号', '字面不在所指行': '字面'}
+    for label, fs in cases.items():
+        got = _pointer_findings(fs)
+        assert_(len(got) == 1 and kinds[label] in got[0],
+                f'控制档「{label}」没让判据开火（或连带误开火）: {got}', None)
+    print(f'PASS 文档↔脚本行指针体检（跟踪面 {n_ptr} 处指针全部落在被引符号／'
+          f'被引句子所在行；不可解／越界／符号／字面四档控制各自开火）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
@@ -5710,7 +5820,8 @@ if __name__ == '__main__':
              test_check_figure_labels, test_verify_search_report,
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
-             test_battery_crash_attribution, test_check_figures_input_guard]
+             test_battery_crash_attribution, test_check_figures_input_guard,
+             test_doc_line_pointers]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}
