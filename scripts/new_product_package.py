@@ -251,6 +251,34 @@ def spec_doc(name):
     return '\n'.join(parts) + '\n'
 
 
+def request_doc(name):
+    """02_申请文件 的请求书著录项底稿：抄进 CNIPA 请求书表格的数据清单，不是表格本身。
+
+    这件从前不在交付包里，于是三处法条要求只能一直挂"未判"：说明书/摘要的名称与请求书一致
+    （细则第二十条一款首句、指南 §4.1.1 首句）、摘要附图的图号写在请求书里（指南 §4.5.2）。
+    第 48 轮把它落进骨架，名称那一处由 R19 真判；其余各项今天只有底稿、没有判据，
+    留占位而不是编内容——编出来的申请人／地址一旦进交付物就是假事实。
+    """
+    parts = [f'# {DISCLOSURE_TITLE}\n',
+             '（本件是**著录项底稿**：供抄进 CNIPA 请求书表格的数据清单，不是官方表格本身。'
+             '首行与下面那一行字段由判据侧拼——R16 读首行、R19 把这一行与同包 01_交底书 §0 对成同一个值，'
+             '这里另抄一份字面，副本漂移就正好从这两行进来。）\n',
+             _c.title_field(DISCLOSURE_TITLE) + '\n',
+             # 细则第十九条一款把这九项逐个点名（行政法规库合并全文，逐字见 references/hard-rules.md）；
+             # 骨架期只有名称是判得动的，其余按法条顺序留标签，将来加判据时标签不必再造。
+             # 括号里只留"待填写＋一句话"（R2b 的 `待[^】]{0,60}` 上限 60 字，超了自家门禁就判红），
+             # 长一点的说明写在括号外的正文行里——那是给人看的，不是占位。
+             '## 申请人／发明人\n'
+             '【待填写：申请人名称或姓名、地址、邮编、信用代码；发明人姓名】\n'
+             '指南 §4.1.2 逐字要求发明人应当是个人，请求书中不得填写单位或者集体，以及人工智能名称。\n',
+             f'## {_cft.ABSTRACT_FIG_SECTION}\n'
+             '【待填写：有附图的案在此写明图号】\n'
+             '细则与指南把这一号落在请求书那一栏；本仓交付包没有官方表格，所以这一行就是仓内的落点。\n',
+             '## 其他著录项\n'
+             '【待填写：代理机构、优先权在先申请信息、申请文件与附加文件清单】\n']
+    return '\n'.join(parts)
+
+
 def main(name, parent):
     root = os.path.join(parent, f'{name}_专利交付包')
     for d in _rp.PKG_DIRS:      # 清单来自判据侧（P5），在这里另抄一份就是给漂移留活路
@@ -271,6 +299,8 @@ def main(name, parent):
     fd_dir = os.path.join(root, '02_申请文件')
     with open(os.path.join(fd_dir, f'说明书_{name}.md'), 'w', encoding='utf8') as f:
         f.write(spec_doc(name))
+    with open(os.path.join(fd_dir, f'请求书著录项_{name}.md'), 'w', encoding='utf8') as f:
+        f.write(request_doc(name))
     td_dir = os.path.join(root, '01_交底书')
     with open(os.path.join(td_dir, f'交底书_{name}.md'), 'w', encoding='utf8') as f:
         f.write(disclosure_doc(name))

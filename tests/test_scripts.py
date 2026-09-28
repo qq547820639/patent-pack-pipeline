@@ -382,11 +382,21 @@ def test_new_product_package():
         rn = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
         # 域内文书从 1 份变 2 份（第 45 轮）：`in_scope` 的正文那一根轴是 `FIG_SCOPE.search(text)`，
         # 而交底书 §4 就是「附图说明」节 ⇒ 骨架的交底书也入域。它那份的读数是 N1 **未判**
-        # （对照表是说明书的形式要求，交底书这类内部文书不硬判），不是多出一条红——
-        # 断言数的是"域内被真判的文书有几份"，骨架多一件入域文书，数字就得跟着新现实改。
-        assert_(rn.returncode == 0 and '实核附图标记文书 2 份' in rn.stdout
-                and '只有表头没有数据行' in rn.stdout,
-                '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态', rn)
+        # （对照表是说明书的形式要求，交底书这类内部文书不硬判），不是多出一条红。
+        # 第 48 轮又 +1：`02_申请文件/请求书著录项_*.md` 走的是**路径轴**（02_申请文件 即入域），
+        # 读数同样是 N1–N4 未判（这份文书既无附图说明节也无标记表，不判红）。
+        # 分母不在这里抄数字，改由判据自己的 `in_scope` 现算：骨架将来再加一件入域文书时，
+        # 这一档要么跟着新现实过，要么把"门禁的分母与它自己的适用域判据不一致"当场照出来。
+        scope_n = 0
+        for dp, _, fs in os.walk(d):
+            for f in sorted(fs):
+                if f.endswith('.md'):
+                    pth = os.path.join(dp, f)
+                    if cfl.in_scope(pth, open(pth, encoding='utf8').read()):
+                        scope_n += 1
+        assert_(rn.returncode == 0 and f'实核附图标记文书 {scope_n} 份' in rn.stdout
+                and scope_n >= 1 and '只有表头没有数据行' in rn.stdout,
+                f'骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态（现算域内 {scope_n} 份）', rn)
         # 交底书那一入域档必须停在"未判"，既不被折成违规（假红会挡住开箱），
         # 也不被折成"核过了"（那等于新增一张没人判的表）
         assert_('有附图说明节却没有图中标记说明对照表' not in rn.stdout,
@@ -411,18 +421,34 @@ def test_new_product_package():
         assert_(rt.returncode == 0 and 'T1–T3 未判' in rt.stdout,
                 '新生成的包在图↔文书对账上未走"未判"三态（判据把骨架误伤或误判成核过）', rt)
         os.remove(sp_path)
-        # 这一档原来数的是"删掉唯一的入域文书 ⇒ 域内零文书 ⇒ rc=2"。骨架有了交底书之后
-        # 说明书不再是唯一入域件：删掉它，域内还剩交底书那一份（读数 rc=0 + N1 未判），
-        # "域内零文书"那一极要把交底书也删掉才成立。两极都留着：一极证"还剩一份时不折成
-        # 已通过"，另一极证"真的零份时仍 rc=2 说未做任何判定"。
+        # 这一档原来数的是"删掉唯一的入域文书 ⇒ 域内零文书 ⇒ rc=2"。骨架有了交底书（第 45 轮）
+        # 与请求书著录项（第 48 轮）之后，说明书不再是唯一入域件：删掉它，域内还剩两份，
+        # 读数 rc=0 + 各自的未判注记；"域内零文书"那一极要把这两份也删掉才成立。
+        # 分母一律由判据自己的 `in_scope` 现算——抄死数字的档会在骨架每加一件文书时红一次，
+        # 而红的原因是"断言在钉旧现实"，不是门禁出问题。
+        def _scope_n():
+            n = 0
+            for dp, _, fs in os.walk(d):
+                for f in sorted(fs):
+                    if f.endswith('.md'):
+                        pth = os.path.join(dp, f)
+                        if cfl.in_scope(pth, open(pth, encoding='utf8').read()):
+                            n += 1
+            return n
         rn4 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
-        assert_(rn4.returncode == 0 and '实核附图标记文书 1 份' in rn4.stdout
-                and '交底书这类内部文书不硬判' in rn4.stdout,
-                f'删掉说明书底稿后域内还剩交底书，读数却不是"1 份 + N1 未判": {show(rn4)}', rn4)
+        assert_(rn4.returncode == 0 and f'实核附图标记文书 {_scope_n()} 份' in rn4.stdout
+                and _scope_n() >= 1 and '交底书这类内部文书不硬判' in rn4.stdout,
+                f'删掉说明书底稿后域内还剩 {max(_scope_n(), 0)} 份入域文书，'
+                f'读数却没按份数报（或没走 N1 未判）: {show(rn4)}', rn4)
         os.remove(td)
+        for dp, _, fs in os.walk(d):
+            for f in fs:
+                if f.startswith('请求书著录项') and f.endswith('.md'):
+                    os.remove(os.path.join(dp, f))
+        assert_(_scope_n() == 0, f'域内清零这一档的前提没成立，还剩 {_scope_n()} 份: ', None)
         rn5 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
         assert_(rn5.returncode == 2 and '没有一份落在附图标记适用域内' in rn5.stdout,
-                '删掉说明书与交底书两份入域文书后未走"未判定"三态', rn5)
+                '删掉说明书、交底书与请求书著录项三份入域文书后未走"未判定"三态', rn5)
     print('PASS new_product_package（五段目录+README+检索/交底书/EVT/法规/补全/说明书六份底稿，'
           '开箱即过 R/V/E/G/K/N 六门禁；交底书 §0 那行使 R7／R15 在生产包上第一次真判，'
           '§4 使 N 族域内文书为 2 份）')
@@ -6090,6 +6116,98 @@ def test_iron_r18_abstract_names_title():
     print('PASS iron_r18 摘要写明名称（合规极 + 红极带绝对坐标 + 无名称源未判 + 空块未判）')
 
 
+def test_iron_r19_title_across_docs():
+    """R19：同包内每一处「发明名称：」字段必须是同一个值（第 48 轮，载体＝请求书著录项底稿）。
+
+    这一条从前判不动，不是因为比对难，而是因为交付包里没有第二处名称：请求书是 CNIPA 的官方表格。
+    骨架把那件著录项底稿落进来之后，"抄进表格时把名称改了一个字"才第一次有了可红的位置。
+    """
+    cir = _cir_r16()
+
+    def pkg(tag, req_val, with_source=True):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        if with_source:
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E 专利技术交底书\n' + cir.title_field(R16_TITLE) + '\n')
+        spec = os.path.join(pk, '02_申请文件', '说明书_E2E.md')
+        open(spec, 'w', encoding='utf8').write(
+            '# ' + R16_TITLE + '\n\n## 说明书摘要\n本案发明名称为「' + R16_TITLE + '」。\n')
+        req = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        text = ('# ' + R16_TITLE + '\n\n' + cir.title_field(req_val) + '\n\n'
+                '## 摘要附图\n【待填写：有附图的案在此写明图号】\n')
+        open(req, 'w', encoding='utf8').write(text)
+        lineno = [i for i, ln in enumerate(text.splitlines(), 1) if '发明名称：' in ln]
+        assert_(len(lineno) == 1, '夹具里数不出著录项那一行，这一档空转', None)
+        return req, lineno[0]
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R19 ')]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 合规极：两处字段同值 ⇒ 整族不开火（这一极同时钉住"骨架开箱的副本不许自判红"）
+        req, _ = pkg('ok', R16_TITLE)
+        r = run([PY, f'{S}/check_iron_rules.py', '--all', d])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                '同值的两处发明名称被 R19 判红了', r)
+
+        # ② 红极 + 绝对坐标：著录项抄错一个字 ⇒ 恰好一条，位点落在被改的那一行
+        req, ln = pkg('drift', R16_TITLE[:-2] + '支架')
+        r = run([PY, f'{S}/check_iron_rules.py', req])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and f'请求书著录项_E2E.md:{ln}:' in got[0],
+                f'副本名称漂移没被 R19 点名或位点不在那一行: {show(r)}', r)
+
+        # ③ 权威源读不到 ⇒ 未判，不折成合规也不折成违规
+        req, _ = pkg('nosrc', R16_TITLE, with_source=False)
+        r = run([PY, f'{S}/check_iron_rules.py', req])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R19 未判' in r.stdout,
+                f'没有名称源时 R19 没走未判: {show(r)}', r)
+
+        # ④ 源自身永远静默：hub 是交底书，改 hub 不该让 hub 自己获罪——开火的只能是副本
+        req, _ = pkg('ok2', R16_TITLE)
+        td = os.path.join(d, 'ok2', '01_交底书', '交底书_E2E.md')
+        open(td, 'w', encoding='utf8').write(
+            '# E2E 专利技术交底书\n' + cir.title_field('一种躯干支架') + '\n')
+        r = run([PY, f'{S}/check_iron_rules.py', '--all', os.path.join(d, 'ok2')])
+        got = fired(r.stdout)
+        # 断言取的是**位点路径**而不是整行：那条 finding 的正文里本来就写着"同包 01_交底书 写的是…"，
+        # 拿"交底书"这三个字当缺席 needle 会被自己的解释文字挡住（永假）。
+        assert_(len(got) == 1 and '01_交底书/交底书_E2E.md:' not in got[0]
+                and '02_申请文件/请求书著录项_E2E.md:' in got[0],
+                f'改源时代罪的不是副本: {show(r)}', r)
+
+        # ⑥ 归一化极：值只差一个内部空白 ⇒ 不开火（这一极给"比较前只剥空白"那一句当牙）
+        req, _ = pkg('space', R16_TITLE[:-2] + ' ' + R16_TITLE[-2:])
+        r = run([PY, f'{S}/check_iron_rules.py', '--all', os.path.join(d, 'space')])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'名称只差一个空白却被 R19 判红（比对没剥空白）: {show(r)}', r)
+
+        # ⑤ docx 通道：著录项只有 Word 件时同判据（交付物常常只有 Word）
+        try:
+            import docx
+        except ImportError:
+            print('  note R19 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r19_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E 专利技术交底书\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.title_field(R16_TITLE).strip()[:-1] + '构')
+            vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            got = fired(r.stdout)
+            assert_(r.returncode == 1 and len(got) == 1 and '请求书著录项_E2E.docx' in got[0],
+                    f'Word 件里的名称漂移没被 R19 抓到: {show(r)}', r)
+    print('PASS iron_r19 发明名称跨文书一致（同值不开火 + 漂移带绝对坐标 + 无源未判 + 改源时副本代罪 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6152,7 +6270,8 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_check_figures_raster_three_state]
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs,
+             test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}
