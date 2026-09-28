@@ -6971,6 +6971,137 @@ def test_iron_r26_priority_statement_set():
           '自报区间含 R26 + docx 通道）')
 
 
+def test_iron_r27_divisional_parent_set():
+    """R27：声明了分案就得写明原申请的申请号和申请日（细则第四十九条末句）。
+
+    与 R26 同一形：**触发式**。`- 分案申请：` 那一行不在 ⇒ 不适用、连注记都不出——
+    绝大多数申请不是分案，硬凑这两栏等于替法条造义务。声明在且填实 ⇒ 两栏（原申请的申请号／
+    原申请的申请日）缺一栏即红**一条**，一条里把缺的都列齐。
+    法源两处：细则第四十九条末句（行政法规库合并全文）逐字「分案申请的请求书中应当写明
+    原申请的申请号和申请日」；指南 §5.1.1 txt:997-998（＝PDF p31／印刷页 1-15）同句，
+    并给出后果（申请日填错要补正、期满未补正视为撤回）。
+    """
+    cir = _cir_r16()
+    ITEMS = cir.divisional_item_fields()
+    DECL_PH = cir.divisional_field('【待填写：本案是分案申请时才填，不是就划去本节】')
+    DECL = cir.divisional_field('本案是 202510012345.6 的分案申请')
+    VALS = ('202510012345.6', '2025-03-14')
+    REAL = [write + v for (_l, write), v in zip(ITEMS, VALS)]
+    PH = [write + '【待填写：' + label + '】' for label, write in ITEMS]
+
+    def draft(tag, decl=DECL, items=None, name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n',
+                cir.applicant_field('甲有限公司') + '\n',
+                cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
+                cir.postal_field('310012') + '\n',
+                cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                '## 分案申请\n']
+        if decl is not None:
+            body.append(decl + '\n')
+        body += [ln + '\n' for ln in (items if items is not None else PH)]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        decl_ln = [i for i, ln in enumerate(text.splitlines(), 1)
+                   if ln.startswith('- 分案申请：')]
+        return p, decl_ln
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R27 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R27 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 声明还是占位 ⇒ 未判，两栏不比（注记要点名是**声明**这一路，不许和单栏占位同形）
+        p, _ = draft('ph', decl=DECL_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '分案声明还是占位' in judged(r.stdout)[0],
+                f'声明占位那档没走未判: {show(r)}', r)
+
+        # ② 声明＋两件真值 ⇒ 这条一句话都不出
+        p, _ = draft('full', decl=DECL, items=REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'两件齐却被说话: {show(r)}', r)
+
+        # ③ 漏一栏 ⇒ 违规、点名那一件、位点是声明那一行；R26 一并静默（夹具对本条轴以外为阴性）
+        p, dl = draft('miss1', decl=DECL, items=REAL[:1])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '原申请的申请日' in got[0]
+                and f'请求书著录项_E2E.md:{dl[0]}:' in got[0] and '第四十九条' in got[0]
+                and 'R26' not in r.stdout.split('合计违规')[0],
+                f'漏写原申请的申请日没按声明那一行点名: {show(r)}', r)
+
+        # ④ 一栏退回占位 ⇒ 未判里只列那一件
+        p, _ = draft('oneph', decl=DECL, items=[REAL[0], PH[1]])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '原申请的申请日' in judged(r.stdout)[0]
+                and '申请号' not in judged(r.stdout)[0],
+                f'单栏占位的未判没只列那一件: {show(r)}', r)
+
+        # ⑤ 没声明 ⇒ 不适用：不判红也不出注记（本案不是分案，法条那句管不着）
+        p, _ = draft('nodecl', decl=None, items=None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R27' not in r.stdout.split('合计违规')[0],
+                f'没声明分案却被要求凑齐原申请两栏: {show(r)}', r)
+
+        # ⑥ 两栏全无 ⇒ 一条红里列齐两件，且文法按件数走（"那几栏"不写成"那一栏"）
+        p, _ = draft('miss2', decl=DECL, items=[])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1
+                and all(lbl in got[0] for lbl, _w in ITEMS) and '那几栏' in got[0],
+                f'两栏全漏被拆成多条、漏列某件、或文法没跟着件数走: {show(r)}', r)
+
+        # ⑦ 文件名字轴：同样几行写进说明书那件必须静默
+        p, _ = draft('axis', decl=DECL, items=[], name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了: {show(r)}', r)
+
+        # ⑧ 自报区间含到 R27
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 27, f'自报区间没把 R27 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R27 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r27_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(DECL.strip())
+            doc.add_paragraph(REAL[0].strip())       # 只写申请号，申请日那一栏没有
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '原申请的申请日' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上漏写原申请的申请日却没被抓到: {show(r)}', r)
+    print('PASS iron_r27 分案申请原申请两栏（声明占位未判 + 两件齐静默 + 漏一栏点名带位点 + '
+          '单栏占位只列那一件 + 没声明不适用 + 两栏全漏只报一条 + 文件名字轴不误伤 + '
+          '自报区间含 R27 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -7034,7 +7165,7 @@ if __name__ == '__main__':
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
- test_iron_r26_priority_statement_set,
+ test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
