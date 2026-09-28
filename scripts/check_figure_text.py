@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""图↔文书对账 T1–T7：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
+"""图↔文书对账 T1–T8：把 hard-rules §5 最后两条纯承诺变成能实跑的判据——
 「图中数值与文书逐字一致」「不得出现交底书没有的部件/参数」——
 外加《专利法实施细则》点名却全仓无人核的图号对账（T4 缺图 / T5 图未被引用 / T6 跳号 / T7 标记号反向）。
 
@@ -30,9 +30,19 @@
      出处：《专利法实施细则》第二十一条（附图中未出现的附图标记不得在说明书文字部分中提及）。
      文书侧号集合只取对照表的标记列，不取正文里"名称+数字"的自由数字——那支抽取（N3 用的 NUM_RUN）
      会把"拉脱力 90N"的 90 当标记号，误伤面不可控；N3 敢用它是因为那里有表名做锚。
+  T8 摘要附图指定的图号必须是说明书附图之一。
+     出处：《专利审查指南》（2023）第一部分第一章 §4.5.2，本机留底 txt:860-868＝PDF p27／印刷页 1-11
+     （同页页眉 txt:845-846 抄引文要跳过），逐字「说明书有附图的，申请人应当指定其中一幅……作为
+     摘要附图，并在请求书中写明图号」＋「指定的摘要附图不是说明书附图之一的，审查员可以通知申请人补正」。
+     两句里判得动的只有后一句：包内写了图号，就拿它去对包里真实存在的图号，机械可比。
+     前一句的"指定"落在**请求书**上，本仓交付包没有请求书载体（同"发明名称与请求书一致"那条卡的地方），
+     所以"有附图却读不到任何指定"一律走未判注记，既不折成违规也不折成合规。
+     认法：命中「摘要附图」那一行，若它是标题行则再吃掉本节正文（止于下一个标题行）——
+     指认写在本行括注里（模板那种「## 摘要附图（指定图 X）」）或另起一行都读得到。
 
 三态：没有 figures 目录 ⇒ 未判（有的交付形态本就没有图）；
       图文件名认不出图号（主视图.png 之类）⇒ T4–T6 未判，不去猜号——猜错会把缺号判成不缺；
+      T8 同一条：拿猜出来的图号去对"指定的摘要附图"，对上了也不说明明，所以一并走未判；
       figures 里有 PNG 却没有 manifest ⇒ rc=2 说"图不是本库出的，无从对账"——
       这不是违规，但绝不是"核过了"。这一条与"有没有别的图带着清单"无关：
       12 张图里混 1 张手画 PNG，那张图上写着什么同样没人核过，包级对账就不完整。
@@ -64,6 +74,12 @@ _cfl = _load('check_figure_labels')
 # 图号从文件名侧的认法：只认「图N.png / 图 N.png」。认不出的（如 主视图.png、fig1.png）
 # 一律进"未判"注记而不是猜一个号——猜错会把 T4 的缺图判成不缺，方向上就是假绿。
 FIG_NUM_NAME = re.compile(r'^图\s*(\d+)$')
+
+# 摘要附图那一节的节名由判据侧持有：生成器另抄一份字面，改了这里而那份字面没跟着改，
+# T8 就在生产包上永远读不到指认——"未判"与"没判"在报告里同形，正是要防的那种漂移。
+ABSTRACT_FIG_SECTION = '摘要附图'
+ABSTRACT_FIG_NUM = re.compile(r'图\s*(\d+)(?!\d)')
+MD_HEAD_LINE = re.compile(r'^\s*#{1,6}\s')
 
 # 量值 token：可带比较符号、数字（含区间/小数）、紧跟的单位串。单位刻意只列常见工程写法，
 # 认不出的写法一律不判而不是判红——宁可漏报，也不拿一张永远缺一种写法的豁免表去追。
@@ -185,6 +201,77 @@ def number_reconcile(root, docs):
     return bad, notes, seen
 
 
+def abstract_figure_windows(text):
+    """命中「摘要附图」的行 → [(行号, 参与判定的窗口文本)]。
+
+    窗口只多取"本节正文"这一层：指认可能写在本行的括注里（模板那种「## 摘要附图（指定图 X）」），
+    也可能另起一行。不往标题层级外扩——扩到下一节就把"摘要附图：图2"和下一节的
+    "图3 为……"混成一句，误伤面从此由文档排版决定。
+
+    已经被某个标题窗口吃掉的行不再单独开一处判定：正文里"……写明摘要附图图号"这种**谈到**
+    这四个字的句子会命中同一子串，各算一处就把一处指认报成两处（计数与位点同时虚胖）。
+    """
+    out = []
+    lines = text.splitlines()
+    consumed = set()
+    for i, ln in enumerate(lines):
+        if ABSTRACT_FIG_SECTION not in ln or i in consumed:
+            continue
+        win = [ln]
+        if MD_HEAD_LINE.match(ln):
+            j = i + 1
+            while j < len(lines) and not MD_HEAD_LINE.match(lines[j]):
+                win.append(lines[j])
+                consumed.add(j)
+                j += 1
+        out.append((i + 1, '\n'.join(win)))
+    return out
+
+
+def abstract_figure(root, docs):
+    """T8：摘要附图指定的图号 ↔ 说明书里真实存在的图号。
+
+    返回值与 T4–T6 同形状 (违规, 未判说明, 实判判据集合)：只有**读到了图号**才把 T8
+    记进实判，其余各档（无指定／有节无号／图号认不出）一律只出注记。
+    """
+    bad, notes, seen = [], [], set()
+    desig, shell = [], []
+    for path, text in docs:
+        for lineno, win in abstract_figure_windows(text):
+            nums = ABSTRACT_FIG_NUM.findall(win)
+            if nums:
+                desig += [(path, lineno, n) for n in nums]
+            else:
+                shell.append((path, lineno))
+    present, unnamed = present_figures(root)
+    named = '、'.join(os.path.basename(p) for p in unnamed[:3]) + (' 等' if len(unnamed) > 3 else '')
+    if unnamed:
+        # 认不出号的图也算"有图"，但拿猜出来的号去对指定，对上了也不说明明——与 T4–T6 同口径。
+        notes.append(f'{root}: 图文件名认不出图号（{named}）→ T8 未判（不折成合规）')
+        return bad, notes, seen
+    if not desig and not shell:
+        if present:
+            notes.append(f'{root}: 有 {len(present)} 幅说明书附图，包内却读不到任何摘要附图指定'
+                         f' → T8 未判（指南 §4.5.2 要图号写在请求书里，本包没有请求书载体，'
+                         f'不折成违规也不折成合规）')
+        else:
+            notes.append(f'{root}: 没有说明书附图，也没有摘要附图指定 → T8 不适用'
+                         f'（指南 §4.5.2 那句的主语是"说明书有附图的"）')
+        return bad, notes, seen
+    if desig:
+        seen.add('T8')
+    for path, lineno, n in desig:
+        if n not in present:
+            got = '、'.join('图' + x for x in sorted(present, key=int)) if present else '一张图都没有'
+            bad.append(f'{path}:{lineno}: 摘要附图指定了 图{n}，说明书附图里没有这张（{got}）→ T8'
+                       f'（指南 §4.5.2：指定的摘要附图不是说明书附图之一的，应当补正）')
+    if shell:
+        where = '、'.join(f'{p}:{l}' for p, l in shell[:3])
+        notes.append(f'{root}: {len(shell)} 处「摘要附图」读不出图号（{where}）'
+                     f' → T8 未判（写了节不等于指定了图，不折成合规）')
+    return bad, notes, seen
+
+
 def label_table_map(docs):
     """从文书里收集「标记｜名称」对照：只认 N 门禁那一族表（表头同时有标记与名称列）。"""
     m, found = {}, False
@@ -230,6 +317,12 @@ def check_package(root, docs=None):
     bad += r_bad
     notes += r_notes
     seen |= r_seen
+    # T8 也放在这一段：它只需要文书与图文件，不需要 manifest，所以必须排在
+    # 下面两个"没有清单就提前收尾"的 return 之前——排在后面就等于有手画图时它不判。
+    t8_bad, t8_notes, t8_seen = abstract_figure(root, docs)
+    bad += t8_bad
+    notes += t8_notes
+    seen |= t8_seen
     if not mans:
         if orphan:
             return bad, notes, seen, fatal
@@ -308,7 +401,7 @@ def check_package(root, docs=None):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T7')
+    ap = argparse.ArgumentParser(description='图 ↔ 文书对账 T1–T8')
     ap.add_argument('targets', nargs='+', help='交付包目录（含 figures/ 与 01/02 段文书）')
     args = ap.parse_args()
 
@@ -335,7 +428,7 @@ def main():
         total += len(bad)
         fatal_all = fatal_all or fatal
         print(f'{root}: 违规 {len(bad)}｜实判判据 {len(seen)} 条')
-    print(f'合计违规 {total}（规则 T1–T7，判据见脚本 docstring）；实判 {judged} 个包')
+    print(f'合计违规 {total}（规则 T1–T8，判据见脚本 docstring）；实判 {judged} 个包')
     if total:
         # 真找到的违规不许被"对账不完整"降级成环境档：先报违规，再补一句不完整在哪
         if fatal_all:

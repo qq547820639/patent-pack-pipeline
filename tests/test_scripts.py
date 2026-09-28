@@ -5058,7 +5058,7 @@ def test_check_claims():
 
 
 def test_figure_text_channel():
-    """图↔文书对账 T1–T7：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
+    """图↔文书对账 T1–T8：清单由画图那段代码自己产出，判据读的是产出而不是手抄登记表。
 
     两半都要验：① `write_manifest` 写了什么（不依赖 matplotlib，否则这条断言会随环境
     一起 SKIP，判据只剩消费侧有牙）；② 门禁对真包开不开火、三态走不走得对。"""
@@ -5247,6 +5247,62 @@ def test_figure_text_channel():
         assert_(r.returncode == 0 and 'T4–T6 未判' in r.stdout and '主视图.png' in r.stdout,
                 f'文件名认不出图号时被折成合规或违规（不猜号才对）: {show(r)}', r)
 
+        # ---- T8 摘要附图对账（第 47 轮，指南第一部分第一章 §4.5.2＝PDF p27／印刷页 1-11） ----
+        # 法条两句里判得动的只有「指定的摘要附图不是说明书附图之一的」那半句；
+        # "应当指定并在请求书中写明图号"那一半没有请求书载体，一律走未判，不许折成违规。
+        d8ok = os.path.join(d, 't8_ok')
+        make(d8ok, docs=DOCS.replace('## 附图说明', '## 摘要附图（指定图 1）\n\n## 附图说明'))
+        r = run([PY, f'{S}/check_figure_text.py', d8ok])
+        assert_(r.returncode == 0 and '→ T8' not in r.stdout.replace('T8 未判', '')
+                and '实判判据 8 条' in r.stdout,
+                f'指定的摘要附图确是说明书附图之一，却没被 T8 判为合规或没进覆盖账: {show(r)}', r)
+
+        d8bad = os.path.join(d, 't8_bad')
+        make(d8bad, docs=DOCS.replace('## 附图说明', '## 摘要附图（指定图 7）\n\n## 附图说明'))
+        r = run([PY, f'{S}/check_figure_text.py', d8bad])
+        assert_(r.returncode == 1 and '摘要附图指定了 图7' in r.stdout and '→ T8' in r.stdout,
+                f'指定的摘要附图不在说明书附图号里，T8 未开火: {show(r)}', r)
+        assert_('01_交底书/交底书.md:2:' in r.stdout.replace(os.sep, '/'),
+                f'T8 位点没落在被引那一行文书上: {show(r)}', r)
+
+        d8shell = os.path.join(d, 't8_shell')
+        make(d8shell, docs=DOCS.replace('## 附图说明', '## 摘要附图\n【待填写】\n\n## 附图说明'))
+        r = run([PY, f'{S}/check_figure_text.py', d8shell])
+        assert_(r.returncode == 0 and '1 处「摘要附图」读不出图号' in r.stdout
+                and '实判判据 7 条' in r.stdout,
+                f'有节无号被折成合规（未判要点名处数、且不进覆盖账）: {show(r)}', r)
+        # 正文里再"谈到"这四个字（写明摘要附图图号）不能再算一处：窗口吃掉节内正文之后
+        # 还逐行开判，就会把一处指认报成两处，计数与位点同时虚胖。
+        d8dup = os.path.join(d, 't8_dup')
+        make(d8dup, docs=DOCS.replace('## 附图说明',
+             '## 摘要附图\n【待填写：有附图的案在此写明摘要附图图号】\n\n## 附图说明'))
+        r = run([PY, f'{S}/check_figure_text.py', d8dup])
+        assert_('2 处「摘要附图」' not in r.stdout and '1 处「摘要附图」' in r.stdout,
+                f'节内正文又出现该字样，被重复计成两处判定: {show(r)}', r)
+
+        d8none = os.path.join(d, 't8_none')
+        make(d8none)
+        r = run([PY, f'{S}/check_figure_text.py', d8none])
+        assert_(r.returncode == 0 and '包内却读不到任何摘要附图指定' in r.stdout
+                and '不折成违规' in r.stdout,
+                f'有附图却无指定被判红（请求书不在包内，只能未判）: {show(r)}', r)
+
+        d8nofig = os.path.join(d, 't8_nofig')
+        os.makedirs(os.path.join(d8nofig, '01_交底书'))
+        open(os.path.join(d8nofig, '01_交底书', '交底书.md'), 'w', encoding='utf8'
+             ).write('# 交底书\n无图。\n')
+        r = run([PY, f'{S}/check_figure_text.py', d8nofig])
+        assert_(r.returncode == 0 and 'T8 不适用' in r.stdout,
+                f'没有说明书附图时 T8 没走不适用（法条那句的主语是"说明书有附图的"）: {show(r)}', r)
+
+        d8un = os.path.join(d, 't8_unnamed')
+        make(d8un, docs=DOCS.replace('## 附图说明', '## 摘要附图（指定图 1）\n\n## 附图说明'),
+             pngs=('主视图',), manifest_for='主视图')
+        r = run([PY, f'{S}/check_figure_text.py', d8un])
+        assert_(r.returncode == 0 and 'T8 未判' in r.stdout
+                and '说明书附图里没有这张' not in r.stdout,
+                f'图文件名认不出号时拿猜出来的号去对指定（该未判而不是判红）: {show(r)}', r)
+
         # ---- docx 通道：交付物只有 Word 件时 T 必须照判 ----
         # 第十八轮给 E/G/K/N 四把按列读的门禁接上 docx 通道，T 是第二十轮新立的，
         # 若不接就出现"文书池只认 md"：真交付件（Word）里的对照表与数值读不到，
@@ -5295,7 +5351,7 @@ def test_figure_text_channel():
             rw4 = run([PY, f'{S}/check_figure_text.py', w_evil])
             assert_(rw4.returncode == 2 and 'Traceback' not in rw4.stdout + rw4.stderr,
                     f'读不动的 docx 未走 rc=2（或未把 traceback 当违规）: {show(rw4)}', rw4)
-    print('PASS check_figure_text（清单形状 + T1–T7 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
+    print('PASS check_figure_text（清单形状 + T1–T8 各成对 + 归一范围钉死 + 三档三态 + Word-only 通道）')
 
 
 def test_check_figures_colour():

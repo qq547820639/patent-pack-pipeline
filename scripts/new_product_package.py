@@ -29,6 +29,7 @@ def _load(name):
 _c = _load('check_iron_rules')
 _dc = _load('check_design_completion')
 _nl = _load('check_figure_labels')
+_cft = _load('check_figure_text')        # 摘要附图那一节的节名由 T8 那一侧持有，这里不另抄字面
 _rp = _load('rebuild_package')          # P5–P7 的判据侧持有五段清单，这里不另抄一份
 PRODUCTION_CLAUSE = _c.PRODUCTION_CLAUSE
 
@@ -223,6 +224,11 @@ def spec_doc(name):
         # 另外两件留通用占位——与背景技术那节带上 R9 逐字声明是同一类"节内容跟着判据走"。
         if s == '说明书摘要':
             parts.append(f'## {s}\n{ABSTRACT_SEED}')
+            # 摘要附图那一节紧接摘要之后（templates §2 的顺序）：指南 §4.5.2 要"说明书有附图的
+            # 应当指定其中一幅"，而骨架期一张图都还没有，所以这里**只立节不给号**——给了号
+            # T8 就当场判红自家骨架（指定的号根本不在附图里），不给号它走"未判"并点名成因。
+            parts.append(f'## {_cft.ABSTRACT_FIG_SECTION}\n'
+                         '【待填写：有附图的案在此写明图号，并在请求书中同步写明】')
         else:
             parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
     # 细则第二十条一款那五节同样由判据侧持有（P12 与生成器一份，两端各抄迟早漂）。
