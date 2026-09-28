@@ -104,19 +104,47 @@ def colour_declaration(root):
     return hits, unreadable
 
 
+# §4.3（《专利审查指南》2023 第一部分第一章，本机留底 txt:834-836＝PDF p26／印刷页 1-10）逐字：
+# 「流程图、框图应当作为附图，并应当在其框内给出必要的文字和符号。一般不得使用照片作为附图，
+#  但特殊情况下，例如，显示金相结构、组织细胞或者电泳图谱时，可以使用照片贴在图纸上作为附图。」
+# 本仓的线条图判据 C1–C5 只读得动 PNG，而从文件本身（扩展名也好、像素也好）判不出「这是不是照片」，
+# 所以非 PNG 位图一律走**未判点名**。从前它们连点名都没有：`check_dir` 只收 `.png`，
+# 于是 jpg／bmp／tif 这类附图文件在这道门禁里静默消失——「看不见」被写成「没有」；
+# 同时 C3 又拿「只有 png」的份数去比 docx 的 media 数，同一件事在两处一个漏判、一个假红。
+RASTER_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.gif', '.webp')
+LINE_ART_EXT = '.png'
+
 def check_dir(d, allow_color=False, stats=None, unreadable=0):
     # 外观设计专利使用渲染图/照片（允许彩色），线条图规则不适用
     if 'views' in d or '外观设计' in d:
         print(f"{d}: 外观设计视图目录，跳过线条图像素规则")
         return 0
-    figs = []
+    figs, other = [], []
     for dp, _, fs in os.walk(d):
         for f in fs:
-            if f.lower().endswith('.png'):
+            low = f.lower()
+            if low.endswith(LINE_ART_EXT):
                 figs.append(os.path.join(dp, f))
+            elif low.endswith(RASTER_EXTS):
+                other.append(os.path.join(dp, f))
+    for f in sorted(other):
+        print(f'  note {f}: 非 PNG 位图（扩展名 {os.path.splitext(f)[1]}）→ C1–C5 未判；'
+              f'§4.3 一般不得使用照片作为附图，而这条判据从文件本身读不出是不是照片'
+              f'（金相／组织细胞／电泳图谱那类是法条自己允许的特例）')
+    if other and stats is not None:
+        stats['unjudged'] = stats.get('unjudged', 0) + len(other)
     bad = []
     for f in figs:
-        reasons, colored, _ = verdict(f, allow_color)
+        try:
+            reasons, colored, _ = verdict(f, allow_color)
+        except Exception as e:
+            # 读不动的位图**不能崩**（从前一张坏 PNG 直接把整道门禁打到 traceback，
+            # 退码落成 1——而 1 在本仓是"判出真违规"的专用位），也不能静默跳过：
+            # 点名成未判，并记进覆盖账，让"这份包的图有没有被看过"这一问题有答案。
+            print(f'  note {f}: 位图读不动（{type(e).__name__}: {str(e)[:60]}）→ C1–C5 未判')
+            if stats is not None:
+                stats['unread_images'] = stats.get('unread_images', 0) + 1
+            continue
         if stats is not None:
             stats['images'] += 1
             if colored > 0:
@@ -128,7 +156,11 @@ def check_dir(d, allow_color=False, stats=None, unreadable=0):
                                  f'若本包确已写明请求保护色彩，请先修好该文书）']
         if reasons:
             bad.append((f, reasons, os.path.getsize(f)))
-    print(f"{d}: {len(figs)} 幅图, 违规 {len(bad)}")
+    unjudged = len(other) + (stats.get('unread_images', 0) if stats is not None else 0)
+    # 前半句逐字保持原样：常驻档里有按 `'0 幅图' in stdout` 写的缺席断言，
+    # 改它的措辞等于让那条断言去验一个生产上不再出现的形状（本仓为此红过一次）。
+    print(f"{d}: {len(figs)} 幅图, 违规 {len(bad)}"
+          + (f"; 另有 {unjudged} 张位图未判（非 PNG 或读不动）" if unjudged else ''))
     for f, reasons, sz in bad:
         print(f"  FAIL {f} 字节={sz} -> {'; '.join(reasons)}")
     return len(bad)
@@ -142,7 +174,9 @@ def check_docx_media(d):
     figdir = os.path.join(d, 'figures')
     if not os.path.isdir(figdir):
         return bad
-    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith('.png')])
+    # 分母含全部位图：从前只数 png，于是包里放一张 .jpg 附图就会让 C3 报「media 比 figures 多」——
+    # 那是假红（图确实在包里，只是不被线条图判据读得动；未判由 check_dir 那侧点名）。
+    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith(RASTER_EXTS)])
     for f in sorted(os.listdir(d)):
         if not f.endswith('.docx'):
             continue

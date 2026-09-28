@@ -5321,7 +5321,11 @@ def test_check_figures_colour():
 
         undecl = build(os.path.join(d, 'undeclared'), NONE, colour=False)
         r = run([PY, f'{S}/check_figures.py', undecl])
-        assert_(r.returncode == 0 and 'C5' not in r.stdout,
+        # 缺席断言只数违规行（本族真输出形状是 `  FAIL <路径> 字节=… -> C5 …`）：
+        # 从前这里写 `'C5' not in stdout`，而门禁的自述行只要提到判据号就把它挡死——
+        # 第 46 轮加"非 PNG 位图未判"那句时正是这样撞上的（自己复述自己＝永真缺席）。
+        c5 = [ln for ln in r.stdout.splitlines() if ln.startswith('  FAIL') and 'C5' in ln]
+        assert_(r.returncode == 0 and not c5,
                 f'没声明色彩保护却被 C5 判红（第三十条只约束声明过的申请）: {show(r)}', r)
 
         nodir = build(os.path.join(d, 'undeclared_colour'), NONE)
@@ -6017,6 +6021,52 @@ def test_iron_r18_abstract_names_title():
     print('PASS iron_r18 摘要写明名称（合规极 + 红极带绝对坐标 + 无名称源未判 + 空块未判）')
 
 
+def test_check_figures_raster_three_state():
+    """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
+
+    从前 `check_dir` 只收 `.png`：包里放一张 `图2.jpg` 时它既不被判、也不被报——"看不见"被写成"没有"；
+    同一件事在 C3 那一侧又拿"只有 png"的份数去比 docx 的 media 数，成一个假红。
+    还有一支顺带修的是"坏 PNG 把整道门禁打成 traceback、退码落成 1"——1 在本仓是判出真违规的专用位。
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        SKIPPED.append('check_figures_raster')
+        print('SKIP check_figures 位图三态（缺 Pillow，这一档未跑）')
+        return
+    with tempfile.TemporaryDirectory() as d:
+        def build(tag, extra=()):
+            root = os.path.join(d, tag)
+            figs = os.path.join(root, 'figures')
+            os.makedirs(figs, exist_ok=True)
+            im = Image.new('L', (60, 60), 255)
+            for x in range(6, 50):
+                im.putpixel((x, 30), 0)          # 一张合规的黑白线条图
+            im.save(os.path.join(figs, '图1.png'))
+            for name in extra:
+                open(os.path.join(figs, name), 'wb').write(b'NOTAREALIMAGE')
+            return root
+
+        # ① 非 PNG 位图 ⇒ 点名未判，且不折成违规（rc 仍 0）
+        r = run([PY, f'{S}/check_figures.py', build('jpg', ('图2.jpg', '图3.bmp'))])
+        notes = [ln for ln in r.stdout.splitlines() if '未判' in ln and '.jpg' in ln]
+        assert_(r.returncode == 0 and len(notes) == 1
+                and '一般不得使用照片作为附图' in notes[0],
+                f'非 PNG 位图没被点名成未判: {show(r)}', r)
+
+        # ② 合规极（must-not-fire）：只有 png ⇒ 不该出现那句未判
+        r = run([PY, f'{S}/check_figures.py', build('png')])
+        assert_(r.returncode == 0 and '未判' not in r.stdout,
+                f'只有 PNG 的包被报了两张未判（这一档在假红）: {show(r)}', r)
+
+        # ③ 坏 PNG ⇒ 未判点名，且**不许崩**：崩溃会把退码落成 1（本仓 1＝判出真违规的专用位）
+        r = run([PY, f'{S}/check_figures.py', build('bad', ('坏图.png',))])
+        assert_(r.returncode == 0 and '位图读不动' in r.stdout
+                and 'Traceback' not in r.stderr and 'Traceback' not in r.stdout,
+                f'读不动的 PNG 没走未判点名（或干脆崩了）: {show(r)}', r)
+    print('PASS check_figures 位图三态（非 PNG 未判点名 + 只有 png 不开火 + 坏 PNG 不崩不判红）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
@@ -6033,7 +6083,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title]
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}

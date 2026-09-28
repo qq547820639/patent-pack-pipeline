@@ -585,6 +585,14 @@ MUTS = {
          "        notes.append('同包 01_交底书 里读不到发明名称字段，R18 未判')",
          "        notes.append('同包 01_交底书 里读不到发明名称字段，R18 未核')",
          'R18 没有名称源时没走未判'),
+        # ── 第 46 轮 #33：§4.3 照片禁令判不动的那一面要点名成未判，不能静默消失 ──
+        ('非 PNG 位图的未判点名整支关掉（jpg 又变成看不见＝被写成没有）', 'scripts/check_figures.py',
+         '            elif low.endswith(RASTER_EXTS):', '            elif False:',
+         '非 PNG 位图没被点名成未判'),
+        ('读不动的 PNG 不再兜异常（一张坏图把整道门禁打成 traceback、退码落成 1）', 'scripts/check_figures.py',
+         "        try:\n            reasons, colored, _ = verdict(f, allow_color)\n        except Exception as e:",
+         "        try:\n            reasons, colored, _ = verdict(f, allow_color)\n        except ZeroDivisionError as e:",
+         '读不动的 PNG 没走未判点名'),
         # ── 第 44 轮 #25（那句"未识别到节标题样式 → …（按节判的判据）未核"的号名单改为源码现推）两支 ──
         # ① 把常驻那把**尺子**退回收银：`roster_diff` 不再 AST 现推、直接抄字面常量当读数 ⇒ 双向差集永空，
         #   原告是它自己的牙齿（同档两份最小假脚本），不必等真语料哪天多出一条按节判的判据。
@@ -614,9 +622,11 @@ MUTS = {
          '        total_bad += len(check_docx_media(d))', '        _printed_only = check_docx_media(d)',
          'docx 丢图未计入退出码'),
         ('C3 只查目录里第一份 docx（历史缺陷）', CF,
-         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith('.png')])\n"
+         # 第 46 轮 #33 把这一行的分母从「只有 png」换成「全部位图」，两支臂的锚点跟着重指；
+         # 锚点由被改文件本体取出，不手抄旧形状——抄了就是一支永远 PROBE-FAIL 的死臂。
+         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith(RASTER_EXTS)])\n"
          "    for f in sorted(os.listdir(d)):\n        if not f.endswith('.docx'):",
-         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith('.png')])\n"
+         "    nfig = len([x for x in os.listdir(figdir) if x.lower().endswith(RASTER_EXTS)])\n"
          "    for f in [x for x in sorted(os.listdir(d)) if x.endswith('.docx')][:1]:\n        if False:",
          '同目录第二份 docx 丢图未被逐个核对'),
         ('C3 丢图判据关闭', CF, '        else:\n            print(f"  FAIL {f}: media=',
