@@ -741,7 +741,7 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
         # 不能反映技术方案要点的，应当通知申请人补正」。
         # 只有"名称"这一件判得动：它是可比对的字符串（源＝同包交底书那一行字段，与 R16 同一个取法）。
         # 「所属技术领域／技术问题／要点／用途」是内容判断，做不成判据——本仓不拿关键词匹配冒充判定，
-        # 那三条留在 #29③ 里等一个能判的形状。
+        # 那三条按裁决收口（第 47 轮，原 #29③）：出现可比对的载体才重开，例如摘要里另立"技术领域"字段行。
         filled = [k for k, x in enumerate(r17_body) if x.strip()]
         if not filled:
             notes.append('摘要块是空的，R18 未判（空块不折成"没写名称"的违规）')
