@@ -7102,6 +7102,159 @@ def test_iron_r27_divisional_parent_set():
           '自报区间含 R27 + docx 通道）')
 
 
+def test_iron_r28_deposit_particulars_set():
+    """R28：声明了生物材料保藏就得写明那五件（细则第二十七条三款(三)）。
+
+    法源两支各引各的：细则第二十七条(三)（读自行政法规库合并全文）逐字
+    「涉及生物材料样品保藏的专利申请应当在请求书和说明书中写明该生物材料的分类命名(注明拉丁文名称)、
+    保藏该生物材料样品的单位名称、地址、保藏日期和保藏编号；申请时未写明的，应当自申请日起4个月内补正；
+    期满未补正的，视为未提交保藏」；指南 §5.2.1(2) txt:1071-1073（＝PDF p33／印刷页 1-17）同句。
+    形状与 R26·R27 同一族：**触发式**（没声明保藏 ⇒ 不适用、连注记都不出），
+    外加一支同句括号里的"注明拉丁文名称"——分类命名填了实值却读不出任何拉丁字母串才红，
+    方向上不会假红（拉丁文名称只能用拉丁字母写）。
+    """
+    cir = _cir_r16()
+    ITEMS = cir.deposit_item_fields()
+    DECL_PH = cir.deposit_field('【待填写：本案涉及新生物材料保藏时才填，不涉及就划去本节】')
+    DECL = cir.deposit_field('本案涉及新的生物材料样品保藏')
+    VALS = ('大肠杆菌 Escherichia coli', '中国典型培养物保藏中心（CCTCC）',
+            '武汉市武昌区八一路 299 号', '2025-02-18', 'CCTCC NO:M 20251234')
+    REAL = [write + v for (_l, write), v in zip(ITEMS, VALS)]
+    PH = [write + '【待填写：' + label + '】' for label, write in ITEMS]
+    NO_LATIN = ITEMS[0][1] + '大肠杆菌'
+
+    def draft(tag, decl=DECL, items=None, name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n',
+                cir.applicant_field('甲有限公司') + '\n',
+                cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
+                cir.postal_field('310012') + '\n',
+                cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                '## 生物材料保藏\n']
+        if decl is not None:
+            body.append(decl + '\n')
+        body += [ln + '\n' for ln in (items if items is not None else PH)]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        lines = text.splitlines()
+        pos = {pre: [i for i, ln in enumerate(lines, 1) if ln.startswith(pre)]
+               for pre in [cir.DEPOSIT_FIELD_WRITE[:-1]] + [w[:-1] for _l, w in ITEMS]}
+        return p, pos
+
+    def fired(out, head='  FAIL R28 生物材料保藏缺伴栏'):
+        return [ln for ln in out.splitlines() if ln.startswith(head)]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R28 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 声明还是占位 ⇒ 未判，五栏不比（注记要点名是**声明**这一路）
+        p, _ = draft('ph', decl=DECL_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '保藏声明还是占位' in judged(r.stdout)[0],
+                f'声明占位那档没走未判: {show(r)}', r)
+
+        # ② 声明＋五件真值 ⇒ 这条一句话都不出
+        p, _ = draft('full', decl=DECL, items=REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'五件齐却被说话: {show(r)}', r)
+
+        # ③ 漏一栏 ⇒ 违规、点名那一件、位点是声明那一行；同族另两条静默（夹具对本轴以外为阴性）
+        p, pos = draft('miss1', decl=DECL, items=REAL[:4])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '保藏编号' in got[0]
+                and f'请求书著录项_E2E.md:{pos["- 生物材料保藏"][0]}:' in got[0]
+                and '第二十七条' in got[0]
+                and 'R26' not in r.stdout.split('合计违规')[0]
+                and 'R27' not in r.stdout.split('合计违规')[0],
+                f'漏写保藏编号没按声明那一行点名: {show(r)}', r)
+
+        # ④ 一栏退回占位 ⇒ 未判里只列那一件
+        p, _ = draft('oneph', decl=DECL, items=[REAL[0], REAL[1], PH[2], REAL[3], REAL[4]])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '保藏单位的地址' in judged(r.stdout)[0] and '保藏日期' not in judged(r.stdout)[0],
+                f'单栏占位的未判没只列那一件: {show(r)}', r)
+
+        # ⑤ 没声明 ⇒ 不适用：不判红也不出注记（本案不涉及保藏，法条那句管不着）
+        p, _ = draft('nodecl', decl=None, items=None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R28' not in r.stdout.split('合计违规')[0],
+                f'没声明保藏却被要求凑齐那五栏: {show(r)}', r)
+
+        # ⑥ 五栏全无 ⇒ 一条红里列齐五件（计数不虚胖），且文法按件数走
+        p, _ = draft('miss5', decl=DECL, items=[])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1
+                and all(lbl in got[0] for lbl, _w in ITEMS) and '那几栏' in got[0],
+                f'五栏全漏被拆成多条、漏列某件、或文法没跟着件数走: {show(r)}', r)
+
+        # ⑦ 分类命名填了实值却没拉丁文名称 ⇒ 另一条红，位点是分类命名那一行
+        p, pos = draft('nolat', decl=DECL,
+                       items=[NO_LATIN] + REAL[1:])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout, '  FAIL R28 分类命名没注明拉丁文名称')
+        assert_(r.returncode == 1 and len(got) == 1 and '大肠杆菌' in got[0]
+                and f'请求书著录项_E2E.md:{pos["- 生物材料的分类命名"][0]}:' in got[0]
+                and not fired(r.stdout),
+                f'分类命名没注明拉丁文名称没被抓到（或顺带把"缺栏"那条也判红了）: {show(r)}', r)
+
+        # ⑧ 同一栏带上拉丁文名称 ⇒ 静默（与⑦成对，证明红的是拉丁那一半而不是这一栏本身）
+        p, _ = draft('latin', decl=DECL, items=REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'带上拉丁文名称仍被判红: {show(r)}', r)
+
+        # ⑨ 文件名字轴：同样几行写进说明书那件必须静默
+        p, _ = draft('axis', decl=DECL, items=[], name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了: {show(r)}', r)
+
+        # ⑩ 自报区间含到 R28
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 28, f'自报区间没把 R28 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R28 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r28_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(DECL.strip())
+            for ln in REAL[:4]:                # 五件只写四件，缺保藏编号
+                doc.add_paragraph(ln.strip())
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '保藏编号' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上漏写保藏编号却没被抓到: {show(r)}', r)
+    print('PASS iron_r28 生物材料保藏那五件（声明占位未判 + 五件齐静默 + 漏一栏点名带位点 + '
+          '单栏占位只列那一件 + 没声明不适用 + 五栏全漏只报一条 + 分类命名无拉丁另开一条 + '
+          '带上拉丁静默 + 文件名字轴不误伤 + 自报区间含 R28 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -7166,6 +7319,7 @@ if __name__ == '__main__':
              test_battery_crash_attribution, test_check_figures_input_guard,
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
+             test_iron_r28_deposit_particulars_set,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
