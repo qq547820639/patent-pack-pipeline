@@ -5898,6 +5898,74 @@ def test_iron_r16_spec_first_line():
     print('PASS iron_r16 说明书首行（合规极 + 冠字支 + 不一致支 + 无名称源未判 + 交底书不入域 + Word 通道）')
 
 
+R17_OK = ('# 申请文件\n## 说明书摘要\n\n本装置包括躯干框架与锁扣本体，用于解决佩戴不稳的问题。\n'
+          '## 具体实施方式\n\n实施例一。\n')
+R17_SUB = ('# 申请文件\n## 说明书摘要\n\n本装置包括躯干框架。\n### 技术效果\n佩戴更稳。\n'
+           '## 具体实施方式\n\n实施例一。\n')
+R17_AFTER = ('# 申请文件\n## 说明书摘要\n\n本装置包括躯干框架。\n### 技术效果\n'
+             '本装置性价比极高，属于行业第一。\n## 具体实施方式\n\n实施例一。\n')
+R17_NOABS = '# 申请文件\n## 具体实施方式\n\n实施例一。\n'
+
+
+def test_iron_r17_abstract_heading():
+    """§4.5.1 前半句「摘要文字部分不得使用标题」实跑成 R17，并顺手钉住取节窗口按层级断尾。"""
+    with tempfile.TemporaryDirectory() as d:
+        def w(name, text):
+            fp = os.path.join(d, name)
+            open(fp, 'w', encoding='utf8').write(text)
+            return fp
+
+        p = w('ok.md', R17_OK)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R17 摘要文字部分有标题' not in r.stdout,
+                'R17 把合规摘要判红了', r)
+
+        # 绝对坐标档：真行号由本档自己数夹具，门禁报的行号差一行就红（与 R11/Q 族同形状）。
+        p = w('sub.md', R17_SUB)
+        real = [i for i, ln in enumerate(R17_SUB.splitlines(), 1) if ln.startswith('### ')]
+        assert_(len(real) == 1, '夹具里数不出唯一的子标题行，这一档空转', None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        fired = [ln for ln in r.stdout.splitlines()
+                 if ln.startswith('  FAIL R17 摘要文字部分有标题')]
+        assert_(r.returncode == 1 and len(fired) == 1 and f'sub.md:{real[0]}:' in fired[0],
+                '摘要块内的子标题没被 R17 点名', r)
+
+        # 窗口极：子标题**之后**那句商业宣传语，旧窗口（止于任何 `#` 标题）读不到——
+        # 这一档同时是 #35 那件前置工作的反证：R10 与 R17 必须同场开火。
+        p = w('after.md', R17_AFTER)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        bad = [ln for ln in r.stdout.splitlines() if ln.startswith('  FAIL')]
+        assert_(any('R10' in ln for ln in bad)
+                and any('R17 摘要文字部分有标题' in ln for ln in bad),
+                '窗口没按层级断尾：摘要块里子标题之后的内容读不到', r)
+
+        p = w('noabs.md', R17_NOABS)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and '未找到摘要节，R17 未判' in r.stdout
+                and not any(ln.startswith('  FAIL R17') for ln in r.stdout.splitlines()),
+                '没有摘要节时 R17 没报未判', r)
+
+        try:
+            import docx
+        except ImportError:
+            SKIPPED.append('iron_r17_docx')
+            print('PASS iron_r17 摘要标题（四档 md 极；Word 通道档缺 python-docx，未跑）')
+            return
+        dv = os.path.join(d, 'wd')
+        os.makedirs(dv)
+        doc = docx.Document()
+        doc.add_heading('说明书摘要', level=2)
+        doc.add_paragraph('本装置包括躯干框架。')
+        doc.add_heading('技术效果', level=3)
+        doc.add_paragraph('佩戴更稳。')
+        vp = os.path.join(dv, '说明书.docx')
+        doc.save(vp)
+        r = run([PY, f'{S}/check_iron_rules.py', vp])
+        assert_(r.returncode == 1 and 'R17 摘要文字部分有标题' in r.stdout,
+                'Word 摘要里的子标题没被 R17 判到', r)
+    print('PASS iron_r17 摘要标题（合规极 + 红极带绝对坐标 + 窗口按层级 + 未判 + Word 通道）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
@@ -5914,7 +5982,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line]
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}

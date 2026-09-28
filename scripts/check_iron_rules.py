@@ -127,7 +127,7 @@
      生产真包上 R7/R15 走的是"未核"那一支。现在骨架写 `01_交底书/交底书_<产品>.md`，
      §0 那一行由判据侧 `title_field()` 拼（写法常量 `TITLE_FIELD_WRITE` 与 `TITLE_FIELD`
      同源，生成器不另抄字面——抄的那份一漂移，两把尺子在生产包上静默退回未核）。
-     现造包真读数：7 份 md、`合计违规 0（规则 R1–R16，判据见脚本 docstring）`、
+     现造包真读数：7 份 md、`合计违规 0（规则 R1–R17，判据见脚本 docstring）`、
      7 份里只剩 6 份报 `R7 未核`，没报的那一份就是交底书（其余 6 份本就没有该字段，
      仍走未核——三态说的是这份文书有没有可读字段，不是判据覆盖了多少同族措辞）。
      连带两面也现量过：交底书 §4「附图说明」使 N 族域内从 1 份变 2 份，那一份走"未判"（那条对照表判据只管说明书，内部文书不硬判）；§6「权利要求建议稿」进 Q 族
@@ -148,6 +148,13 @@
      有内容的行（md 开头的空行是排版壳）。同句里"左右居中"与"名称与正文之间空一行"明写不判：
      两者都是排版属性，文本通道读不到居中、docx_text 又不吐空段落，判红等于把判据的缺席
      写成文档的违规。
+  R17 摘要文字部分里有标题——《专利审查指南》（2023）第一部分第一章 §4.5.1 前半句，
+     txt:856-857＝PDF p27／印刷页 1-11（同页页眉 txt:845-846 要跳过），逐字
+     「摘要文字部分不得使用标题，文字部分（包括标点符号）不得超过 300 个字」；
+     后半句是 R4 的法源，这一支补上前半句。判点是摘要块内的标题行，只报第一个；
+     没有摘要节报「R17 未判」。能判的前提是 `section_body()` 按层级断尾（见那个函数
+     的 docstring：窗口若止于任何 `#` 标题，块内子标题会把窗口截在它之前，
+     "读不到"会被写成"没有"）。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -219,6 +226,8 @@ BRIEF_DESC_HEAD = re.compile(r'^#{2,3}\s*(?:\d+\.\s*)?(?:外观)?简要说明')
 CLAIMS_HEAD = re.compile(r'^#{2,3}\s*(?:\d+\.\s*)?(?:权利要求书|权利要求建议稿)')
 BACKGROUND_HEAD = re.compile(r'^#{2,3}\s*(?:\d+(?:\.\d+)*\.?\s*)?(?:背景技术|2\.1|现有技术)')
 NEXT_SECTION = re.compile(r'^#{1,3}\s')
+# 取节窗口用的层级认子（第 46 轮起 `section_body` 按层级断尾，见那个函数的 docstring）。
+HEAD_LEVEL = re.compile(r'^(#{1,6})\s')
 
 # R10 的适用域：两节各引各的法源（同一张词表，打在摘要上引 26 条、打在简要说明上引 31 条，
 # 报成同一句的话读者分不出这条红是哪件文书欠的）。写成常量而不是内联在循环里，
@@ -478,12 +487,29 @@ class Finding:
 
 
 def section_body(lines, head_re):
-    """返回 (起始行号 1-based, 该节正文行列表)；找不到返回 (None, [])。"""
+    """返回 (起始行号 1-based, 该节正文行列表)；找不到返回 (None, [])。
+
+    第 46 轮起**按层级断尾**：从命中的标题级数往下走，止于下一个级数不高于它的标题。
+    从前它止于任何 `^#{1,3}` 标题，于是「## 说明书摘要」底下只要出现一个 `### 技术效果`
+    子标题，窗口就在子标题**之前**截断——"块里有没有标题"这件事根本读不到，
+    而读不到与没有在同一份报告里完全同形（R17 就是被这一条挡住的，见 R17 那一格）。
+    命中的那一行若不是 markdown 标题（`head_re` 允许裸文本时），退回旧断法：
+    没有级数可比，就按"下个标题即断"处理，不猜。"""
     for i, ln in enumerate(lines):
         if head_re.match(ln.strip()):
+            hm = HEAD_LEVEL.match(ln)
+            if hm is None:
+                body = []
+                for j in range(i + 1, len(lines)):
+                    if NEXT_SECTION.match(lines[j]):
+                        break
+                    body.append(lines[j])
+                return i + 1, body
+            level = len(hm.group(1))
             body = []
             for j in range(i + 1, len(lines)):
-                if NEXT_SECTION.match(lines[j]):
+                nj = HEAD_LEVEL.match(lines[j])
+                if nj and len(nj.group(1)) <= level:
                     break
                 body.append(lines[j])
             return i + 1, body
@@ -688,6 +714,24 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     # 号集只认表里登记的「名称↔号」对，表外的自由数字（"拉脱力 90N""2020 年"）一律不当标记——
     # 与 Q5 同一条防线，否则这两把尺子只会造假红。包内没有那张表 ⇒ 两条未判（不折成合规）；
     # 区域不在本份文书 ⇒ 该条不适用，不出提示行（与 R11 同口径）。
+    # R17 摘要文字部分不得使用标题——《专利审查指南》（2023）第一部分第一章 §4.5.1，
+    # 本机留底 txt:856-857（`<<<PAGE 27>>>` 在 txt:844、页眉两行 txt:845-846 抄引文要跳过，
+    # 印刷页 1-11），逐字：「摘要文字部分不得使用标题，文字部分（包括标点符号）
+    # 不得超过 300 个字。」这一支只报**第一个**块内标题：一条红足够指出该改的地方，
+    # 而多报几条会让"一份摘要里有三个小标题"这种形状的计数变成噪音。
+    r17_start, r17_body = section_body(lines, ABSTRACT_HEAD)
+    if r17_start is None:
+        notes.append('未找到摘要节，R17 未判（不折成合规）')
+    else:
+        for off, ln in enumerate(r17_body):
+            if HEAD_LEVEL.match(ln):
+                findings.append(Finding(
+                    'R17 摘要文字部分有标题', path, r17_start + 1 + off,
+                    '摘要块内出现标题行「' + ln.strip()[:40] + '」——§4.5.1 逐字：'
+                    '摘要文字部分不得使用标题（摘要是写明名称、技术领域、要解决的技术问题、'
+                    '技术方案要点与主要用途的连续正文，小标题不属于它）'))
+                break
+
     r13_start, r13_body = section_body(lines, ABSTRACT_HEAD)
     r12_start, r12_body = doc_region(lines, SPEC_IMPL_HEAD)
     if not marks:
