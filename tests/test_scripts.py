@@ -4,7 +4,7 @@
 同时兼作环境自检：打印各依赖是否就绪、缺失影响哪个环节。
 """
 import importlib.util
-import os, re, shutil, sys, tempfile, time, subprocess, zipfile, stat
+import ast, os, re, shutil, sys, tempfile, time, subprocess, zipfile, stat
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -1100,10 +1100,17 @@ def test_check_iron_rules_docx():
         # 那句注记点名的判据清单也是自述：第 39 轮加了 R12/R13（都按节判），第 42 轮加了 R14、
         # 并把共用 `spec_doc_blocks` 的 R11 一起补进来（节标题还原不出来时**区域也是空的**，
         # 那两条同样从"判过"退成"没判"）。抄旧的清单就是把"看不见"说成"只影响那几条"。
-        # ⚠ 这一格钉的是**现状**（现抄自门禁此刻的真读数），不是应然：今天没有任何机器-side 的尺子
-        # 逼"新增的按节／按区域判的判据"把自己写进那句 note——已登记待办（把这份名单改成从源码现推：
-        # 调用 `doc_region`／`spec_doc_blocks`／`section_body` 的那几条必须都在名单里）。
-        assert_('→ R3/R4/R10/R11/R12/R13/R14（按节判的判据）未核' in r.stdout,
+        # ⚠ 从前这一格钉的是**现状**（现抄自门禁此刻的真读数），并且写着"没有任何机器-side 的尺子
+        # 逼新增的按节／按区域判的判据把自己写进这句"——那个待办在第 44 轮 #25 关闭了：
+        # 号名单由门禁就近声明的常量渲染，常量与"源码里到底哪几条按节判"由
+        # `test_iron_section_face_roster` 用 stdlib ast 现推并**双向**对账。
+        # 这里因此只钉两件事：① 句子的模板逐字（→ …（按节判的判据）未核）没被人改写成别的措辞；
+        # ② 打印出来的那串号**确实**等于常量的渲染——名单少一格时这里跟着红，而成因由新那一档点名。
+        _irtxt = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
+        _declared = declared_roster(_irtxt)
+        assert_(_declared, '门禁里再没有 SECTION_FACE_RULES 那份就近声明，'
+                           '未核自述没有可渲染的名单了', r)
+        assert_(f'→ {"/".join(_declared)}（按节判的判据）未核' in r.stdout,
                 f'docx 未核注记点名的判据清单不对: {show(r)}', r)
 
         # 损坏 docx 与带 DTD 的 document.xml 都必须 rc=2 说清成因，不折成"零违规"
@@ -1149,6 +1156,146 @@ def test_check_iron_rules_docx():
                     f'--all 未递归收 docx: {show(r)}', r)
     print('PASS check_iron_rules_docx（docx 正文可读 + 节还原有牙 + 三种未判/拒绝路径）')
 
+
+# ---------- 那句未核自述的号名单：从源码现推，不手抄（内部编号 #25） ----------
+
+# 四份最小假脚本都喂给**同一个**现推函数（`section_face_roster`／`roster_diff`），
+# 结构与 `check_iron_rules.py` 里的真实开火形状一一对应：
+#   ① 节正文循环里开了火、名单没写那一格；② 名单多列了一条其实判在全文面上的；
+#   ③ 与②同一份字节、名单补齐（必须闭嘴，否则①②是恒红）；④ 按节判但自己在
+#   "节没找到"那一支出了未核行（R5／R9 今天的形状）⇒ 它不该进名单。
+FAKE_SECTION_MISSING = '''
+def check_text(path, text):
+    findings, notes = [], []
+    lines = text.splitlines()
+    astart, abody = section_body(lines, ABSTRACT_HEAD)
+    if astart is not None:
+        for off, ln in enumerate(abody):
+            findings.append(Finding('R4 摘要字数', path, astart + 1 + off, 'x'))
+    cstart, cbody = section_body(lines, CLAIMS_HEAD)
+    if cstart is not None:
+        for off, ln in enumerate(cbody):
+            findings.append(Finding('R9 权文内占位注释', path, cstart + 1 + off, 'x'))
+    return findings, notes
+'''
+
+FAKE_SECTION_OVERLIST = '''
+def check_text(path, text):
+    findings, notes = [], []
+    lines = text.splitlines()
+    for i, raw in enumerate(lines, 1):
+        findings.append(Finding('R6 商标型号', path, i, 'x'))
+    astart, abody = section_body(lines, ABSTRACT_HEAD)
+    if astart is not None:
+        for off, ln in enumerate(abody):
+            findings.append(Finding('R4 摘要字数', path, astart + 1 + off, 'x'))
+    return findings, notes
+'''
+
+FAKE_SECTION_SELFVENT = '''
+def check_text(path, text):
+    findings, notes = [], []
+    lines = text.splitlines()
+    astart, abody = section_body(lines, ABSTRACT_HEAD)
+    if astart is not None:
+        for off, ln in enumerate(abody):
+            findings.append(Finding('R4 摘要字数', path, astart + 1 + off, 'x'))
+    bstart, bbody = section_body(lines, BACKGROUND_HEAD)
+    if bstart is None:
+        notes.append('背景技术节未找到，R9 未判')
+    else:
+        for off, ln in enumerate(bbody):
+            findings.append(Finding('R9 查新声明', path, bstart + 1 + off, 'x'))
+    return findings, notes
+'''
+
+
+def test_iron_section_face_roster():
+    """docx 那句「未识别到节标题样式 → R…（按节判的判据）未核」点名的号名单由源码现推并双向对账。
+
+    修的是哪一格：那句自述从前是**手写的字面量**。新增一条"按节／按区域判"的判据时没有任何机械力
+    逼它把自己写进这句，漏写的症状不是红、而是"读不动的 Word 件仍然只报老那几条未核"——
+    对读者是一份**少报的自述**。本仓为这类"看不见被报成只影响那几条"已修过三次
+    （第 39 轮 R12/R13、第 41 轮同文件对账、第 42 轮 R14 靠人记得补进这句）。
+    现在的分工：门禁侧只渲染就近声明的 `SECTION_FACE_RULES`（读者看到的句子逐字不变，
+    第 44 轮改前/改后同一件无节标题 docx 的 stdout 逐字节相同）；"该写哪几格"由本档用 stdlib ast
+    从门禁源码现推，**少一格与多一格都红**。
+    现推的谓词落在代码结构而不是号段：一个 `Finding('R<n> …')` 调用点算"按节／按区域判"，
+    当它被某一次 `section_body`／`doc_region`／`spec_doc_blocks` 的取节结果压住
+    （祖先里的节正文循环 `for off, ln in enumerate(<正文>)`、区域循环 `for dstart, dbody in <blocks>`、
+    节闸门 `if <那一节的起点> is not None`，或它自己拿那个起点打位点），
+    或它所在的循环直接迭代一个 `*_HEAD`／`*_SECTION`／`*_SCOPE` 那族节标题常量（R10 走 `R10_SCOPE`）。
+    取号复用 `rule_span()` 那把尺，不再写第二份正则（第 34 轮"R10 被折成 R1"就是两份提取器分叉）。
+
+    ⚠ 这把尺子读不动的一面（都是"要连尺子一起改"的形状，不是"这样也算核过"）：
+      · 区域在 A 函数里取好、当作参数传进 B 函数再开火：B 的作用域里没有取节口 ⇒ 现推看不见它，
+        于是那条号会读成"多列"（红，方向安全——名单只会因红而补齐，不会静默少报）；
+      · 取节结果没绑成变量（`if len(section_body(lines, H)[1]) > 3:` 这种）：`_section_source_sites`
+        只认 Assign 绑出的名字，看不见这种直接用法；
+      · "是否按节判"藏在自定义辅助函数里、或节标题正则与取节口不同名（不落 `*_HEAD` 那一族）；
+      · 门禁把"自己出声"的落点从 `notes.append` 改名：剔除那一支会整体失效 ⇒ 真语料当场读成
+        少列=['R5','R9']（是红，不是静默）。
+    """
+    irtxt = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
+
+    # ── 牙齿自证：真语料今天读到的差集是**空**，而"空"既是合规的形状也是恒真的形状 ──
+    # 所以先让这把尺子在四份最小样本上各咬一次，再信它对真语料说的那声"相等"。
+    miss, extra = roster_diff(FAKE_SECTION_MISSING, ('R4',))
+    assert_(miss == ['R9'] and extra == [],
+            f'牙齿自证①不成立：假脚本把 R9 开在 `section_body` 的节正文循环里、名单只列了 R4，'
+            f'这把尺子必须点名 R9 少列（实得 少列={miss} 多列={extra}）', None)
+    miss, extra = roster_diff(FAKE_SECTION_OVERLIST, ('R4', 'R6'))
+    assert_(extra == ['R6'] and miss == [],
+            f'牙齿自证②不成立：R6 开在 `enumerate(lines, 1)` 的全文面上、名单却把它列进按节判，'
+            f'这把尺子必须报多列（实得 少列={miss} 多列={extra}）', None)
+    miss, extra = roster_diff(FAKE_SECTION_OVERLIST, ('R4',))
+    assert_(miss == [] and extra == [],
+            f'牙齿自证③的合规对照不成立（名单补齐了还报差集，上面两档就是恒红）: '
+            f'少列={miss} 多列={extra}', None)
+    _vented = section_face_roster(FAKE_SECTION_SELFVENT)
+    assert_(_vented == ['R4'],
+            f'牙齿自证④不成立：R9 在"节没找到"那一支自己打了未核行，本该从自述里剔除、'
+            f'只留 R4（剔除写成恒真会连 R4 一起剔掉、写成恒假会把 R9 留在名单里）: 实得 {_vented}',
+            None)
+
+    # ── 真语料对账（双向）──
+    declared = declared_roster(irtxt)
+    assert_(declared, '门禁里再没有 SECTION_FACE_RULES 这份就近声明：那句未核自述要么改回了'
+                      '内联字面量、要么没了渲染处——本轮修的洞正是"名单靠人抄"', None)
+    found, ambiguous = section_face_sites(irtxt)
+    assert_(not ambiguous,
+            f'真语料上有 Finding 调用点取不出恰好一个判据号，现推的名单不可信: {ambiguous}', None)
+    assert_(len(found) >= 7,
+            f'现推只读到 {len(found)} 个按节／按区域判的开火点，这把尺子在空转'
+            f'（改前它是 R3/R4/R5/R9/R10/R11/R12/R13/R14 九条）', None)
+    derived = section_face_roster(irtxt)
+    excluded = sorted([f'R{n}' for n, v in found.items()
+                       if v['sources'] and v['sources'] <= v['vented_srcs']], key=_roster_num)
+    assert_(excluded,
+            f'剔除那一支今天在真语料上一条都没剔到（{excluded}）：那"按节判但自己会出声"这一格'
+            f'就没有任何覆盖，剔除写对写错都读不出来', None)
+    miss, extra = roster_diff(irtxt, declared)
+    assert_(not miss and not extra,
+            f'那句未核自述的名单与源码现推不对账 少列={miss} 多列={extra}'
+            f'（少列＝新增的按节／按区域判的判据没把自己写进自述；多列＝自述谎称一条其实判在'
+            f'全文面上的判据受了节标题影响）', None)
+
+    # ── 渲染面：那句 note 必须真的从这份常量渲染，否则常量对了也白对 ──
+    seg = note_render_site(irtxt)
+    assert_(seg is not None,
+            'main() 里那句"未识别到节标题样式"的 print 找不到了（形状改了？改法要连本档一起改）',
+            None)
+    assert_(ROSTER_CONST in seg,
+            f'那句未核自述又不从常量渲染了，号名单回到内联字面量: {seg}', None)
+    assert_(not re.search(r'R\d+/R\d+', seg),
+            f'那句 note 的源码段里还留着手抄的号名单（常量与它各自漂移就是旧形状）: {seg}', None)
+
+    _anchors = {f'R{n}': (sorted(v['anchors']) or sorted(v['helpers']))
+                for n, v in sorted(found.items())}
+    print(f'PASS iron 按节判名单现推（AST 推出 {len(derived)} 格 {derived}、名单 {len(declared)} 格 '
+          f'{declared}、差集 少列={miss} 多列={extra}；另 {len(excluded)} 条按节判但自己出了未核行'
+          f'故不进自述: {excluded}；开火点取节口 {sum(len(v["sources"]) for v in found.values())} 处）')
+    print(f'     每条号的锚点（节标题常量／取节口，读数不判据）: {_anchors}')
 
 
 def test_docx_table_channel():
@@ -1430,6 +1577,217 @@ def rule_span(src):
     `\\s*` 也不可省：R8 的 Finding( 与实参之间有换行，紧凑写法会把它整个漏掉。
     两份调用点（iron 档内、契约档内）共用这一把，不在两处各写一遍正则。"""
     return sorted({int(x) for x in re.findall(r"Finding\(\s*['\"]R(\d{1,2})", src)})
+
+
+# ---------- 「按节／按区域判」名单的现推尺子（内部编号 #25，第 44 轮） ----------
+# 要修的那一格：`main()` 里"读得出正文、却认不出任何节标题样式"的 Word 件打的
+# `未识别到节标题样式 → R3/R4/…（按节判的判据）未核`，那份号名单**从前是手抄的字面量**。
+# 手抄的漏写不报错、只少报：新增一条按节判的判据忘了写进这句，读者看到的仍是一份旧的自述
+# （本仓已为此修过三次：第 39 轮补 R12/R13、第 41 轮补同文件对账、第 42 轮补 R14——全靠人记得）。
+# 现在门禁只渲染它就近声明的 `SECTION_FACE_RULES`，"该写哪几格"由下面这把尺子从源码现推、双向对账：
+# 少一格（漏报）与多一格（谎称"这条也受节标题影响"）都红。
+# 推导放在常驻而不是门禁运行时解析自己：那会把一台解析器挂进每次判定路径，读不动就整条 rc=2，
+# 等于给"看不见"再添一面新墙（同上面 `self_rule_span()` 只在总结行现推、不参与判定的取舍）。
+SECTION_FACE_SOURCES = ('section_body', 'doc_region', 'spec_doc_blocks')
+# 节标题／区域常量的名字形状（ABSTRACT_HEAD／BACKGROUND_HEAD／CLAIMS_HEAD／BRIEF_DESC_HEAD／
+# SPEC_DOC_HEAD／SPEC_IMPL_HEAD／DESIGN_SECTION／R10_SCOPE 这一族）：用作"这条判据锚在哪个节面"
+# 的确认信号与读数，判"按节判"的主信号仍是它压在哪一次取节口上。
+HEAD_CONST_RE = re.compile(r'^[A-Z][A-Z0-9_]*(?:HEAD|SECTION|SCOPE)[A-Z0-9_]*$')
+NOTES_SINK = 'notes'        # 门禁那侧"自己出声"的落点：`notes.append(...)`
+ROSTER_CONST = 'SECTION_FACE_RULES'
+
+
+def _roster_num(tag):
+    return int(tag[1:])
+
+
+def _ast_with_parents(tree):
+    """ast 没有 parent 指针：先自己标一遍，后面才能从 `Finding(` 的调用点沿祖先往上走。"""
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            child._parent = node
+    return tree
+
+
+def _ast_names(*nodes):
+    out = set()
+    for node in nodes:
+        if node is not None:
+            out |= {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+    return out
+
+
+def _walk_scope(scope):
+    """只遍历 scope 自己的正文，**不进**嵌套的 def／lambda／class。
+    取节口与它绑出的变量名只在同一层作用域里说话：跨函数同名（两处各自叫 `body`）
+    会把两条不相干的判据算成同一次取节，那是这把尺子最容易被误读的一处。"""
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _section_source_sites(scope):
+    """scope 内每一次"取节／取区域"的调用点 → (取节口名, 它绑出的变量名, 引用的节标题常量名)。
+    按**调用点**归组而不是按变量名：`start, body = section_body(...)` 绑的两个名字是同一次取节，
+    下面剔除"自己会出声"那一格时必须整组剔——按单个名字判会因为漏掉另一个名字而把它留下。"""
+    sites = {}
+    for node in _walk_scope(scope):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in SECTION_FACE_SOURCES):
+            continue
+        parent = getattr(node, '_parent', None)
+        if not isinstance(parent, ast.Assign):
+            continue        # 取节结果没被绑成变量（例如只拿去算长度）⇒ 这一尺看不见，见收尾"未证实"
+        bound = []
+        for tgt in parent.targets:
+            if isinstance(tgt, ast.Tuple):
+                bound += [e.id for e in tgt.elts if isinstance(e, ast.Name)]
+            elif isinstance(tgt, ast.Name):
+                bound.append(tgt.id)
+        if not bound:
+            continue
+        ent = sites.setdefault((node.func.id, node.lineno), [node.func.id, set(), set()])
+        ent[1] |= set(bound)
+        ent[2] |= {a.id for a in node.args
+                   if isinstance(a, ast.Name) and HEAD_CONST_RE.match(a.id)}
+    return sites
+
+
+def _notes_sink(nodes):
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr in ('append', 'extend')
+               and isinstance(n.func.value, ast.Name) and n.func.value.id == NOTES_SINK
+               for st in nodes for n in ast.walk(st))
+
+
+def _absence_test(test):
+    """('absent', 名字) 对应 `X is None`／`not X`（"那一节读不到"那一支）；
+    ('present', 名字) 对应 `X is not None`。只认这三种形状——
+    `if spec_blocks and r14_hits == 0:` 那种正向合取是**区域在**时才出声，不算自报盲区。"""
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return 'absent', _ast_names(test.operand)
+    if (isinstance(test, ast.Compare) and len(test.ops) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value is None):
+        if isinstance(test.ops[0], ast.Is):
+            return 'absent', _ast_names(test.left)
+        if isinstance(test.ops[0], ast.IsNot):
+            return 'present', _ast_names(test.left)
+    return None, set()
+
+
+def _vented_sources(scope, sites):
+    """这些取节口在"读不到"那一支里自己写了未核／未判行 ⇒ 那句 note 不必替它们说话。
+    R5（背景技术公开号）与 R9（逐字查新声明）今天就是这样：两条都按节判，
+    但 `if start is None: notes.append('背景技术节未找到…')` 已经自己出了声，
+    所以它们**不在**名单里——这一格是推导出来的，不是手挑的（剔除的形状由假脚本④单独咬）。"""
+    vented = set()
+    for node in _walk_scope(scope):
+        if not isinstance(node, ast.If):
+            continue
+        kind, tn = _absence_test(node.test)
+        if not tn:
+            continue
+        mine = {k for k, v in sites.items() if v[1] & tn}
+        if kind == 'absent' and _notes_sink(node.body):
+            vented |= mine
+        elif kind == 'present' and node.orelse and _notes_sink(node.orelse):
+            vented |= mine
+    return vented
+
+
+def section_face_sites(src):
+    """每个 `Finding('R<n> …')` 调用点压在哪一次取节口上。返回 ({n: 记录}, [取不出恰好一个号的位点])。
+    取号**直接复用** `rule_span()`（同一把尺）：两处各写一份正则就会分叉——第 34 轮
+    "R10 被折成 R1"那次讲的就是这个。歧义位点不静默跳过，它单列出来由调用方判红，
+    因为"少看见一个开火点"与"名单漏一格"在终端上是同一种病。"""
+    tree = _ast_with_parents(ast.parse(src))
+    found, ambiguous, seen = {}, [], set()
+    scopes = [tree] + [n for n in ast.walk(tree)
+                       if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for scope in scopes:
+        sites = _section_source_sites(scope)
+        vented = _vented_sources(scope, sites)
+        for node in _walk_scope(scope):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == 'Finding') or id(node) in seen:
+                continue
+            seen.add(id(node))
+            nums = rule_span(ast.get_source_segment(src, node) or '')
+            if len(nums) != 1:
+                ambiguous.append((node.lineno, nums))
+                continue
+            hit, anchors = set(), set()
+            own = _ast_names(*node.args)
+            hit |= {k for k, v in sites.items() if v[1] & own}
+            anc = getattr(node, '_parent', None)
+            while anc is not None:
+                if isinstance(anc, ast.For):       # 节／区域正文迭代
+                    itn = _ast_names(anc.iter)
+                    hit |= {k for k, v in sites.items() if v[1] & itn}
+                    anchors |= {x for x in itn if HEAD_CONST_RE.match(x)}
+                elif isinstance(anc, ast.If):      # `if <那一节的起点> is not None:` 这类节闸门
+                    hit |= {k for k, v in sites.items() if v[1] & _ast_names(anc.test)}
+                if isinstance(anc, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    break
+                anc = getattr(anc, '_parent', None)
+            if not hit and not anchors:
+                continue                            # 判在全文面上（R1／R2／R6／R7／R8 那一族）
+            for k in hit:
+                anchors |= sites[k][2]
+            ent = found.setdefault(nums[0], {'helpers': set(), 'anchors': set(),
+                                             'sources': set(), 'vented_srcs': set(),
+                                             'lines': set()})
+            ent['helpers'] |= {sites[k][0] for k in hit}
+            ent['anchors'] |= anchors
+            ent['sources'] |= hit
+            ent['vented_srcs'] |= {k for k in hit if k in vented}
+            ent['lines'].add(node.lineno)
+    return found, ambiguous
+
+
+def section_face_roster(src):
+    """现推出的名单（形如 ['R3','R4',…]）：按节／按区域判、且节读不到时自己不出声的那些判据。"""
+    found, _ = section_face_sites(src)
+    return sorted(['R%d' % n for n, v in found.items()
+                   if not (v['sources'] and v['sources'] <= v['vented_srcs'])], key=_roster_num)
+
+
+def declared_roster(src, const=ROSTER_CONST):
+    """读回门禁**就近声明**的那份名单常量（不是正则扫句子——那份常量才是被渲染的源）。
+    没有这份声明、或它不再是字面量序列，一律返回 None：门禁把名单改回内联字面量就是退回旧形状。"""
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == const:
+                    if isinstance(node.value, (ast.Tuple, ast.List)):
+                        return [e.value for e in node.value.elts
+                                if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+                    return None
+    return None
+
+
+def roster_diff(src, declared):
+    """把"AST 现推的名单"与"该文件自己声明的那份名单"做**双向**差集，返回 (少列, 多列)。
+    少列＝新增的按节判判据没把自己写进自述；多列＝自述谎称一条其实判在全文面上的判据受了节标题影响。"""
+    derived = section_face_roster(src)
+    d, s = set(derived), set(declared)
+    return sorted(d - s, key=_roster_num), sorted(s - d, key=_roster_num)
+
+
+def note_render_site(src):
+    """`main()` 里那句未核自述的 print 源码段（找不到返回 None）——用来核"名单是从常量渲染的"。"""
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'print' and node.args):
+            seg = ast.get_source_segment(src, node) or ''
+            if '未识别到节标题样式' in seg:
+                return seg
+    return None
 
 
 def test_check_iron_rules():
@@ -5257,6 +5615,7 @@ if __name__ == '__main__':
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
              test_iron_spec_region_shapes, test_iron_spec_region_shapes_docx,
              test_iron_r14_illustration, test_r7_title_tiers, test_iron_r15_title_words,
+             test_iron_section_face_roster,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,
