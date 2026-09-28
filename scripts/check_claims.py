@@ -111,7 +111,10 @@ MULTI_HINT = re.compile(r'[、,，]|或|至|~|～|任一|任意|之一')
 PAREN_SPAN = re.compile(r'[（(][^）)]*[）)]')
 # Q7／Q8 的两个形状（细则第二十二条一款）。md 图片语法与 docx 的折算行同一条正则；
 # "如图…所示"要求带编号——无编号的"如图所示"误伤面没量过，不判（docstring 有记）。
-CLAIM_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)|<img\b', re.I)
+# 图片形状的定义住在下层 `check_iron_rules.SPEC_IMAGE`：说明书那一族的 R14（指南 §4.2
+# 「说明书文字部分…不得有插图」）与本条认的是同一个形状，本模块本就 `_cir = _load('check_iron_rules')`，
+# 这里取同一个对象而不是再抄一份正则——两份各自可改的正则迟早分叉（与 COMMERCIAL／SPEC_SECTIONS 同纪律）。
+CLAIM_IMAGE = _cir.SPEC_IMAGE
 CLAIM_FIG_REF = re.compile(r'如图\s*[0-9０-９]{1,3}\s*所示')
 CLAIM_SPEC_REF = re.compile(r'如说明书[^，。；\n]{0,16}部分所述')
 

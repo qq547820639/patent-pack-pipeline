@@ -1097,9 +1097,13 @@ def test_check_iron_rules_docx():
         r = run([PY, f'{S}/check_iron_rules.py', naked])
         assert_(r.returncode == 0 and '未识别到节标题样式' in r.stdout,
                 f'无节标题的 docx 未报三态: {show(r)}', r)
-        # 那句注记点名的判据清单也是自述：第 39 轮加了 R12/R13（都按节判），
-        # 抄旧的"R3/R4/R10"就是把"看不见"说成"只影响那三条"。清单现抄自门禁此刻的真读数。
-        assert_('→ R3/R4/R10/R12/R13（按节判的判据）未核' in r.stdout,
+        # 那句注记点名的判据清单也是自述：第 39 轮加了 R12/R13（都按节判），第 42 轮加了 R14、
+        # 并把共用 `spec_doc_blocks` 的 R11 一起补进来（节标题还原不出来时**区域也是空的**，
+        # 那两条同样从"判过"退成"没判"）。抄旧的清单就是把"看不见"说成"只影响那几条"。
+        # ⚠ 这一格钉的是**现状**（现抄自门禁此刻的真读数），不是应然：今天没有任何机器-side 的尺子
+        # 逼"新增的按节／按区域判的判据"把自己写进那句 note——已登记待办（把这份名单改成从源码现推：
+        # 调用 `doc_region`／`spec_doc_blocks`／`section_body` 的那几条必须都在名单里）。
+        assert_('→ R3/R4/R10/R11/R12/R13/R14（按节判的判据）未核' in r.stdout,
                 f'docx 未核注记点名的判据清单不对: {show(r)}', r)
 
         # 损坏 docx 与带 DTD 的 document.xml 都必须 rc=2 说清成因，不折成"零违规"
@@ -2134,8 +2138,10 @@ def test_iron_spec_region_shapes():
                 f'区域与 P12 判的就不是同一份清单了', None)
 
     # ---------- 生产侧真工件：手写夹具全绿不等于生产形态被走过 ----------
-    # 临时目录开在 worktree 内（仓库纪律：主树正被别的批跑占用，产物不落主树、不落 /tmp 之外的共享处）。
-    work = tempfile.mkdtemp(prefix='specreg_prod_', dir=ROOT)
+    # 生产真工件这一档的临时目录走系统 TMPDIR（不是仓库根）：`finally` 里会 rmtree，
+    # 但中途被杀就会在仓库根留下未跟踪目录，把下一次『树干净』的断言弄成假红；
+    # TMPDIR 里的残留不进跟踪面。
+    work = tempfile.mkdtemp(prefix='specreg_prod_')
     try:
         pkg = os.path.join(work, 'SPECREG_专利交付包')
         r = run([PY, f'{S}/new_product_package.py', 'SPECREG', work])
@@ -2409,6 +2415,199 @@ def test_iron_spec_region_shapes_docx():
     print('PASS 说明书区域落点形状·Word 通道（九节 Heading 2 扁平开火／Heading 3 嵌套开火／'
           '权利要求书与附图两类出域节名静默／H1 罩下 Stop 名单不吞权要＋同批字节正向对偶开火／'
           '合规效力对照 rc=0／区域为空三态不折叠；位点原点全部由段落写入序现算）')
+
+
+def test_iron_r14_illustration():
+    """R14 说明书文字部分不得有插图（《专利审查指南》2023 第一部分第一章 §4.2，PDF p25／印刷页 1-9）。
+
+    法源逐字（本机留底 `.codebuddy/attest/zhinan2023_ahippc.txt:791-792`，在 `<<<PAGE25>>>` 之后、
+    页眉「（1-9）21」之下）：「说明书文字部分可以有化学式、数学式或者表格，但不得有插图。」
+    ⇒ 这一档要同时证三件事，缺一件就是拿合规形状冒充判据有牙：
+      ① 开火面：md 图片语法与 `<img>` 两种形状，打在 `spec_doc_blocks()` 的**同一个区域**里
+         （与 R11／R10 同一套区域、同一套逐块原点 `dstart + 1 + off`）；
+      ② 豁免面是**结构上碰不到**、不是显式排掉：同一批字节换成化学式／数学式／表格行／"图 1"引用，
+         整条门禁必须 rc=0——这一档既是豁免证明，也是①的开火归因对照（没有它，"开火"
+         可能来自夹具里别的既有违规）；
+      ③ Word 通道的**盲区不许折成合规**：`docx_text()` 只把段落里的图形对象折成一行，
+         表格格子里嵌的图与页眉里的图它读不到 ⇒ zip 级 census>0 而文本面 0 命中时
+         必须出那条"R14 未判"的 note，且退码仍是 0；段落里嵌图那条路必须真开火（证明未判行
+         不是因为整条判据在 Word 上不说话）。
+    另外两条纪律性断言：区域外不判（权利要求书那一面归 Q7、附图那一件本来就是放图的）；
+    共享形状的定义只有一处（`check_claims.CLAIM_IMAGE is check_iron_rules.SPEC_IMAGE`，钉 identity 不钉相等）。
+    位点一律绝对坐标：由本档自己 `enumerate` 夹具算出，不抄门禁行号。
+    """
+    IMG_MD = '![装置示意](图9.png)'
+    IMG_HTML = '<img src="图9.png" alt="装置"/>'
+    OK_BODY = ['正文里写 C₂H₅OH 与 F = m·a。', '| 部件 | 标记 |', '|---|---|', '| 躯干框架 | 1 |',
+               '图 1 为本装置的整体示意。']
+
+    def spec_md(img_line=None, section='具体实施方式'):
+        body = ['# E2E 申请文件（说明书）', '', '## 说明书摘要', '【待填写】概要。', '',
+                '## 权利要求书', '1. 一种锁扣装置，包括躯干框架。', '',
+                '## 技术领域', '【待填写】可穿戴设备。', '',
+                f'## {section}']
+        if img_line is not None:
+            body.append(img_line)
+        body += OK_BODY
+        return '\n'.join(body) + '\n'
+
+    def one(d, name, text):
+        p = os.path.join(d, name)
+        open(p, 'w', encoding='utf8').write(text)
+        return run([PY, f'{S}/check_iron_rules.py', p])
+
+    def fired(out, tag='R14 说明书文字部分有插图'):
+        return [int(m.group(1)) for ln in out.splitlines() if tag in ln
+                for m in [re.search(r':(\d+): ', ln)] if m]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 开火面：md 图片语法，位点＝测试自己数出来的那一行
+        for label, img in (('md 图片语法', IMG_MD), ('内嵌 HTML img', IMG_HTML)):
+            txt = spec_md(img)
+            want = [i for i, ln in enumerate(txt.splitlines(), 1) if ln == img]
+            assert_(len(want) == 1, f'{label} 夹具里图片行不止一处（{want}），这一档空转', None)
+            r = one(d, f'r14_{label}.md', txt)
+            assert_(r.returncode == 1 and fired(r.stdout) == want
+                    and '不得有插图' in r.stdout and 'PDF p25' in r.stdout,
+                    f'{label} 没被 R14 在它那一行开火（期望位点 {want}）: {show(r)}', r)
+        # ② 豁免面：同一批字节不放图片形状，整条门禁必须干净
+        r = one(d, 'r14_ok.md', spec_md(None))
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'化学式／数学式／表格／"图N"引用被 R14 判红（法条明写允许的那一侧）: {show(r)}', r)
+        # 围栏代码块不豁免：本轮量过的选择（区域内今天零命中），写出来只多一个静默口子
+        fence = spec_md(None).replace('## 具体实施方式', '## 具体实施方式\n\n```text\n' + IMG_MD + '\n```')
+        want_f = [i for i, ln in enumerate(fence.splitlines(), 1) if ln == IMG_MD]
+        r = one(d, 'r14_fence.md', fence)
+        assert_(r.returncode == 1 and fired(r.stdout) == want_f,
+                f'图片形状藏进围栏代码块就从判据里消失了（期望仍在 {want_f} 开火）: {show(r)}', r)
+        # ③ 区域外不判：同一行写在权利要求书／附图那两节底下
+        for sec in ('权利要求书', '附图', '说明书附图', '图中标记说明'):
+            r = one(d, f'r14_out_{sec}.md', spec_md(IMG_MD, section=sec))
+            assert_(not fired(r.stdout),
+                    f'图片行写在「{sec}」那一节却被 R14 判红（那一面另有判据或本就是放图的文书）: '
+                    f'{show(r)}', r)
+        # 三态：既无「说明书」标题也无那五节 ⇒ 不适用，不判红也不长未判噪声行
+        NONE = '# 交底书\n\n## 一、技术方案\n' + IMG_MD + '\n'
+        r = one(d, 'r14_noregion.md', NONE)
+        # 缺席断言只数 R14 自己的两种行（违规行／未判行）。整份输出里 grep 'R14' 会被
+        # 合计行那句自报区间「规则 R1–R14」挡成永假——本仓那条"缺席断言被门禁自己的复述挡"的老坑。
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and not [ln for ln in r.stdout.splitlines()
+                         if ln.startswith('  FAIL R14') or 'R14 未判' in ln],
+                f'区域为空时 R14 被折成违规或新长出提示行: {show(r)}', r)
+
+        # 共享形状只有一处定义：权要那一族取的是同一个编译对象（两份正则迟早分叉）
+        _ci = importlib.util.spec_from_file_location('cir_r14', f'{S}/check_iron_rules.py')
+        cir_m = importlib.util.module_from_spec(_ci)
+        _ci.loader.exec_module(cir_m)
+        _cl = importlib.util.spec_from_file_location('ccl_r14', f'{S}/check_claims.py')
+        clm = importlib.util.module_from_spec(_cl)
+        _cl.loader.exec_module(clm)
+        assert_(clm.CLAIM_IMAGE is cir_m.SPEC_IMAGE,
+                'check_claims 的图片形状不是 check_iron_rules 那份对象（有人另抄了一份正则）', None)
+
+    # ---------- Word 通道：段落嵌图必须开火，格子里／页眉里的嵌图必须走未判 ----------
+    try:
+        import docx  # noqa: F401  python-docx
+    except ImportError:
+        SKIPPED.append('iron_r14_illustration_docx')
+        print('PASS R14 插图（md 两形状开火／豁免面 rc=0／围栏不豁免／区域外三档静默／区域为空不判 '
+              '+ 共享形状同一对象；docx 档未跑）')
+        return
+
+    def png_bytes():
+        """自己铸一张 2×2 白底 PNG（纯标准库）。matplotlib 本机可能没有，
+        而这一档的前提是"文件里真有一个图形部件"，不能拿假字节糊。"""
+        import struct
+        import zlib
+        w = h = 2
+        raw = b''.join(b'\x00' + b'\xff' * (w * 3) for _ in range(h))
+
+        def chunk(tag, data):
+            c = struct.pack('>I', len(data)) + tag + data
+            return c + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+        return (b'\x89PNG\r\n\x1a\n'
+                + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+                + chunk(b'IDAT', zlib.compress(raw, 9))
+                + chunk(b'IEND', b''))
+
+    def wdoc(d, name, build):
+        p = os.path.join(d, name)
+        doc = docx.Document()
+        build(doc, png_bytes())
+        doc.save(p)
+        return p
+
+    def heading(doc, text, level):
+        doc.add_heading(text, level=level)
+
+    with tempfile.TemporaryDirectory() as d:
+        png = os.path.join(d, '图9.png')
+        open(png, 'wb').write(png_bytes())
+
+        # 段落里嵌图：docx_text 折成一行 ⇒ R14 必须开火（这条同时证明下面那条未判行不是"整条判据在 Word 上沉默"）
+        def build_para(doc, _b):
+            heading(doc, '说明书', 2)
+            heading(doc, '具体实施方式', 2)
+            doc.add_paragraph('正文。')
+            doc.add_paragraph().add_run().add_picture(png)
+        p1 = wdoc(d, '段落嵌图.docx', build_para)
+        r = run([PY, f'{S}/check_iron_rules.py', p1])
+        body = [ln for ln in r.stdout.splitlines() if 'R14 说明书文字部分有插图' in ln]
+        assert_(r.returncode == 1 and len(body) == 1 and 'docx-embedded-object' in body[0],
+                f'Word 段落里嵌的图没被 R14 开火（折算行没进区域？）: {show(r)}', r)
+        assert_('R14 未判' not in r.stdout,
+                f'文本面已经开火了还补一条"未判"（同一份文书两个口径同时说话）: {show(r)}', r)
+
+        # 表格格子里嵌图：文本面看不见 ⇒ 必须出未判 note，退码仍是 0
+        def build_cell(doc, _b):
+            heading(doc, '说明书', 2)
+            heading(doc, '具体实施方式', 2)
+            tbl = doc.add_table(rows=1, cols=2)
+            tbl.cell(0, 0).text = '部件'
+            tbl.cell(0, 1).text = '示意'
+            tbl.cell(0, 1).paragraphs[0].add_run().add_picture(png)
+        p2 = wdoc(d, '格子里嵌图.docx', build_cell)
+        r = run([PY, f'{S}/check_iron_rules.py', p2])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and any('R14 未判' in ln and '表格格' in ln for ln in r.stdout.splitlines()),
+                f'格子里嵌的图被读成合规（该出"R14 未判"的 note）: {show(r)}', r)
+
+        # census 自己也得有牙：一份纯文字 Word 件不许冒出未判行（否则上面那条"未判"可能是恒真）
+        def build_clean(doc, _b):
+            heading(doc, '说明书', 2)
+            heading(doc, '具体实施方式', 2)
+            doc.add_paragraph('正文只有文字。')
+        p3 = wdoc(d, '纯文字.docx', build_clean)
+        r = run([PY, f'{S}/check_iron_rules.py', p3])
+        assert_(r.returncode == 0 and not any('R14 未判' in ln for ln in r.stdout.splitlines()),
+                f'纯文字 Word 件也报"R14 未判"（census 恒正 ⇒ 那条未判行是假信号）: {show(r)}', r)
+
+    # ---------- 生产侧真工件：骨架开箱必须干净，注入即开火 ----------
+    work = tempfile.mkdtemp(prefix='r14_prod_')
+    try:
+        pkg = os.path.join(work, 'R14_专利交付包')
+        r = run([PY, f'{S}/new_product_package.py', 'R14', work])
+        assert_(r.returncode == 0 and os.path.isdir(pkg), f'骨架生成失败: {show(r)}', r)
+        spec = os.path.join(pkg, '02_申请文件', '说明书_R14.md')
+        assert_(os.path.isfile(spec), f'生产侧没落出 02_申请文件/说明书_*.md: {show(r)}', r)
+        r = run([PY, f'{S}/check_iron_rules.py', spec])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'生产骨架开箱即被 R14 判红（豁免面或区域划错了）: {show(r)}', r)
+        txt = open(spec, encoding='utf8').read()
+        heads = [i for i, ln in enumerate(txt.splitlines(), 1) if ln.strip() == '## 具体实施方式']
+        assert_(len(heads) == 1, f'真工件里「## 具体实施方式」数出 {heads} 处，这一档空转', None)
+        inj = '\n'.join(txt.splitlines()[:heads[0]] + [IMG_MD] + txt.splitlines()[heads[0]:]) + '\n'
+        open(spec, 'w', encoding='utf8').write(inj)
+        r = run([PY, f'{S}/check_iron_rules.py', spec])
+        assert_(r.returncode == 1 and fired(r.stdout) == [heads[0] + 1],
+                f'真工件注入的图片行未在期望位点 {heads[0] + 1} 开火: {show(r)}', r)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    print('PASS R14 插图（md 两形状开火＋位点自算／化学式·数学式·表格·图N 引用 rc=0／围栏不豁免／'
+          '区域外三档静默＋区域为空不判／Word 段落嵌图开火·格子嵌图走未判·纯文字不误报未判／'
+          '生产真工件开箱干净且注入即红／SPEC_IMAGE 与 CLAIM_IMAGE 同一对象）')
 
 
 def test_r7_title_tiers():
@@ -4774,7 +4973,8 @@ if __name__ == '__main__':
              test_check_figures_colour,
              test_regen_docx,
              test_regen_docx_stale, test_check_iron_rules, test_check_iron_rules_docx,
-             test_iron_spec_region_shapes, test_iron_spec_region_shapes_docx, test_r7_title_tiers,
+             test_iron_spec_region_shapes, test_iron_spec_region_shapes_docx,
+             test_iron_r14_illustration, test_r7_title_tiers,
              test_check_evt, test_check_regulatory, test_check_design_completion,
              test_docx_table_channel,
              test_check_figure_labels, test_verify_search_report,

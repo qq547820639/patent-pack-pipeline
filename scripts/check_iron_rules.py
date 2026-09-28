@@ -59,6 +59,41 @@
      （txt:5594，PDF p159／2-23）。与 R12 共用同一张对照表做号集，**两面的方向正好相反**，
      再和权利要求书那一面（标记必须在括号内，归 check_claims 的 Q5）凑成三面三样。
      包内没有那张表 ⇒ R12/R13 一起报未判，既不折成违规也不折成合规。
+  R14 说明书文字部分有插图——《专利审查指南》（2023）第一部分第一章 §4.2 说明书逐字一句：
+     「说明书文字部分可以有化学式、数学式或者表格，但不得有插图。」
+     本机留底 .codebuddy/attest/zhinan2023_ahippc.txt:791-792（791 止于"但不得"、792 是"有插图。"），
+     该句在 `<<<PAGE 25>>>`（txt:770）之后、页眉行「发明专利申请的初步审查 专利审查指南第一部分第一章」
+     （txt:771）与其下「 （1-9） 21 」（txt:772）之下 ⇒ **PDF p25／印刷页 1-9**；节标题是
+     txt:763「细则 20  4.2 说 明 书」。⚠ **不是**第二部分第二章 §4.2（那一章通篇没有这句，
+     r73 量测轮按 grep 逐字否掉过（留底 .codebuddy/attest/r73_figcriterion/readings.md，该目录不入 git），
+     抄错章会把法源挂到讲权利要求的那一段上）。
+     开火形状两支都要、大小写都认：① md 图片语法 `![任意alt](任意目标)` ② 内嵌 HTML `<img …>`。
+     正则一份定义在 `SPEC_IMAGE`；权要那一族（check_claims 的插图判据 Q7，细则 22 条一款）取同一个
+     对象，两族不再各抄一份形状。
+     适用域**与 R11／R10 说明书面是同一个区域**（`spec_doc_blocks()` 的多块并集、逐块原点
+     `dstart + 1 + off`）——区域第 40 轮修过一次假阴性，另划一套迟早跟它分叉。区域外不判：
+     权利要求书那一面归 Q7，「说明书附图／附图」本来就是放图的那一件文书（指南 §4.3）。
+     法条点名的三种豁免形态（化学式／数学式／表格）是**结构上碰不到**、不是显式排掉：化学式
+     （C₂H₅OH）与数学式（F = m·a）在 md 与 docx 文本面都是纯文本，表格是 `|…|` 管道行，
+     两支正则都取不到它们。这一条由常驻注入正例证明（合规侧同一批字节整条门禁 rc=0），不靠注释声明。
+     **围栏代码块不豁免**（量过的选择，不是默认）。主理人自量件 `.codebuddy/attest/r79_fence_measure.py`
+     （分母写死＝git 跟踪的 *.md ＋ 生产真工件 `attest/**/02_申请文件/说明书_*.md`，两者并集去重）：
+     2026-09-28 读数 **26 份语料、15 份有说明书区域、区域正文 124 行、其中围栏内 0 行；
+     区域内图片形状命中 0 条、其中围栏内 0 条** ⇒ 豁免分支今天咬不到任何东西，写出来只多一个静默口子
+     （"把插图包进围栏"就从判据里消失了），而说明书正文里出现代码块本来就该被这一行顶出来。
+     另有一档更宽口径（把 `.codebuddy` 下的非跟踪探针语料一并扫进来，225 份 md／32 份有区域／264 行）
+     与这组同向，那份**本轮没复算**，只作旁证。
+     三态（不折叠）：文书里一块区域都没有 ⇒ 不适用，不出提示行（与 R11／R10 同口径）；
+     区域在、文本面零命中、docx 的 zip 级图形部件 census 也是 0 ⇒ **已判零违规**（不出行）；
+     **docx 盲区走未判**——`docx_text()` 只把**段落**里含 drawing/object/pict 的那一支折成一行
+     `![](docx-embedded-object)`，表格格子里嵌的图（表格分支按格取文）与页眉页脚里的图
+     （只读 word/document.xml）它读不到，第 73 轮两份构造件（表格内嵌图／页眉嵌图）实测都是
+     `word/media/ 有 1 个部件而折算行 0 行` ⇒ census>0（或 census 读不动）而文本面零命中时
+     打一条 note「R14 未判（docx 有图形部件但文本面看不见：表格格／页眉那一类）」，
+     既不折成违规也不折成合规；退码语义不动（未判与合规都是 0，真违规 1，输入读不动 2）。
+     自家文档提醒：跟踪语料里有一行**逐字**写着 `![](docx-embedded-object)`
+     （references/hard-rules.md 讲 Q7 docx 折算行那一句），它在任何说明书区域**之外**所以本条零红；
+     谁把那句话挪进「说明书」或那五节的标题底下，门禁就会把自家文档判红。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -162,6 +197,22 @@ _HD = re.compile(r'^(#{1,6})\s+(.*)$')          # 只认"# 后接空白"的标�
 _HD_PAREN = re.compile(r'[（(].*?[）)]')         # 尾部括注（"（必填）"式模板标注）
 _HD_NUM = re.compile(r'^[0-9０-９.、\s]+')       # 编号前缀（"2." "2.1" "2、"）
 CLAIMS_QUOTE_REF = re.compile(r'如权利要求[^，。；\n]{0,24}所述')
+# R14 的图片形状（说明书文字部分不得有插图）。两支都要、大小写都认：
+#   ① md 图片语法 `![任意alt](任意目标)`   ② 内嵌 HTML `<img …>`
+# 定义只在这一处：权要那一族（`check_claims.py` 的插图判据 Q7，细则 22 条一款）与本条认的是同一个
+# 形状，它本就 `_cir = _load('check_iron_rules')`，所以那边取本常量的别名——两处各抄一份迟早分叉
+# （与本文件 COMMERCIAL／SPEC_SECTIONS 同一条纪律）。
+# 为什么这一支能"结构上"放过法条点名的三种豁免形态：化学式（C₂H₅OH）与数学式（F = m·a）在 md 与
+# docx 文本面都是纯文本，表格是 `|…|` 管道行——两种形状都取不到它们，所以不写豁免分支；
+# 常驻用例的合规侧（同批字节换成化学式／数学式／表格三行／"图 1"一句）整条门禁 rc=0 就是这件事的证明，
+# 不靠注释声明。围栏代码块**不豁免**（理由与实测读数见模块 docstring 的 R14 那一格）。
+SPEC_IMAGE = re.compile(r'!\[[^\]]*\]\([^)]*\)|<img\b', re.I)
+# docx 图形部件普查用的标签名（Word 的三个世代：DrawingML / OLE / 旧式 VML）。
+# 命名空间前缀不写死（`w:` 是常规写法，但前缀由文档自己的 xmlns 决定），所以只认"末段标签名"。
+# **字节**模式不可省：`docx_graph_census` 拿的是 `zipfile.read()` 的 bytes，
+# 用 str 模式去 findall 会抛 TypeError，症状是"整条门禁崩在第一份 Word 件上"（本轮实测踩过一次）。
+DOCX_GRAPH_TAG = re.compile(rb'<(?:[A-Za-z_][-.0-9A-Za-z_]*:)?(?:drawing|object|pict)\b')
+
 # R12／R13：同一张「标记｜名称」对照表，三面各有自己的写法（第 39 轮，法源已亲验的指南）：
 #   权利要求书 —— 标记**必须**放括号里（细则第二十二条，check_claims 的 Q5 那一头）；
 #   具体实施方式 —— 标记**不得**加括号，且要紧跟技术名称（指南第二部分第二章 §2.2.6，
@@ -351,8 +402,12 @@ def spec_doc_blocks(lines):
     return blocks
 
 
-def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None):
-    """对单份文书文本跑全部判据，返回 (findings, notes)。notes 为不计入违规的说明行。"""
+def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, docx_graphs=None):
+    """对单份文书文本跑全部判据，返回 (findings, notes)。notes 为不计入违规的说明行。
+
+    docx_graphs：R14 的 zip 级图形部件普查读数（见 `docx_graph_census`）。CLI 侧由 main() 传；
+    没传而对一个 .docx 路径跑判据时，本函数自己补算一次——拿"没普查"当"没有图形部件"就是
+    这条判据要避开的那个假绿（md 通道 census 恒 0，不涉及这一格）。"""
     findings, notes = [], []
     lines = text.splitlines()
 
@@ -408,13 +463,19 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None):
                                             hstart + 1 + off,
                                             f'商业性宣传用语「{w}」——{ref}', ln.strip()[:60]))
 
-    # R11＋R10 的说明书面：细则第二十条三款"……并不得使用'如权利要求……所述的……'
-    # 一类的引用语，也不得使用商业性宣传用语"。区域是**整份说明书**（「说明书」标题那一块 ∪
-    # 那五节各自的块，任一层级、同名多处全并入——见 spec_doc_blocks），
-    # 词表复用 R10 的 COMMERCIAL（一张词表三张面，不抄第二份）；引用语是独立正则。
-    # 一块都没有 ⇒ 不适用（不出提示行），与 R10 两节的口径一致；也不许因为区域变了就把
-    # "看不见"折成"合规"或新添一条"未判"噪声。位点 dstart + 1 + off 由**当前这一块**给出。
-    for dstart, dbody in spec_doc_blocks(lines):
+    # R11＋R10 的说明书面＋R14：三条判据**共用同一个区域**（`spec_doc_blocks`，多块并集、逐块原点
+    # dstart + 1 + off）。细则第二十条三款"……并不得使用'如权利要求……所述的……'
+    # 一类的引用语，也不得使用商业性宣传用语"；《专利审查指南》（2023）第一部分第一章 §4.2
+    # 那句「说明书文字部分可以有化学式、数学式或者表格，但不得有插图。」管的也是**同一份说明书**，
+    # 所以 R14 另划一套区域只会跟这套在第 40 轮修过的划法分叉（区域内每一行三个问题一起问）。
+    # 词表复用 R10 的 COMMERCIAL（一张词表三张面，不抄第二份）；引用语是独立正则；
+    # 图片形状复用 SPEC_IMAGE（与权要那一族的 Q7 同一个对象）。
+    # 一块都没有 ⇒ 三条都不适用（不出提示行），与 R10 两节的口径一致；也不许因为区域变了就把
+    # "看不见"折成"合规"或新添一条"未判"噪声（R14 的未判只由下面那格 census 出，且只在 docx 通道）。
+    # 位点 dstart + 1 + off 由**当前这一块**给出。
+    spec_blocks = spec_doc_blocks(lines)
+    r14_hits = 0
+    for dstart, dbody in spec_blocks:
         for off, ln in enumerate(dbody):
             m = CLAIMS_QUOTE_REF.search(ln)
             if m:
@@ -426,6 +487,31 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None):
                     findings.append(Finding('R10 说明书宣传用语', path, dstart + 1 + off,
                                             f'商业性宣传用语「{w}」——细则第二十条三款：'
                                             '说明书里不得使用商业性宣传用语', ln.strip()[:60]))
+            im = SPEC_IMAGE.search(ln)
+            if im:
+                r14_hits += 1
+                findings.append(Finding('R14 说明书文字部分有插图', path, dstart + 1 + off,
+                                        '说明书文字部分不得有插图——《专利审查指南》（2023）'
+                                        '第一部分第一章 §4.2「说明书文字部分可以有化学式、数学式'
+                                        '或者表格，但不得有插图」（PDF p25／印刷页 1-9）；'
+                                        '化学式／数学式／表格三种豁免形态在文本面上不是图片形状，'
+                                        '本条是结构上碰不到它们，不是显式排掉',
+                                        ln.strip()[:60]))
+
+    # R14 的三态第三支：docx 的**盲区**不折成合规。
+    # docx_text 只把**段落**里含 drawing/object/pict 的折成一行 `![](docx-embedded-object)`，
+    # 表格格子里嵌的图（表格分支按格取文）与页眉页脚里的图（只读 word/document.xml）它读不到
+    # ⇒ 文本面零命中不等于这份 Word 件没有插图。zip 级 census>0 而文本面 0 命中 ⇒ 出一条未判 note；
+    # census==0 ⇒ 已判零违规（不出行）；md 通道 census 恒 0（图片形状就在文本面上，没有盲区）。
+    # 退码语义不动：未判与合规都是 0，只有真违规是 1（见 main 的 `1 if total else 0`）。
+    if spec_blocks and r14_hits == 0:
+        if docx_graphs is None:
+            # CLI 侧由 main() 与 read_text 同一个 try 里算好传进来（读不动 ⇒ rc=2）；
+            # 直接调 check_text 的路径没传就在当场补算一次，不拿"没普查"当"普查过且为零"。
+            docx_graphs = docx_graph_census(path)
+        if docx_graphs:
+            notes.append('R14 未判（docx 有图形部件但文本面看不见：表格格／页眉那一类）')
+
 
     # R12／R13：同一张「标记｜名称」对照表，三面三种写法（第四面是 check_claims 的 Q5）：
     #   摘要——标记应当加括号（指南第二部分第二章 §2.4，PDF p159／印刷页 2-23 逐字）；
@@ -631,6 +717,31 @@ def docx_text(path):
     return ''.join(out)
 
 
+def docx_graph_census(path):
+    """docx 里"图形部件"的 zip 级普查：`word/media/*` 的条目数 ＋ `word/document.xml` 里
+    drawing／object／pict 标签的出现数。不是 .docx ⇒ 0（md 通道没有这一层盲区，图片形状就在文本面上）。
+
+    为什么需要这一把尺：`docx_text()` 只把**段落**里的图形对象折成一行
+    `![](docx-embedded-object)`（本文件 docx_text 中 `}pStyle` 之后那一支），
+    表格格子里嵌的图（表格分支按格取文）与页眉页脚里的图（它只读 word/document.xml）都读不到
+    ⇒ 在这条通道上"文本面零命中"证明不了"没有插图"。
+    读数**只用来决定要不要出一条未判 note**，本身不作违规依据：判违规仍然只认文本面上那一行。
+    页眉／页脚那一类靠 media 条目抓到——嵌一张图必然带一个 word/media/ 部件
+    （r73 量测轮那份页眉嵌图实测 media=1、document.xml 里 drawing 0，留底
+    .codebuddy/attest/r73_figcriterion/readings.md，该目录不入 git）。
+    media 只数非零字节的条目（目录条目与零字节占位不算一个部件）——与 `rebuild_package` 同一口径。
+    读不动时**不吞异常**：main() 把它与 read_text 放在同一个 try 里，落 rc=2（输入不可用），
+    而不是退化成"这份件没有图形部件"。"""
+    if not path.lower().endswith('.docx'):
+        return 0
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        media = sum(1 for i in z.infolist()
+                    if i.filename.startswith('word/media/') and i.file_size)
+        ntags = len(DOCX_GRAPH_TAG.findall(z.read('word/document.xml')))
+    return media + ntags
+
+
 def read_text(path):
     """按扩展名分派读文本。docx 打不开/无 document.xml 时抛异常，由调用方转 rc=2。"""
     if path.lower().endswith('.docx'):
@@ -648,6 +759,31 @@ def gather_files(args):
                     out.append(os.path.join(dp, f))
         return out
     return args.targets
+
+
+# 从本文件源码现取自己定义的判据号（`Finding(` 后面的 R 号）。模式与 tests/test_scripts.py 的
+# `rule_span` 逐字同一把：`\d{1,2}` 不省成 `\d`（省了会把 R10 折成 1，断档从此看不见）、
+# `\s*` 不省（R8 的换行写法会被整个漏掉）。两边各写一把就会分叉，所以这里的模式与那份对齐，
+# 并由常驻档"提取器自己的两档"同时钉住两处（改一处另一处当场点名）。
+RULE_ID_RE = re.compile(r"Finding\(\s*['\"]R(\d{1,2})")
+
+
+def self_rule_span():
+    """合计行的自报区间：从自己的源码推出 `R<首>–R<尾>`；推不动就返回 None。
+
+    为什么不留一个字面量在这里：这一格从前写着"R1–R13"，本轮加 R14 之后它就是一句谎话，
+    而谎话只有拿源码现推才看得见（`test_check_iron_rules` 那条"门禁自报规则区间与实际判据"
+    就是拿源码现推的读数来比这一行打印出来的内容）。
+    号有断档（说明推导式漏读了一个 token，或有人跳号）时**不报区间**：
+    宁缺于一个假区间，也不为了有一行总结话而抄一份。"""
+    try:
+        src = open(os.path.abspath(__file__), encoding='utf8').read()
+    except OSError:
+        return None
+    nums = sorted({int(x) for x in RULE_ID_RE.findall(src)})
+    if not nums or nums != list(range(nums[0], nums[0] + len(nums))):
+        return None
+    return f'R{nums[0]}–R{nums[-1]}'
 
 
 def main():
@@ -688,27 +824,35 @@ def main():
     docs = []
     for p in paths:
         try:
-            docs.append((p, read_text(p)))
+            # R14 的 census 与正文抽取同生死：zip 读不动就是输入不可用（rc=2），
+            # 不能让它退化成"这份件没有图形部件"，那等于把 Word 件的盲区读成合规
+            docs.append((p, read_text(p), docx_graph_census(p)))
         except Exception as e:
             # 抽不出正文就谈不上判定：说清成因并 rc=2，不折成"这份文书没有违规"
             print(f'输入不可用，未做任何判定: {p}（{type(e).__name__}: {e}）')
             sys.exit(2)
     # R12/R13 的号集是**包级**事实：那张「标记｜名称」表常写在另一份文书的附图说明节里，
     # 按单份文书各读各的，摘要侧就永远看不见表、永远报未判。
-    marks = mark_map([t for _, t in docs])
-    for p, text in docs:
+    marks = mark_map([t for _, t, _g in docs])
+    for p, text, graphs in docs:
         if p.lower().endswith('.docx') and not re.search(r'^#{1,6}\s', text, re.M):
-            # 节标题靠 w:pStyle 还原；样式名对不上（非 pandoc 产物）时 R3/R4 根本找不到节，
-            # 这时"违规 0"不等于核过，必须说明未核。
-            print(f'  note {p}: 未识别到节标题样式 → R3/R4/R10/R12/R13（按节判的判据）未核')
-        findings, notes = check_text(p, text, allowed, brands, marks)
+            # 节标题靠 w:pStyle 还原；样式名对不上（非 pandoc 产物）时按节／按区域判的判据
+            # 根本找不到节（R11 与 R14 共用 `spec_doc_blocks` 那套区域，区域为空就是"没判"，
+            # 连那条 census 未判行都长不出来），这时"违规 0"不等于核过，必须说明未核。
+            print(f'  note {p}: 未识别到节标题样式 → R3/R4/R10/R11/R12/R13/R14'
+                  f'（按节判的判据）未核')
+        findings, notes = check_text(p, text, allowed, brands, marks, graphs)
         for note in notes:
             print(f'  note {p}: {note}')
         for f in findings:
             print(str(f))
         total += len(findings)
         print(f'{p}: 违规 {len(findings)}')
-    print(f'合计违规 {total}（规则 R1–R13，判据见脚本 docstring）')
+    # 自报区间一律现推，不手抄：这一格从前是字面的"R1–R13"，本轮加 R14 时它当场过期，
+    # 而常驻"门禁自报规则区间与实际判据"那档拿 tests 的 rule_span（同一把模式）对账会点名。
+    # 读不到源码或推导有断档时宁可写"区间未推"，也不报一个抄来的假区间。
+    span = self_rule_span() or '区间未推'
+    print(f'合计违规 {total}（规则 {span}，判据见脚本 docstring）')
     sys.exit(1 if total else 0)
 
 
