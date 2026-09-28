@@ -332,8 +332,11 @@
   44 条（三）"申请文件的格式不符合规定的"⇒ **补正级**，报文里明写，不许蹭不予受理那一档。
   适用域与 P10 共用同一条 `need_trio`（只列外观设计的包没有说明书这件文书，P12 出"不适用"note）。
   连带：`new_product_package.py` 的说明书骨架现在按 `SPEC_SECTIONS` 发五节
-  （**定义只有一处：`check_iron_rules.py:143` 的 `SPEC_SECTIONS`**，因为它那张"说明书区域"与 P12 判的是同一份法条清单；
-  `rebuild_package.py:118` 取 `_cir.SPEC_SECTIONS`，`new_product_package.py:142` 再取 `_rp.SPEC_SECTIONS`——
+  （**定义只有一处：`check_iron_rules.py` 里那个名为 `SPEC_SECTIONS` 的模块级常量**——这里不抄行号：
+  `636daa1` 往 docstring 与常量段插了 60+ 行，把原先写的 `:143` 指到了 `import importlib.util` 那行上，
+  而这类指针全仓没有一道机械力守着（套件全绿而指针已指到别处）。取法一律按符号名：
+  `rebuild_package.py` 里 `SPEC_SECTIONS = _cir.SPEC_SECTIONS` 那一行取一次，
+  `new_product_package.py` 里同名的赋值再取 `_rp.SPEC_SECTIONS`——
   箭头只能这么走，`rebuild_package` 已 `_load('check_iron_rules')`，反向 `_load` 就是循环导入；
   "三处同一个对象"由常驻 `is` 断言钉，两份各自可改的元组迟早分叉，`==` 看不见）。
   其中**背景技术节自带 R9 那句逐字查新声明**——P12 把该节从"没有本节⇒R9 未判"变成"有节⇒R9 要句"，

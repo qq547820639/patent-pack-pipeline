@@ -2619,7 +2619,8 @@ def test_iron_spec_region_shapes():
 
 # 为什么单开一档：md 面的 test_iron_spec_region_shapes 钉的是"区域按细则 20 条一款那五节的**节名**认"，
 # 而 Word 包上同一件事要多穿一层还原——`docx_text()` 按 `w:pStyle` 把标题段还原成 `#` 行
-# （`scripts/check_iron_rules.py:616-620` 那一支 `}pStyle`／`title` 的判断），
+# （`scripts/check_iron_rules.py` 的 `docx_text()` 里认 `}pStyle`／`title` 的那一支——行号不抄，理由见
+#  `references/hard-rules.md` 里 `SPEC_SECTIONS` 那格：这类指针没有机械力，插一次行就指到别处去）。
 # `_head_split`/`spec_doc_blocks` 才认得出那些节名。
 # 这一层一退化（样式名换了、还原步被删），Word 包上的 R11 与 R10 说明书面就**静默变成看不见**：
 # 门禁照样打"违规 0"。第 40 轮只用四份手工取证件看过一次，没留常驻用例——这一档补的就是那一格。
