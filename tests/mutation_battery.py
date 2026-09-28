@@ -681,22 +681,22 @@ MUTS = {
         # ── 第 52 轮 R25 申请人著录项四件齐（§4.1.3.1 txt:662-663＝PDF p22／1-6）──
         # 六条轴各一支：缺栏不报／位点错位／文件名字轴放宽／占位不检／未判不发声／二选一退化。
         ('R25 的缺栏判定整支关掉（底稿少一栏也不报）', IRON,
-         '    if miss:', '    if False:',
+         "    if miss:\n        findings.append(Finding(\n            'R25 申请人著录项缺栏'",
+         "    if False:\n        findings.append(Finding(\n            'R25 申请人著录项缺栏'",
          '缺邮政编码栏没按申请人那一行点名'),
         ('R25 的位点写死成第一行（缺哪件都不指申请人那行）', IRON,
          "            'R25 申请人著录项缺栏', path, apps[0][0],",
          "            'R25 申请人著录项缺栏', path, 1,",
          '缺邮政编码栏没按申请人那一行点名'),
         ('R25 的适用域从文件名字轴放宽到全部文书（交底书说明书一起吃进假红）', IRON,
-         '    if not is_request_draft(path):', '    if False:',
+         '    if not is_request_draft(path):\n        return [], []\n    apps = field_hits(APPLICANT_FIELD, lines)',
+         '    if False:\n        return [], []\n    apps = field_hits(APPLICANT_FIELD, lines)',
          # 两个合法原告：R7 那档先红——它那份交底书夹具写着 `   - 申请人：某单位`，
          # 轴一放宽 R25 就在那份内部文书上凭空开火，正是这条轴挡着的假红面；
          # 本族极（⑧）是第二原告。两边都真，expect 写成这对集合。
          ('轴放宽到别的文书也判了（假红面）', '缺字段时的 R7 未核三态被改动')),
-        ('R25 不检占位（栏位有但值是骨架占位也被当成已填）', IRON,
-         '          if hits and any(PLACEHOLDER_TOKEN.search(v) for _, v in hits)]',
-         '          ] if False else []',
-         '四栏占位没走未判'),
+        # 占位那一路只留一支臂：计数已抽成 R25／R26 共用的 `field_group_tally`，
+        # "不检占位"与"注记不发声"改的是同一个可观察，留两条就是同形 needle 互相吃掉。
         ('R25 把"占位数不清"折成沉默（未判注记不发声）', IRON,
          "        notes.append('R25 未判（' + '、'.join(ph) + ' 还是占位——填没填判不了，不折成合规）')",
          '        pass',
@@ -705,6 +705,29 @@ MUTS = {
          '         field_hits(CREDIT_UNIQ_FIELD, lines) + field_hits(CREDIT_ID_FIELD, lines)),',
          '         field_hits(CREDIT_UNIQ_FIELD, lines)),',
          '「或者身份证件号码」那支没被认成同一件'),
+        # ── 第 54 轮 R26 优先权声明三件伴栏（细则第三十四条）──
+        ('R26 的漏写判定整支关掉（声明了优先权、三栏全无也不报）', IRON,
+         "    if miss:\n        findings.append(Finding(\n            'R26 优先权声明缺伴栏'",
+         "    if False:\n        findings.append(Finding(\n            'R26 优先权声明缺伴栏'",
+         '漏写原受理机构名称没按声明那一行点名'),
+        ('R26 把"声明还是占位"折成可判（没定也去比三栏）', IRON,
+         '    if any(PLACEHOLDER_TOKEN.search(v) for _, v in decl):',
+         '    if False:',
+         '声明占位那档没走未判'),
+        ('R26 替法条造义务（没声明优先权也去硬凑三栏）', IRON,
+         '    if not decl:\n        return [], []',
+         '    if False:\n        return [], []',
+         # 两个合法原告：本族极点名"凑齐三栏"；但触发一放宽后**第一批**红的其实是 R19 那档
+         # ——它的底稿没有优先权一节，被硬凑三栏就变成整包违规，抢在 R26 的极之前。
+         ('没声明优先权却被要求凑齐三栏', '同值的两处发明名称被 R19 判红了')),
+        ('R26 的位点写死成第一行（不指声明那一行）', IRON,
+         "            'R26 优先权声明缺伴栏', path, decl[0][0],",
+         "            'R26 优先权声明缺伴栏', path, 1,",
+         '漏写原受理机构名称没按声明那一行点名'),
+        ('R26 的适用域从文件名字轴放宽（说明书那件也被判）', IRON,
+         '    if not is_request_draft(path):\n        return [], []\n    decl = field_hits(PRIORITY_FIELD, lines)',
+         '    if False:\n        return [], []\n    decl = field_hits(PRIORITY_FIELD, lines)',
+         '轴放宽到别的文书也判了'),
         # ── 第 46 轮 #33：§4.3 照片禁令判不动的那一面要点名成未判，不能静默消失 ──
         ('非 PNG 位图的未判点名整支关掉（jpg 又变成看不见＝被写成没有）', 'scripts/check_figures.py',
          '            elif low.endswith(RASTER_EXTS):', '            elif False:',

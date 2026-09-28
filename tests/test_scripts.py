@@ -6843,6 +6843,134 @@ def test_iron_r25_applicant_bibliographic_set():
           '自报区间含 R25 + docx 通道）')
 
 
+def test_iron_r26_priority_statement_set():
+    """R26：声明了优先权就得写明三件（细则第三十四条，读自行政法规库合并全文）。
+
+    这一条是**触发式**的，与 R22 到 R25 那一族差在"没有触发就不适用"：
+    `- 优先权声明：` 那一行不在 ⇒ 连注记都不出（法条那句的主语是"要求优先权的"，
+    不要求优先权的案子不该被硬凑这三栏）。声明在且填实 ⇒ 三栏（在先申请的申请日／在先申请的申请号／
+    原受理机构名称）缺一栏即红**一条**，一条里把缺的都列齐——拆成三条会把一处缺陷报成三处虚胖计数。"""
+    cir = _cir_r16()
+    ITEMS = cir.priority_item_fields()
+    DECL_PH = cir.priority_field('【待填写：要求优先权时才填，不要求就划去本节】')
+    DECL = cir.priority_field('要求本国优先权')
+    VALS = ('2025-03-14', '202510012345.6', '国家知识产权局')
+    REAL = [write + v for (_l, write), v in zip(ITEMS, VALS)]
+    PH = [write + '【待填写：' + label + '】' for label, write in ITEMS]
+
+    def draft(tag, decl=DECL, items=None, name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n',
+                cir.applicant_field('甲有限公司') + '\n',
+                cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
+                cir.postal_field('310012') + '\n',
+                cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                '## 优先权\n']
+        if decl is not None:
+            body.append(decl + '\n')
+        body += [ln + '\n' for ln in (items if items is not None else PH)]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        decl_ln = [i for i, ln in enumerate(text.splitlines(), 1)
+                   if ln.startswith('- 优先权声明：')]
+        return p, decl_ln
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R26 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R26 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 声明还是占位 ⇒ 未判，三栏不比
+        p, _ = draft('ph', decl=DECL_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '优先权声明还是占位' in judged(r.stdout)[0],
+                f'声明占位那档没走未判（注记还得点名是**声明**这一路）: {show(r)}', r)
+
+        # ② 声明＋三件真值 ⇒ 这条一句话都不出
+        p, _ = draft('full', decl=DECL, items=REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'三件齐却被说话: {show(r)}', r)
+
+        # ③ 漏一栏 ⇒ 违规、点名那一件、位点是声明那一行
+        p, dl = draft('miss1', decl=DECL, items=REAL[:2])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '原受理机构名称' in got[0]
+                and f'请求书著录项_E2E.md:{dl[0]}:' in got[0] and '第三十四条' in got[0],
+                f'漏写原受理机构名称没按声明那一行点名: {show(r)}', r)
+
+        # ④ 一栏退回占位 ⇒ 未判里只列那一件
+        p, _ = draft('oneph', decl=DECL, items=[REAL[0], PH[1], REAL[2]])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '在先申请的申请号' in judged(r.stdout)[0]
+                and '申请日' not in judged(r.stdout)[0],
+                f'单栏占位的未判没只列那一件: {show(r)}', r)
+
+        # ⑤ 没声明 ⇒ 不适用：不判红也不出注记（法条那句的主语是"要求优先权的"）
+        p, _ = draft('nodecl', decl=None, items=None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R26' not in r.stdout.split('合计违规')[0],
+                f'没声明优先权却被要求凑齐三栏: {show(r)}', r)
+
+        # ⑥ 三栏全无 ⇒ 一条红里列齐三件（计数不虚胖）
+        p, _ = draft('miss3', decl=DECL, items=[])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1
+                and all(lbl in got[0] for lbl, _w in ITEMS),
+                f'三栏全漏被拆成多条或漏列某件: {show(r)}', r)
+
+        # ⑦ 文件名字轴：同样几行写进说明书那件必须静默
+        p, _ = draft('axis', decl=DECL, items=[], name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了: {show(r)}', r)
+
+        # ⑧ 自报区间含到 R26
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 26, f'自报区间没把 R26 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R26 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r26_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(DECL.strip())
+            doc.add_paragraph(REAL[0].strip())       # 只写两件，第三件漏写
+            doc.add_paragraph(REAL[1].strip())
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '原受理机构名称' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上漏写原受理机构名称却没被抓到: {show(r)}', r)
+    print('PASS iron_r26 优先权声明三件伴栏（声明占位未判 + 三件齐静默 + 漏一栏点名带位点 + '
+          '单栏占位只列那一件 + 没声明不适用 + 三栏全漏只报一条 + 文件名字轴不误伤 + '
+          '自报区间含 R26 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6906,6 +7034,7 @@ if __name__ == '__main__':
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
+ test_iron_r26_priority_statement_set,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

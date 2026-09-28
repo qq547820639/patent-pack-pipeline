@@ -127,8 +127,8 @@
      生产真包上 R7/R15 走的是"未核"那一支。现在骨架写 `01_交底书/交底书_<产品>.md`，
      §0 那一行由判据侧 `title_field()` 拼（写法常量 `TITLE_FIELD_WRITE` 与 `TITLE_FIELD`
      同源，生成器不另抄字面——抄的那份一漂移，两把尺子在生产包上静默退回未核）。
-     现造包真读数：7 份 md、`合计违规 0（规则 R1–R18，判据见脚本 docstring）`、
-     7 份里只剩 6 份报 `R7 未核`，没报的那一份就是交底书（其余 6 份本就没有该字段，
+     现造包真读数（第 54 轮 2026-09-29 复算）：8 份 md、`合计违规 0（规则 R1–R26，判据见脚本 docstring）`、
+     8 份里 6 份报 `R7 未核`，没报的那两份是交底书与著录项底稿（其余 6 份本就没有该字段，
      仍走未核——三态说的是这份文书有没有可读字段，不是判据覆盖了多少同族措辞）。
      连带两面也现量过：交底书 §4「附图说明」使 N 族域内从 1 份变 2 份，那一份走"未判"（那条对照表判据只管说明书，内部文书不硬判）；§6「权利要求建议稿」进 Q 族
      适用域，"有节却无项"成为两条注记而包级覆盖账仍是 3 条；电池配一支"写法与判据失配"臂。
@@ -212,6 +212,15 @@
      「统一社会信用代码或者身份证件号码」是**二选一**，两栏任有一栏即算齐，不硬要两栏都在。
      同节"个人不得使用笔名""单位应当使用正式全称并与公章一致"（txt:664-667）明写不做——
      本仓没有可比对的人名表与机构名录，与 R20 那半句、R15 第三支同一盲区。
+  R26 声明了优先权就得写明三件——细则第三十四条（行政法规库合并全文）逐字
+     「要求优先权，但请求书中漏写或者错写在先申请的申请日、申请号和原受理机构名称中的一项或者
+     两项内容的，……应当通知申请人在指定期限内补正；期满未补正的，视为未要求优先权」。
+     判"漏写"那一支：著录项底稿里有 `- 优先权声明：` 那一行且已填实 ⇒ 三栏（在先申请的申请日／
+     在先申请的申请号／原受理机构名称）得各有其一，栏名逐字取自法条；整栏没有 ⇒ 违规、
+     栏在值占位 ⇒「R26 未判」、有真值 ⇒ 这一件判过。**没有优先权声明 ⇒ 不适用**（连注记都不出）——
+     法条那句的主语是"要求优先权的"，不要求优先权的案子不该被硬凑这三栏。
+     同条另两支明写不做：副本须经原受理机构证明／电子交换视为已交（要外部证据），
+     以及"申请人与在先申请副本记载不一致须提交优先权转让证明"（要拿副本比对，本仓没有）。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -596,6 +605,18 @@ def is_request_draft(path):
     return REQUEST_DRAFT_NAME in os.path.basename(path)
 
 
+def field_group_tally(items):
+    """一组「栏名 → 该栏命中的行」的三态归纳：整栏没有 ⇒ miss，栏在而值占位 ⇒ ph。
+
+    R25（申请人那四件）与 R26（优先权那三件）共用这一份计数——两条判据各写一遍迟早漂移，
+    而漂移的方向恰好是"一边把缺栏折成未判、另一边把占位折成合规"那种读不出来的错。
+    """
+    miss = [label for label, hits in items if not hits]
+    ph = [label for label, hits in items
+          if hits and any(PLACEHOLDER_TOKEN.search(v) for _, v in hits)]
+    return miss, ph
+
+
 def applicant_bibliographic_set(path, lines):
     """R25 四件齐：缺栏判红、占位未判。判据号写在 `Finding(` 字面里，理由见 `field_line_limits` 的注。"""
     if not is_request_draft(path):
@@ -610,9 +631,7 @@ def applicant_bibliographic_set(path, lines):
         ('统一社会信用代码或者身份证件号码',
          field_hits(CREDIT_UNIQ_FIELD, lines) + field_hits(CREDIT_ID_FIELD, lines)),
     ]
-    miss = [label for label, hits in items if not hits]
-    ph = [label for label, hits in items
-          if hits and any(PLACEHOLDER_TOKEN.search(v) for _, v in hits)]
+    miss, ph = field_group_tally(items)
     findings, notes = [], []
     if miss:
         findings.append(Finding(
@@ -623,6 +642,65 @@ def applicant_bibliographic_set(path, lines):
             '底稿少一栏＝请求书那一栏没人负责抄，位点报申请人那一行'))
     if ph:
         notes.append('R25 未判（' + '、'.join(ph) + ' 还是占位——填没填判不了，不折成合规）')
+    return findings, notes
+
+
+# ── R26 声明了优先权就得写明那三件（细则第三十四条）──
+# 行政法规库合并全文（`.codebuddy/attest/xzfg1697.htm`）第三十四条逐字：
+# 「要求本国优先权，申请人在请求书中写明在先申请的申请日和申请号的，视为提交了在先申请文件副本。
+#   要求优先权，但请求书中漏写或者错写在先申请的申请日、申请号和原受理机构名称中的一项或者两项
+#   内容的，国务院专利行政部门应当通知申请人在指定期限内补正；期满未补正的，视为未要求优先权。」
+# 判点是**漏写**那一支：底稿声明了优先权，三件就得各有其一——栏名逐字取自法条
+# （在先申请的申请日／在先申请的申请号／原受理机构名称），不是房内口径。
+# 三态与 R25 同格：声明在、某一件**整栏没有** ⇒ 违规（漏写，后果是"视为未要求优先权"这一档）；
+# 栏在而值占位 ⇒ 未判；有真值 ⇒ 这一件判过。
+# **没声明优先权 ⇒ 不适用**（连注记都不出）：法条那句的主语是"要求优先权的"，
+# 没有优先权的案子不该被要求填这三栏——这一档与 §4.1.5 代表人那句同样是"法律自己决定默认"。
+# 同条另两支**明写不做**：副本须经原受理机构证明／电子交换视为已交（要外部证据），
+# 以及"申请人与在先申请副本记载不一致须提交优先权转让证明"（要拿副本比对，本仓没有）。
+PRIORITY_FIELD = re.compile(r'^\s*-\s*优先权声明[:：]\s*(\S.*?)\s*$')
+PRIORITY_FIELD_WRITE = '- 优先权声明：'
+PRIORITY_ITEMS = (
+    ('在先申请的申请日', re.compile(r'^\s*-\s*在先申请的申请日[:：]\s*(\S.*?)\s*$'),
+     '- 在先申请的申请日：'),
+    ('在先申请的申请号', re.compile(r'^\s*-\s*在先申请的申请号[:：]\s*(\S.*?)\s*$'),
+     '- 在先申请的申请号：'),
+    ('原受理机构名称', re.compile(r'^\s*-\s*原受理机构名称[:：]\s*(\S.*?)\s*$'),
+     '- 原受理机构名称：'),
+)
+
+
+def priority_field(value):
+    """优先权声明那一栏的写法（R26 的触发条件就是这一行在不在、填没填）。"""
+    return PRIORITY_FIELD_WRITE + value
+
+
+def priority_item_fields():
+    """三件伴栏的写法常量（生成器与判据共用同一份，别各抄字面）。"""
+    return [(label, write) for label, _rex, write in PRIORITY_ITEMS]
+
+
+def priority_statement_set(path, lines):
+    """R26 声明了优先权就得写明三件。判据号写在 `Finding(` 字面里，理由见 `field_line_limits` 的注。"""
+    if not is_request_draft(path):
+        return [], []
+    decl = field_hits(PRIORITY_FIELD, lines)
+    if not decl:
+        return [], []
+    if any(PLACEHOLDER_TOKEN.search(v) for _, v in decl):
+        return [], ['R26 未判（优先权声明还是占位——有没有要求优先权都还没定，三栏不比）']
+    items = [(label, field_hits(rex, lines)) for label, rex, _w in PRIORITY_ITEMS]
+    miss, ph = field_group_tally(items)
+    findings, notes = [], []
+    if miss:
+        findings.append(Finding(
+            'R26 优先权声明缺伴栏', path, decl[0][0],
+            '底稿声明了优先权，却没有 ' + '、'.join(miss) + ' 那一栏——细则第三十四条逐字'
+            '「要求优先权，但请求书中漏写或者错写在先申请的申请日、申请号和原受理机构名称中的'
+            '一项或者两项内容的，……应当通知申请人在指定期限内补正；期满未补正的，视为未要求优先权」；'
+            '位点报优先权声明那一行'))
+    if ph:
+        notes.append('R26 未判（' + '、'.join(ph) + ' 还是占位——填没填判不了，不折成合规）')
     return findings, notes
 
 
@@ -1205,6 +1283,11 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     set_findings, set_notes = applicant_bibliographic_set(path, lines)
     findings += set_findings
     notes += set_notes
+
+    # R26 声明了优先权才判三件伴栏：没声明就不适用（法条那句的主语是"要求优先权的"）。
+    prio_findings, prio_notes = priority_statement_set(path, lines)
+    findings += prio_findings
+    notes += prio_notes
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。
