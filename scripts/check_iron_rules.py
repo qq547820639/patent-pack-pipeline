@@ -127,7 +127,7 @@
      生产真包上 R7/R15 走的是"未核"那一支。现在骨架写 `01_交底书/交底书_<产品>.md`，
      §0 那一行由判据侧 `title_field()` 拼（写法常量 `TITLE_FIELD_WRITE` 与 `TITLE_FIELD`
      同源，生成器不另抄字面——抄的那份一漂移，两把尺子在生产包上静默退回未核）。
-     现造包真读数：7 份 md、`合计违规 0（规则 R1–R17，判据见脚本 docstring）`、
+     现造包真读数：7 份 md、`合计违规 0（规则 R1–R18，判据见脚本 docstring）`、
      7 份里只剩 6 份报 `R7 未核`，没报的那一份就是交底书（其余 6 份本就没有该字段，
      仍走未核——三态说的是这份文书有没有可读字段，不是判据覆盖了多少同族措辞）。
      连带两面也现量过：交底书 §4「附图说明」使 N 族域内从 1 份变 2 份，那一份走"未判"（那条对照表判据只管说明书，内部文书不硬判）；§6「权利要求建议稿」进 Q 族
@@ -155,6 +155,11 @@
      没有摘要节报「R17 未判」。能判的前提是 `section_body()` 按层级断尾（见那个函数
      的 docstring：窗口若止于任何 `#` 标题，块内子标题会把窗口截在它之前，
      "读不到"会被写成"没有"）。
+  R18 摘要文字部分没写明本案发明名称——§4.5.1 txt:851-854 逐字「摘要文字部分应当写明发明的
+     名称和所属的技术领域……未写明发明名称或者不能反映技术方案要点的，应当通知申请人补正」。
+     只有「名称」这一件判得动（可比对的字符串，源＝同包交底书那一行字段，与 R16 同一个取法）；
+     技术领域／技术问题／要点／用途是内容判断，本仓不拿关键词匹配冒充判定，留在登记里等一个
+     能判的形状。摘要块为空 ⇒ 「R18 未判」（空块不折成违规）；取不到名称源 ⇒ 「R18 未判」。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -721,7 +726,7 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     # 而多报几条会让"一份摘要里有三个小标题"这种形状的计数变成噪音。
     r17_start, r17_body = section_body(lines, ABSTRACT_HEAD)
     if r17_start is None:
-        notes.append('未找到摘要节，R17 未判（不折成合规）')
+        notes.append('未找到摘要节，R17 未判、R18 未判（不折成合规）')
     else:
         for off, ln in enumerate(r17_body):
             if HEAD_LEVEL.match(ln):
@@ -731,6 +736,27 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
                     '摘要文字部分不得使用标题（摘要是写明名称、技术领域、要解决的技术问题、'
                     '技术方案要点与主要用途的连续正文，小标题不属于它）'))
                 break
+        # R18 摘要文字部分应当写明发明的名称——§4.5.1 逐字（txt:851-854）：
+        # 「摘要文字部分应当写明发明的名称和所属的技术领域……未写明发明名称或者
+        # 不能反映技术方案要点的，应当通知申请人补正」。
+        # 只有"名称"这一件判得动：它是可比对的字符串（源＝同包交底书那一行字段，与 R16 同一个取法）。
+        # 「所属技术领域／技术问题／要点／用途」是内容判断，做不成判据——本仓不拿关键词匹配冒充判定，
+        # 那三条留在 #29③ 里等一个能判的形状。
+        filled = [k for k, x in enumerate(r17_body) if x.strip()]
+        if not filled:
+            notes.append('摘要块是空的，R18 未判（空块不折成"没写名称"的违规）')
+        else:
+            r18_names = case_titles(path)
+            if r18_names is None:
+                notes.append('同包 01_交底书 里读不到发明名称字段，R18 未判')
+            else:
+                flat = re.sub(r'\s', '', ''.join(r17_body))
+                if not any(nm in flat for nm in r18_names):
+                    findings.append(Finding(
+                        'R18 摘要未写明发明名称', path, r17_start + 1 + filled[0],
+                        '摘要块正文里找不到本案发明名称（' + '／'.join(r18_names[:3]) + '）——'
+                        '§4.5.1 逐字：摘要文字部分应当写明发明的名称……'
+                        '未写明发明名称或者不能反映技术方案要点的，应当通知申请人补正'))
 
     r13_start, r13_body = section_body(lines, ABSTRACT_HEAD)
     r12_start, r12_body = doc_region(lines, SPEC_IMPL_HEAD)

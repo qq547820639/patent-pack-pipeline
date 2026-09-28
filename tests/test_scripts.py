@@ -5966,6 +5966,57 @@ def test_iron_r17_abstract_heading():
     print('PASS iron_r17 摘要标题（合规极 + 红极带绝对坐标 + 窗口按层级 + 未判 + Word 通道）')
 
 
+def test_iron_r18_abstract_names_title():
+    """R18：摘要文字部分应当写明发明的名称（§4.5.1 同句里今天判得动的那一支）。"""
+    with tempfile.TemporaryDirectory() as d:
+        def pkg(tag, abstract_body, with_field=True):
+            pk = os.path.join(d, tag)
+            cir = _cir_r16()
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            if with_field:
+                open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                    '# E2E 专利技术交底书\n' + cir.title_field(R16_TITLE) + '\n')
+            spec = os.path.join(pk, '02_申请文件', '说明书_E2E.md')
+            open(spec, 'w', encoding='utf8').write('# ' + R16_TITLE + '\n\n## 说明书摘要\n'
+                                                   + abstract_body + '\n## 具体实施方式\n\n正文。\n')
+            return spec
+
+        # ① 合规极：摘要正文里写着本案名称 ⇒ 不开火（这一极同时钉住"比对去空白"）
+        p = pkg('ok', '\n本装置为' + R16_TITLE + '，解决佩戴不稳的问题。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R18 摘要未写明发明名称' not in r.stdout,
+                'R18 把写明名称的摘要判红了', r)
+
+        # ② 红极 + 绝对坐标：摘要只写要点不写名称 ⇒ 点名第一行正文
+        body = '\n本装置包括躯干框架与锁扣本体。\n'
+        p = pkg('bad', body)
+        real = [i for i, ln in enumerate(
+            ('# ' + R16_TITLE + '\n\n## 说明书摘要\n' + body +
+             '\n## 具体实施方式\n\n正文。\n').splitlines(), 1) if '躯干框架与锁扣本体' in ln]
+        assert_(len(real) == 1, '夹具里数不出摘要正文首行，这一档空转', None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        fired = [ln for ln in r.stdout.splitlines()
+                 if ln.startswith('  FAIL R18 摘要未写明发明名称')]
+        assert_(r.returncode == 1 and len(fired) == 1 and f'说明书_E2E.md:{real[0]}:' in fired[0],
+                '摘要没写明发明名称那档没开火', r)
+
+        # ③ 三态极（名称源缺失）：包里读不到 `- 发明名称：` ⇒ 未判，不折成违规
+        p = pkg('nosrc', body, with_field=False)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R18 未判' in r.stdout
+                and not any(ln.startswith('  FAIL R18') for ln in r.stdout.splitlines()),
+                'R18 没有名称源时没走未判', r)
+
+        # ④ 三态极（空块）：摘要节在但正文全空 ⇒ 未判，不折成违规
+        p = pkg('empty', '\n\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and '摘要块是空的，R18 未判' in r.stdout
+                and not any(ln.startswith('  FAIL R18') for ln in r.stdout.splitlines()),
+                '摘要块为空时 R18 把未判折成了违规或沉默', r)
+    print('PASS iron_r18 摘要写明名称（合规极 + 红极带绝对坐标 + 无名称源未判 + 空块未判）')
+
+
 if __name__ == '__main__':
     missing = probe_env()
     TESTS = [test_check_figures, test_check_figures_media_count, test_check_figures_embedded,
@@ -5982,7 +6033,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading]
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
                if n.startswith('test_') and callable(v)}

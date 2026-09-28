@@ -140,6 +140,12 @@ REG = """# {name} 法规适用性与冲突裁决
 #     不带方括号占位（R2b）、无绝对化措辞（R1）。
 DISCLOSURE_TITLE = '一种腰部助力外骨骼装置'
 
+# 摘要占位里必须出现本案发明名称——§4.5.1 逐字「摘要文字部分应当写明发明的名称」，
+# 判据 R18 读的就是这一件事。名称与 §0 那一行同一个源（DISCLOSURE_TITLE），
+# 两处各写一份迟早对不上——与 #27 把 `- 发明名称：` 那行的写法收到判据侧是同一条纪律。
+ABSTRACT_SEED = ('本案发明名称为「' + DISCLOSURE_TITLE + '」；'
+                 '【待填写：技术方案要点与主要用途，含标点控制在三百字以内】')
+
 DISCLOSURE = """# {name} 专利技术交底书
 
 （骨架期各节只给结构与占位：内容取自产品定义与检索报告，填了行与句子才谈得上判。）
@@ -174,7 +180,7 @@ DISCLOSURE = """# {name} 专利技术交底书
 【待填写：一项独立权利要求加若干从属权利要求，逐条编号顺排】
 
 ## 7. 摘要建议稿
-【待填写：技术方案要点，含标点控制在三百字以内】
+{abstract_seed}
 
 ## 8. 检索关键词与 IPC 分类建议
 【待填写：检索关键词与分类号建议】
@@ -186,7 +192,7 @@ def disclosure_doc(name):
     发明名称那一行由 check_iron_rules.title_field() 拼——写宽或写窄一分，R7／R15
     就在这份生产文书上看不见它，所以字面不在这里出现第二次。"""
     fig_hint = dict(_nl.DOC_SECTIONS)['附图说明']
-    return DISCLOSURE.format(name=name,
+    return DISCLOSURE.format(name=name, abstract_seed=ABSTRACT_SEED,
                              title=_c.title_field(DISCLOSURE_TITLE),
                              novelty=_c.NOVELTY_CLAUSE,
                              fig_hint=fig_hint)
@@ -213,7 +219,12 @@ def spec_doc(name):
     # 三件应提交的文书先立节、内容留占位：节名由判据侧 rebuild_package.APPLY_SECTIONS 持有，
     # 生成器另抄一份节名就是给"P10 绿而骨架没那节"这种漂移留活路。
     for s in _rp.APPLY_SECTIONS:
-        parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
+        # 摘要那一件要带上本案名称（判据 R18 读的就是"摘要里有没有写明发明名称"），
+        # 另外两件留通用占位——与背景技术那节带上 R9 逐字声明是同一类"节内容跟着判据走"。
+        if s == '说明书摘要':
+            parts.append(f'## {s}\n{ABSTRACT_SEED}')
+        else:
+            parts.append(f'## {s}\n【待填写：骨架期占位，取自交底书】')
     # 细则第二十条一款那五节同样由判据侧持有（P12 与生成器一份，两端各抄迟早漂）。
     # 背景技术这一节必须带上 R9 那句逐字查新声明：P12 把该节从"没有本节⇒R9 未判"
     # 变成"有节⇒R9 要句"，不带的话骨架自己就过不了铁律门禁——这是设计好的反馈，不是要绕的误伤。
