@@ -34,9 +34,11 @@
      出处：《专利审查指南》（2023）第一部分第一章 §4.5.2，本机留底 txt:860-868＝PDF p27／印刷页 1-11
      （同页页眉 txt:845-846 抄引文要跳过），逐字「说明书有附图的，申请人应当指定其中一幅……作为
      摘要附图，并在请求书中写明图号」＋「指定的摘要附图不是说明书附图之一的，审查员可以通知申请人补正」。
-     两句里判得动的只有后一句：包内写了图号，就拿它去对包里真实存在的图号，机械可比。
-     前一句的"指定"落在**请求书**上，本仓交付包没有请求书载体（同"发明名称与请求书一致"那条卡的地方），
-     所以"有附图却读不到任何指定"一律走未判注记，既不折成违规也不折成合规。
+     两句各判各的：后一句拿包内写出的图号去对真实存在的图号；前一句的"指定"落在**请求书**上，
+     载体就是第 48 轮落进骨架的那件 `02_申请文件/请求书著录项_*.md`（第 47 轮登记"判不动"时
+     还没有这件载体，那句理由已随 `8b93842` 作废）。所以：有说明书附图而包内读不到任何指认 ⇒ 违规；
+     那一处写着占位 ⇒ 未判（还没定不等于没指定）；那一处填完了却没号 ⇒ 违规；
+     包里一张附图都没有 ⇒ 不适用（法条那句的主语是"说明书有附图的"）。
      认法：命中「摘要附图」那一行，若它是标题行则再吃掉本节正文（止于下一个标题行）——
      指认写在本行括注里（模板那种「## 摘要附图（指定图 X）」）或另起一行都读得到。
 
@@ -80,6 +82,9 @@ FIG_NUM_NAME = re.compile(r'^图\s*(\d+)$')
 ABSTRACT_FIG_SECTION = '摘要附图'
 ABSTRACT_FIG_NUM = re.compile(r'图\s*(\d+)(?!\d)')
 MD_HEAD_LINE = re.compile(r'^\s*#{1,6}\s')
+# 占位符的形状只有 R2b 那一份定义（`check_iron_rules.PLACEHOLDER_TOKEN`）：本门禁借它，不抄第二份。
+# T8 的"写了节却没指认"到底算违规还是算没填完，全靠这一枚正则分开——另抄一份就是给漂移留活路。
+PLACEHOLDER_TOKEN = _cir.PLACEHOLDER_TOKEN
 
 # 量值 token：可带比较符号、数字（含区间/小数）、紧跟的单位串。单位刻意只列常见工程写法，
 # 认不出的写法一律不判而不是判红——宁可漏报，也不拿一张永远缺一种写法的豁免表去追。
@@ -229,10 +234,19 @@ def abstract_figure_windows(text):
 
 
 def abstract_figure(root, docs):
-    """T8：摘要附图指定的图号 ↔ 说明书里真实存在的图号。
+    """T8：摘要附图那句法条的两半各判各的。
 
-    返回值与 T4–T6 同形状 (违规, 未判说明, 实判判据集合)：只有**读到了图号**才把 T8
-    记进实判，其余各档（无指定／有节无号／图号认不出）一律只出注记。
+    §4.5.2 前半句「说明书有附图的，申请人应当指定其中一幅……作为摘要附图，并在请求书中写明图号」
+    判**有没有指认**；后半句「指定的摘要附图不是说明书附图之一的，审查员可以通知申请人补正」
+    判**指认对不对**。前半句在第 47 轮登记成"判不动"，卡点是交付包里没有请求书——那个前提
+    载体已被第 48 轮（`8b93842`）作废：著录项底稿就是本仓的请求书落点，`## 摘要附图` 那一节也在。
+    于是四档各得其所：**底稿在、有附图、读不到指认 ⇒ 违规**；那一处**写着占位 ⇒ 未判**（还没定
+    不等于没指定）；那一处在底稿里**填完了却没号 ⇒ 违规**；指认出现在底稿**之外**的文书、或包里
+    压根没有那件底稿 ⇒ 未判（指认没落点，不折成违规）；包里一张附图都没有 ⇒ 不适用（法条那句的
+    主语是"说明书有附图的"）。
+
+    返回值与 T4–T6 同形状 (违规, 未判说明, 实判判据集合)：**只要真出过判决**才把 T8 记进实判
+    ——读到指认、或判出"该指定却没指定"都算；占位与不适用不算（把已判折成未报是第 36 轮那批坑）。
     """
     bad, notes, seen = [], [], set()
     desig, shell = [], []
@@ -242,18 +256,29 @@ def abstract_figure(root, docs):
             if nums:
                 desig += [(path, lineno, n) for n in nums]
             else:
-                shell.append((path, lineno))
+                shell.append((path, lineno, win))
     present, unnamed = present_figures(root)
     named = '、'.join(os.path.basename(p) for p in unnamed[:3]) + (' 等' if len(unnamed) > 3 else '')
     if unnamed:
-        # 认不出号的图也算"有图"，但拿猜出来的号去对指定，对上了也不说明明——与 T4–T6 同口径。
+        # 认不出号的图也算"有图"，但拿猜出来的号去对指定，对上了也不说明——与 T4–T6 同口径。
         notes.append(f'{root}: 图文件名认不出图号（{named}）→ T8 未判（不折成合规）')
         return bad, notes, seen
+    ph_sites = [(p, l) for p, l, w in shell if PLACEHOLDER_TOKEN.search(w)]
+    blank_sites = [(p, l) for p, l, w in shell if not PLACEHOLDER_TOKEN.search(w)]
+    # 指认的**落点**是那件著录项底稿（第 48 轮进骨架）：包里有它，"读不到指认"才是没指定；
+    # 包里根本没有那件载体时，指认没地方读 ⇒ 走未判，不折成违规——与 R16/R19"取不到载体就未判"同一条。
+    carrier = [p for p, _ in docs if _cir.REQUEST_DRAFT_NAME in os.path.basename(p)]
     if not desig and not shell:
-        if present:
-            notes.append(f'{root}: 有 {len(present)} 幅说明书附图，包内却读不到任何摘要附图指定'
-                         f' → T8 未判（指南 §4.5.2 要图号写在请求书里，本包没有请求书载体，'
-                         f'不折成违规也不折成合规）')
+        if present and carrier:
+            bad.append(f'{root}: 包里有 {len(present)} 幅说明书附图，著录项底稿（{os.path.basename(carrier[0])}）'
+                       f'里却读不到任何摘要附图指认 → T8'
+                       '（指南 §4.5.2 逐字「说明书有附图的，申请人应当指定其中一幅……作为摘要附图，'
+                       '并在请求书中写明图号」——载体在，指认就是没写）')
+            seen.add('T8')
+        elif present:
+            notes.append(f'{root}: 有 {len(present)} 幅说明书附图，但包里没有那件著录项底稿'
+                         f'（文件名含「{_cir.REQUEST_DRAFT_NAME}」的文书），指认没有落点'
+                         f' → T8 未判（§4.5.2 要图号写在请求书里，不折成违规也不折成合规）')
         else:
             notes.append(f'{root}: 没有说明书附图，也没有摘要附图指定 → T8 不适用'
                          f'（指南 §4.5.2 那句的主语是"说明书有附图的"）')
@@ -265,10 +290,29 @@ def abstract_figure(root, docs):
             got = '、'.join('图' + x for x in sorted(present, key=int)) if present else '一张图都没有'
             bad.append(f'{path}:{lineno}: 摘要附图指定了 图{n}，说明书附图里没有这张（{got}）→ T8'
                        f'（指南 §4.5.2：指定的摘要附图不是说明书附图之一的，应当补正）')
-    if shell:
-        where = '、'.join(f'{p}:{l}' for p, l in shell[:3])
-        notes.append(f'{root}: {len(shell)} 处「摘要附图」读不出图号（{where}）'
-                     f' → T8 未判（写了节不等于指定了图，不折成合规）')
+    # 空白那一处按落点分档：在底稿里＝填完了却没指认 ⇒ 违规；在别的文书里只是"谈到"那一节 ⇒ 未判。
+    blank_carrier = [(p, l) for p, l in blank_sites
+                     if _cir.REQUEST_DRAFT_NAME in os.path.basename(p)]
+    blank_other = [(p, l) for p, l in blank_sites
+                   if _cir.REQUEST_DRAFT_NAME not in os.path.basename(p)]
+    if blank_carrier and present:
+        for path, lineno in blank_carrier:
+            bad.append(f'{path}:{lineno}: 「摘要附图」那一处填完了却没有图号，'
+                       f'而包里有 {len(present)} 幅说明书附图 → T8'
+                       '（§4.5.2 要申请人指定一幅并写明图号；这里既读不出号、也没有占位标记，'
+                       '就是"写完了却没指认"，不许躲进未判）')
+        seen.add('T8')
+    elif blank_carrier:
+        notes.append(f'{root}: {len(blank_carrier)} 处「摘要附图」没写图号，而包里也没有说明书附图'
+                     f' → T8 不适用（法条那句的主语是"说明书有附图的"）')
+    if blank_other:
+        where = '、'.join(f'{p}:{l}' for p, l in blank_other[:3])
+        notes.append(f'{root}: {len(blank_other)} 处「摘要附图」在底稿之外（{where}）'
+                     f' → T8 未判（指认的落点是著录项底稿，别处的这一行只是谈到那一节）')
+    if ph_sites:
+        where = '、'.join(f'{p}:{l}' for p, l in ph_sites[:3])
+        notes.append(f'{root}: {len(ph_sites)} 处「摘要附图」还是占位（{where}）'
+                     f' → T8 未判（没定不等于没指定，不折成违规也不折成合规）')
     return bad, notes, seen
 
 

@@ -5273,9 +5273,11 @@ def test_figure_text_channel():
         assert_(r.returncode == 0 and 'T4–T6 未判' in r.stdout and '主视图.png' in r.stdout,
                 f'文件名认不出图号时被折成合规或违规（不猜号才对）: {show(r)}', r)
 
-        # ---- T8 摘要附图对账（第 47 轮，指南第一部分第一章 §4.5.2＝PDF p27／印刷页 1-11） ----
-        # 法条两句里判得动的只有「指定的摘要附图不是说明书附图之一的」那半句；
-        # "应当指定并在请求书中写明图号"那一半没有请求书载体，一律走未判，不许折成违规。
+        # ---- T8 摘要附图对账（指南第一部分第一章 §4.5.2＝PDF p27／印刷页 1-11） ----
+        # 法条两句现在各判各的：后半句"指定的必须是说明书附图之一"由第 47 轮接上；
+        # 前半句"说明书有附图的应当指定一幅并在请求书中写明图号"当年登记成"判不动——交付包里没有
+        # 请求书载体"，那个前提已被第 48 轮的著录项底稿作废，第 53 轮改成判得动：
+        # 有图而读不到任何指认 ⇒ 违规；那一处是占位 ⇒ 未判；那一处填完却没号 ⇒ 违规；没图 ⇒ 不适用。
         d8ok = os.path.join(d, 't8_ok')
         make(d8ok, docs=DOCS.replace('## 附图说明', '## 摘要附图（指定图 1）\n\n## 附图说明'))
         r = run([PY, f'{S}/check_figure_text.py', d8ok])
@@ -5294,9 +5296,9 @@ def test_figure_text_channel():
         d8shell = os.path.join(d, 't8_shell')
         make(d8shell, docs=DOCS.replace('## 附图说明', '## 摘要附图\n【待填写】\n\n## 附图说明'))
         r = run([PY, f'{S}/check_figure_text.py', d8shell])
-        assert_(r.returncode == 0 and '1 处「摘要附图」读不出图号' in r.stdout
+        assert_(r.returncode == 0 and '1 处「摘要附图」还是占位' in r.stdout
                 and '实判判据 7 条' in r.stdout,
-                f'有节无号被折成合规（未判要点名处数、且不进覆盖账）: {show(r)}', r)
+                f'占位那处被折成违规或合规（未判要点名处数、且不进覆盖账）: {show(r)}', r)
         # 正文里再"谈到"这四个字（写明摘要附图图号）不能再算一处：窗口吃掉节内正文之后
         # 还逐行开判，就会把一处指认报成两处，计数与位点同时虚胖。
         d8dup = os.path.join(d, 't8_dup')
@@ -5306,12 +5308,52 @@ def test_figure_text_channel():
         assert_('2 处「摘要附图」' not in r.stdout and '1 处「摘要附图」' in r.stdout,
                 f'节内正文又出现该字样，被重复计成两处判定: {show(r)}', r)
 
+        # 第 53 轮新开的一极：指认的落点是**著录项底稿**——那一处填完了却没图号 ⇒ 违规，不许躲进未判
+        def carrier(root, text):
+            fd = os.path.join(root, '02_申请文件')
+            os.makedirs(fd, exist_ok=True)
+            p = os.path.join(fd, '请求书著录项_E2E.md')
+            open(p, 'w', encoding='utf8').write(text)
+            return p
+
+        d8blank = os.path.join(d, 't8_blank')
+        make(d8blank)
+        cp = carrier(d8blank, '# 著录项底稿\n\n## 摘要附图\n本节留空，等代理人定夺。\n')
+        r = run([PY, f'{S}/check_figure_text.py', d8blank])
+        assert_(r.returncode == 1 and '「摘要附图」那一处填完了却没有图号' in r.stdout
+                and '请求书著录项_E2E.md:3:' in r.stdout.replace(os.sep, '/')
+                and '实判判据 8 条' in r.stdout,
+                f'底稿里写完却没指认被折成未判（该判红并进覆盖账、位点在那一行）: {show(r)}', r)
+        # 同一句话写在**底稿之外**的文书里＝只是谈到那一节 ⇒ 未判，不判红（落点只有一处）
+        d8other = os.path.join(d, 't8_blank_other')
+        make(d8other, docs=DOCS.replace('## 附图说明', '## 摘要附图\n本节留空。\n\n## 附图说明'))
+        r = run([PY, f'{S}/check_figure_text.py', d8other])
+        assert_(r.returncode == 0 and '在底稿之外' in r.stdout and 'T8 未判' in r.stdout,
+                f'底稿之外的那一处被判成"没指认"（落点错位即假红）: {show(r)}', r)
+        # 底稿在、通篇读不到指认 ⇒ 违规（第 47 轮那句"本包没有请求书载体"的前提已被第 48 轮作废）
+        d8nocar = os.path.join(d, 't8_carrier_none')
+        make(d8nocar)
+        carrier(d8nocar, '# 著录项底稿\n\n## 申请人／发明人\n- 申请人：某单位\n')
+        r = run([PY, f'{S}/check_figure_text.py', d8nocar])
+        assert_(r.returncode == 1 and '著录项底稿（请求书著录项_E2E.md）' in r.stdout
+                and '读不到任何摘要附图指认' in r.stdout and '实判判据 8 条' in r.stdout,
+                f'底稿在、有附图却读不到指认，T8 没按 §4.5.2 前半句判红: {show(r)}', r)
+
         d8none = os.path.join(d, 't8_none')
         make(d8none)
         r = run([PY, f'{S}/check_figure_text.py', d8none])
-        assert_(r.returncode == 0 and '包内却读不到任何摘要附图指定' in r.stdout
-                and '不折成违规' in r.stdout,
-                f'有附图却无指定被判红（请求书不在包内，只能未判）: {show(r)}', r)
+        assert_(r.returncode == 0 and '指认没有落点' in r.stdout and 'T8 未判' in r.stdout,
+                f'包里没有著录项底稿时把"读不到指认"折成了违规（没落点只能未判）: {show(r)}', r)
+
+        # 没图时那一处只是多余的节：义务的主语不在，判红就是假红 ⇒ 只出不适用注记
+        d8blank_nofig = os.path.join(d, 't8_blank_nofig')
+        os.makedirs(os.path.join(d8blank_nofig, '01_交底书'))
+        open(os.path.join(d8blank_nofig, '01_交底书', '交底书.md'), 'w', encoding='utf8'
+             ).write('# 交底书\n无图。\n')
+        carrier(d8blank_nofig, '# 著录项底稿\n\n## 摘要附图\n本节留空。\n')
+        r = run([PY, f'{S}/check_figure_text.py', d8blank_nofig])
+        assert_(r.returncode == 0 and '而包里也没有说明书附图 → T8 不适用' in r.stdout,
+                f'没有附图时"底稿那一处没号"被判红了（法条主语不成立）: {show(r)}', r)
 
         d8nofig = os.path.join(d, 't8_nofig')
         os.makedirs(os.path.join(d8nofig, '01_交底书'))
