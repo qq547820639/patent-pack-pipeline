@@ -6208,6 +6208,96 @@ def test_iron_r19_title_across_docs():
     print('PASS iron_r19 发明名称跨文书一致（同值不开火 + 漂移带绝对坐标 + 无源未判 + 改源时副本代罪 + docx 通道）')
 
 
+def test_iron_r20_inventor_is_person():
+    """R20：发明人那一行不得是单位／集体／人工智能名称（§4.1.2 txt:635-637＝PDF p21／1-5）。
+
+    词表只收法条逐字点名的两个形状（课题组／人工智能）⇒ 命中集合是下界，这一档因此还
+    配了一组"同一词写在申请人行不触发"的极性对照：判点错位的假红最容易就长那样。"""
+    cir = _cir_r16()
+
+    def pkg(tag, inventor_lines=(), applicant=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '']
+        for v in inventor_lines:
+            body.append(cir.inventor_field(v) + '\n')
+        if applicant is not None:
+            body.append('- 申请人：' + applicant + '\n')
+        p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        open(p, 'w', encoding='utf8').write('\n'.join(body) + '\n')
+        return p
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R20 ')]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 合规极：真实姓名 ⇒ 不开火，也不出未判注记
+        p = pkg('ok', ['张明'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and not [x for x in r.stdout.splitlines() if ' note ' in x and 'R20' in x],
+                f'合规姓名那档被 R20 判红或出了注记: {show(r)}', r)
+
+        # ②③ 两支词表各一档，位点都要落在被改那一行
+        for tag, val, tok in (('group', '智能机械课题组', '课题组'), ('ai', '人工智能小助手', '人工智能')):
+            p = pkg(tag, [val])
+            r = run([PY, f'{S}/check_iron_rules.py', p])
+            got = fired(r.stdout)
+            assert_(r.returncode == 1 and len(got) == 1 and '请求书著录项_E2E.md:3:' in got[0],
+                    f'发明人「{val}」没被 R20 按「{tok}」开火或位点不对: {show(r)}', r)
+
+        # ④ 极性对照：同一个词在**申请人**行是合规（职务发明的申请人本来就是单位）
+        p = pkg('polarity', ['张明'], applicant='清北大学机械课题组')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout),
+                f'同一词写在申请人行被 R20 判红（判点错位）: {show(r)}', r)
+
+        # ⑤ 占位极：骨架那一行未填 ⇒ 未判，不折成合规
+        p = pkg('ph', ['【待填写：本人真实姓名，一人一行】'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and 'R20 未判' in r.stdout,
+                f'占位那档没走未判: {show(r)}', r)
+
+        # ⑥ 多处都判：三位发明人里两位违规 ⇒ 两条红（第二处不许成免检通道）
+        p = pkg('multi', ['张明', '智能机械课题组', '人工智能小助手'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 2,
+                f'多行发明人只报到第一处: {show(r)}', r)
+
+        # ⑦ 不适用：文书里根本没有发明人那一行 ⇒ 不判也不出注记
+        p = pkg('none', [])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout)
+                and not [x for x in r.stdout.splitlines() if ' note ' in x and 'R20' in x],
+                f'没有发明人字段却被 R20 说话: {show(r)}', r)
+
+        # ⑧ docx 通道：Word 件上的同一违规照判
+        try:
+            import docx
+        except ImportError:
+            print('  note R20 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r20_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.inventor_field('智能机械课题组').strip())
+            vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '请求书著录项_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上的发明人违规没被 R20 抓到: {show(r)}', r)
+    print('PASS iron_r20 发明人是个人（两支点名形状各成对 + 申请人行同词不触发 + 占位未判 + 多处都判 + 无字段不适用 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6270,7 +6360,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs,
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

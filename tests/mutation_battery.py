@@ -599,6 +599,24 @@ MUTS = {
         ('R19 的比较不剥空白（差一个空格就判红）', IRON,
          "            flat_val = re.sub(r'\\s', '', val)", '            flat_val = val',
          '名称只差一个空白却被 R19 判红（比对没剥空白）'),
+        # ── 第 49 轮 R20 发明人那一行（指南 §4.1.2＝txt:635-637＝PDF p21／1-5）四支各关自己 ──
+        ('R20 的词表命中整支关掉（发明人填课题组也不管）', IRON,
+         '        hit = next((t for t in INVENTOR_BANNED if t in val2), None)',
+         '        hit = None',
+         '没被 R20 按'),
+        ('R20 的第二支词表被吞（只认课题组、不认人工智能）', IRON,
+         "INVENTOR_BANNED = ('课题组', '人工智能')",
+         "INVENTOR_BANNED = ('课题组',)",
+         '没被 R20 按'),
+        ('R20 把"还是占位"那一支摘掉（未判折成合规）', IRON,
+         '        if PLACEHOLDER_TOKEN.search(val2):', '        if False:',
+         '占位那档没走未判'),
+        # 适用域越界那一支：判点从"发明人那一行"扩到申请人行——申请人是单位本来合法，
+        # 原告正是常驻档里那档极性对照（同一个词写在申请人行必须静默）。
+        ('R20 适用域越界（申请人行也按发明人判）', IRON,
+         "INVENTOR_FIELD = re.compile(r'^\\s*-\\s*(?:发明人|设计人)[:：]\\s*(\\S.*?)\\s*$')",
+         "INVENTOR_FIELD = re.compile(r'^\\s*-\\s*(?:发明人|设计人|申请人)[:：]\\s*(\\S.*?)\\s*$')",
+         '判点错位'),
         # ── 第 46 轮 #33：§4.3 照片禁令判不动的那一面要点名成未判，不能静默消失 ──
         ('非 PNG 位图的未判点名整支关掉（jpg 又变成看不见＝被写成没有）', 'scripts/check_figures.py',
          '            elif low.endswith(RASTER_EXTS):', '            elif False:',
