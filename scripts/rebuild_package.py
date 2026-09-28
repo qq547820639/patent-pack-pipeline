@@ -44,6 +44,9 @@ P5–P12 看的是**包本身**而不是 zip：P1–P4 全绿而包里本来就�
      这四要素**本轮不判红**：节里写"产品用途：…"还是"本设计用于…"是措辞问题，
      误伤面在没有真实交付包语料的本机量不出来（先例：R9 的"置于本节末尾"半条只提示不判红）。
      与 P9 的分工：全包"几张图"这件事只数一次、只报一遍——同时列了实用新型与外观设计而无图时，
+  P13 「专利清单」列了外观设计、且 02_申请文件 里确实有「简要说明」这一件时，四项各有其项
+     （产品名称／产品用途／设计要点／指定的图片或照片）；缺哪项点哪项。块取不出来走未判。
+     判的是标签形状（房内口径，比法条更具体）：内容判不动，见 DESIGN_BRIEF_ITEMS 旁注。
   P12 说明书那**一份**里五节齐：**技术领域／背景技术／发明内容／附图说明／具体实施方式**。
      法源逐字是《专利法实施细则》第二十条一款（"说明书应当包括下列内容：（一）技术领域：写明…
      （二）背景技术：…（三）发明内容：…（四）附图说明：说明书有附图的，对各幅附图作简略说明；
@@ -64,7 +67,7 @@ P5–P12 看的是**包本身**而不是 zip：P1–P4 全绿而包里本来就�
       02_申请文件 目录本身不在 ⇒ P10、P11、P12 未判（缺段已由 P5 报，不重复报成缺件）；
       一份带「说明书」节的文书都没有 ⇒ P12 未判（缺那件由 P10 报，不重复判）；只列外观设计 ⇒ P12 不适用。
 
-退出码: 0 全过或未判 / 1 存在不符（P1–P12 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
+退出码: 0 全过或未判 / 1 存在不符（P1–P13 任一）/ 2 输入不可用（zip 打不开等，说清成因）。
 注意：必须用 Python zipfile 写包——Info-ZIP zip(1) 在本环境不写 UTF-8 标志位（0x800），
 导致中文文件名在 Windows 资源管理器/部分解压软件下显示乱码。Python zipfile 对非 ASCII
 文件名自动置 UTF-8 标志位，Windows/macOS/Linux 全兼容。
@@ -108,6 +111,17 @@ APPLY_SECTIONS = ('说明书摘要', '权利要求书', '说明书')
 # （图片／照片由 image_count 在全包数，节名认不出来——照片不是 markdown 标题）。
 # 认法与 APPLY_SECTIONS 同一条：归一后**全等**，"简要说明建议稿"不与"简要说明"互认。
 DESIGN_SECTION = '简要说明'
+# P13：细则第三十一条一款那四项（指南 txt:3055-3070＝PDF p87-88／印刷页 1-72，逐字见 docstring）。
+# 判的是**标签形状**：法条要的是内容（名称／用途／设计要点／指定一幅最能表明设计要点的图片或照片），
+# 而内容判不动——判"有没有各自一行以该事项名称打头的声明"。这是**比法条更具体的房内口径**：
+# 标签齐而正文空不算这一条的事（占位符由 R2/T 族兜），漏标签才是本条要点出的那种"整项没写"。
+DESIGN_BRIEF_ITEMS = (
+    ('产品名称', re.compile(r'(?:产品名称|产品的名称)\s*[:：]')),
+    ('产品用途', re.compile(r'(?:产品的?)?用途\s*[:：]')),
+    ('设计要点', re.compile(r'设计要点\s*[:：]')),
+    ('指定的图片或者照片', re.compile(r'指定[^。\n]{0,24}?(?:图片或照片|图片、照片|视图|照片)'
+                                 r'|最能表明[^。\n]{0,16}?(?:图片|照片|视图)')))
+
 # P12：细则第二十条一款列的五节，二款要求"按照前款规定的方式和顺序撰写…并在每一部分前面写明标题"
 # ⇒ 判的是**节标题**（不是正文里提到这几个词），且必须在**同一份**说明书里齐。
 # 「附图说明」是条件项（20 条（四）"说明书有附图的，对各幅附图作简略说明"），单独按有无图定。
@@ -235,6 +249,28 @@ def shape_state(pkg):
                     notes.append('P11 未判：02_申请文件 目录本身不在（缺段已由 P5 报，'
                                  '这里不重复报成缺件）')
                 else:
+                    # P13：这一件在，不等于四项齐——细则第三十一条一款列了名称／用途／设计要点／
+                    # 指定一幅最能表明设计要点的图片或照片四项，缺哪项点哪项。
+                    # 取不到块（节名认得出但块起点找不到，例如只写成一级标题）走未判，不折成"四项全缺"：
+                    # 那是判据读不动，不是文书没写。
+                    if DESIGN_SECTION in aseen:
+                        for bf, bset in adocs[0]:
+                            if DESIGN_SECTION not in bset:
+                                continue
+                            bstart, bbody = _cir.section_body(
+                                adocs[2].get(bf, '').splitlines(), _cir.BRIEF_DESC_HEAD)
+                            if bstart is None:
+                                notes.append(f'P13 未判：{bf} 里「{DESIGN_SECTION}」这一节的块取不出来'
+                                             '（节名认得出、块起点找不到——不猜正文）')
+                                continue
+                            btxt = '\n'.join(bbody)
+                            miss = [lab for lab, rex in DESIGN_BRIEF_ITEMS if not rex.search(btxt)]
+                            if miss:
+                                bad.append(f'P13 {bf}：「{DESIGN_SECTION}」缺 {len(miss)} 项：'
+                                           + '／'.join(miss)
+                                           + '——细则第三十一条一款那四项（产品名称／产品用途／设计要点／'
+                                             '指定一幅最能表明设计要点的图片或者照片），'
+                                             '指南 txt:3055-3070 逐字；判的是标签形状，见 DESIGN_BRIEF_ITEMS 旁注')
                     if DESIGN_SECTION not in aseen:
                         bad.append(f'P11 02_申请文件 里找不到「{DESIGN_SECTION}」节'
                                    '（md 与 docx 两通道都读过了）——第四十四条（一）后段'
@@ -329,17 +365,20 @@ def read_apply_docs(app):
     把整个目录的节名并成一个集合会让"摘要在一个文件、技术领域在另一个"的拼盘读成合规。"""
     if not os.path.isdir(app):
         return None
-    docs, unread = [], []
+    docs, unread, bodies = [], [], {}
     for dp, _, fs in os.walk(app):
         for f in sorted(fs):
             low = f.lower()
             if not low.endswith(('.md', '.docx')):
                 continue
             try:
-                docs.append((f, head_names(_cir.read_text(os.path.join(dp, f)))))
+                text = _cir.read_text(os.path.join(dp, f))
             except Exception as e:
                 unread.append(f'{f}（{type(e).__name__}）')
-    return docs, unread
+                continue
+            docs.append((f, head_names(text)))
+            bodies[f] = text
+    return docs, unread, bodies
 
 
 def claim_rows(text):
@@ -448,7 +487,7 @@ def main(pkg):
         print('  note ' + n)                       # 未判单独说，不混进不符清单
     bad = verify(pkg, zfin)
     if bad:
-        print("MISMATCH（P1–P12）:")
+        print("MISMATCH（P1–P13）:")
         for b in bad:
             print('  ✗', b)
         sys.exit(1)

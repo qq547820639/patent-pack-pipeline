@@ -677,7 +677,11 @@ def test_rebuild_package():
         # P11：外观设计那一支的法定件（细则 44 条（一）**后段**＋专利法 27 条一）。
         # 第三十轮把 44 条（一）引成"……"时正好切掉了"或者外观设计专利申请缺少请求书、
         # 图片或者照片、简要说明的"这半句，于是 P9/P10 都落了地而这一支还空着。
-        BRIEF = '# 简要说明\n## 简要说明\n本外观设计产品的名称：手柄。用途：握持。\n'
+        BRIEF = ('# 简要说明\n## 简要说明\n本外观设计产品的名称：手柄。用途：握持。\n'
+                 '设计要点：握持部的曲面形状。指定的图片或者照片：主视图。\n')
+        # 四项里挑掉一项：P13 必须只点那一项（四项各判一支的样本；这里挑「设计要点」）
+        BRIEF_NOKEY = ('# 简要说明\n## 简要说明\n本外观设计产品的名称：手柄。用途：握持。\n'
+                       '指定的图片或者照片：主视图。\n')
 
         def mkbrief(tag, cells, brief=None, **kw):   # 缺件靠默认，交件必须显式给 brief=BRIEF
             p = mktbl(tag, cells, **kw)
@@ -690,6 +694,15 @@ def test_rebuild_package():
         # P10 那句"归 P11 判"的说明里就含 P11 三个字，字面判会把说明读成开火。
         assert_(b == [] and not any(x.startswith('P11') for x in n),
                 f'交了简要说明又有图的外观设计包被 P11 误伤: {b} / {n}', None)
+        # P13 的 must-not-fire：四项齐的本范本不许出声（`b == []` 这一条 P11 也管，
+        # 所以 P13 的红必须靠下面那支"只缺一行"的对照来证，不是靠这条绿）
+        assert_(not any(x.startswith('P13') for x in b + n),
+                f'四项齐的简要说明被 P13 判红或点名: {b} / {n}', None)
+        b3, n3 = rp.shape_state(mkbrief('P13_缺设计要点', ['外观设计'], png=1, brief=BRIEF_NOKEY))
+        k13 = [x for x in b3 if x.startswith('P13')]
+        assert_(len(k13) == 1 and '缺 1 项：设计要点——' in k13[0]
+                and not any(x.startswith('P11') for x in b3 + n3),
+                f'缺一行设计要点的简要说明没被 P13 单独点名: {b3} / {n3}', None)
         SPEC5 = ('技术领域', '背景技术', '发明内容', '附图说明', '具体实施方式')
         SPEC4 = ('技术领域', '背景技术', '发明内容', '具体实施方式')
 

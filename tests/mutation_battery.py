@@ -593,6 +593,10 @@ MUTS = {
          "        try:\n            reasons, colored, _ = verdict(f, allow_color)\n        except Exception as e:",
          "        try:\n            reasons, colored, _ = verdict(f, allow_color)\n        except ZeroDivisionError as e:",
          '读不动的 PNG 没走未判点名'),
+        # 第 46 轮 #32：P13 外观设计简要说明四项
+        ('P13 缺项点名整支关掉（四项只判在不在）', 'scripts/rebuild_package.py',
+         '                            if miss:', '                            if False:',
+         '缺一行设计要点的简要说明没被 P13 单独点名'),
         # ── 第 44 轮 #25（那句"未识别到节标题样式 → …（按节判的判据）未核"的号名单改为源码现推）两支 ──
         # ① 把常驻那把**尺子**退回收银：`roster_diff` 不再 AST 现推、直接抄字面常量当读数 ⇒ 双向差集永空，
         #   原告是它自己的牙齿（同档两份最小假脚本），不必等真语料哪天多出一条按节判的判据。
