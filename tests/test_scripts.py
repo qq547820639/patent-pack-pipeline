@@ -2636,6 +2636,47 @@ def test_docs_scripts_contract():
     coll = {t: sorted(v) for t, v in rule_home.items() if len(v) > 1}
     assert_(not coll, f'判据号被两个脚本各自定义，读者无法分辨指代: {coll}')
 
+    # ---- 同一份文件内的对账：脚本"打得出去的号"必须出现在它自己的模块 docstring 清单里 ----
+    # 上面那份 `defined_rules` 是三个取号模式**跨文件**的并集，天生看不见同一文件里的两栏不对账：
+    # 第 39 轮 R12/R13 落地时 docstring 清单还停在 R11、`Finding(` 已经打到 R13，
+    # 而 README 与 hard-rules 同时补了这两个号 ⇒ 并集两侧一起涨、跨文件契约照样绿
+    # （本轮现算差集 = {R12, R13}，靠人眼发现的；这一格把它变成机器发现）。
+    # 判决面的形状各族不同，这里只列"真打得出去"的两种：`Finding('R1 …')` 与报文里的 `→ 号`。
+    # claims 那一族的 Q 号是 f'… → Q7（…）' 的括号形状、不在 `Finding(` 里，
+    # 所以它不进这一格——硬凑只会把分母撑大而让断言永真；那一族仍由上面那条跨文件对账管。
+    SAME_FILE_EMIT = (SCRIPT_RES[0], SCRIPT_RES[2])
+
+    def _same_file_missing(src):
+        """该脚本自己打得出去、却没在自己模块 docstring 清单里逐条列出的判据号。"""
+        _emit = set()
+        for _pat in SAME_FILE_EMIT:
+            _emit |= set(re.findall(_pat, src, re.M))
+        return sorted(_emit - set(re.findall(SCRIPT_RES[1], src, re.M)))
+
+    # 牙齿自证：这一档在真语料上今天读到的必然全是"空"，而那既是合规的形状也是恒真的形状。
+    # 所以先喂两份最小样本——打了没列的那份必须点名 R2，补了清单的那份必须闭嘴。
+    assert_(_same_file_missing("  R1 列了\nFinding('R2 打了没列')\n") == ['R2'],
+            '同文件审计在最小组样上就不咬人（打了 R2 没列 R2 却读成空）', None)
+    assert_(_same_file_missing("  R1 列了\n  R2 也列了\nFinding('R2 打了也列了')\n") == [],
+            '同文件审计在合规样本上误咬（清单补齐了还报缺）', None)
+
+    _sf_scripts = _sf_ids = 0
+    for _n, _s in scripts.items():
+        _miss = _same_file_missing(_s)
+        assert_(not _miss,
+                f'{_n} 的模块 docstring 清单漏写自己打得出去的判据号 {_miss}'
+                f'（跨文件那份并集看不见这一格：文档侧同时补号就会抵消成绿）')
+        _sf_scripts += 1
+        _sf_ids += len(set(re.findall(SAME_FILE_EMIT[0], _s, re.M))
+                       | set(re.findall(SAME_FILE_EMIT[1], _s, re.M)))
+    # 分母自证：审到 0 个脚本＝这条从没跑过。本机实测：14 个脚本全部过审，
+    # 其中 7 个"打得得出号"（iron 走 `Finding(`，另外 6 个走报文里的 `→ 号`），号数合计 41；
+    # 收尾行报的两个数都由这个循环自己累加，不抄注释。
+    # 只设下限：新增脚本自动进分母，哪天取号模式被改窄或判据被整批搬走，这里才红。
+    assert_(_sf_scripts >= 6 and _sf_ids >= 25,
+            f'同文件对账的分母塌了（脚本 {_sf_scripts} 个、号 {_sf_ids} 个）：'
+            f'要么取号模式被改窄、要么判据被整批搬走，这条对账已经不再覆盖任何东西', None)
+
     doc_scripts = set(re.findall(r'scripts/([A-Za-z0-9_\-]+\.py)', doctxt))
     assert_(doc_scripts == set(scripts),
             f'脚本名不对齐 虚指={sorted(doc_scripts - set(scripts))} '
@@ -2716,7 +2757,8 @@ def test_docs_scripts_contract():
                     f'文档第 {ln_no} 行自报 {claimed}，脚本实际判据 {span}')
     assert_(hit >= 2, f'只核到 {hit} 处自报区间，覆盖面过窄（曾有两处各自漂移）')
     print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
-          f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处）')
+          f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处；'
+          f'同文件对账 {_sf_scripts} 个脚本/{_sf_ids} 个号——打得出去的号必须在自己 docstring 里列出）')
 
 
 def test_check_evt():
