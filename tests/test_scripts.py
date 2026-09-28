@@ -6927,8 +6927,11 @@ def test_iron_r26_priority_statement_set():
         p, _ = draft('miss3', decl=DECL, items=[])
         r = run([PY, f'{S}/check_iron_rules.py', p])
         got = fired(r.stdout)
+        # 「列齐」只能对着**引文之前**那段清单判：这条 Finding 自己嵌了法条逐字引文，
+        #  而引文里三个栏名一个不缺——拿整条消息判等于让引文替实现作证（本轮实测 SURVIVED 的成因）。
+        head = got[0].split('——')[0]
         assert_(r.returncode == 1 and len(got) == 1
-                and all(lbl in got[0] for lbl, _w in ITEMS),
+                and all(lbl in head for lbl, _w in ITEMS),
                 f'三栏全漏被拆成多条或漏列某件: {show(r)}', r)
 
         # ⑦ 文件名字轴：同样几行写进说明书那件必须静默
@@ -7059,8 +7062,9 @@ def test_iron_r27_divisional_parent_set():
         p, _ = draft('miss2', decl=DECL, items=[])
         r = run([PY, f'{S}/check_iron_rules.py', p])
         got = fired(r.stdout)
+        head = got[0].split('——')[0]
         assert_(r.returncode == 1 and len(got) == 1
-                and all(lbl in got[0] for lbl, _w in ITEMS) and '那几栏' in got[0],
+                and all(lbl in head for lbl, _w in ITEMS) and '那几栏' in head,
                 f'两栏全漏被拆成多条、漏列某件、或文法没跟着件数走: {show(r)}', r)
 
         # ⑦ 文件名字轴：同样几行写进说明书那件必须静默
@@ -7195,8 +7199,9 @@ def test_iron_r28_deposit_particulars_set():
         p, _ = draft('miss5', decl=DECL, items=[])
         r = run([PY, f'{S}/check_iron_rules.py', p])
         got = fired(r.stdout)
+        head = got[0].split('——')[0]
         assert_(r.returncode == 1 and len(got) == 1
-                and all(lbl in got[0] for lbl, _w in ITEMS) and '那几栏' in got[0],
+                and all(lbl in head for lbl, _w in ITEMS) and '那几栏' in head,
                 f'五栏全漏被拆成多条、漏列某件、或文法没跟着件数走: {show(r)}', r)
 
         # ⑦ 分类命名填了实值却没拉丁文名称 ⇒ 另一条红，位点是分类命名那一行
