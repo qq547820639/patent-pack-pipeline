@@ -6393,6 +6393,120 @@ def test_iron_r21_address_not_unit_name():
     print('PASS iron_r21 地址不被单位名代替（门牌合规 + 仅省加大学开火带位点 + 数字那一半有牙 + 下界静默 + 占位未判 + 申请人行不触发 + 无字段不适用 + docx 通道）')
 
 
+def test_iron_r22_r23_headcount_limits():
+    """R22／R23：专利代理师不超过两人（§4.1.6 txt:748-749＝PDF p24／1-8）、
+    联系人只能一人（§4.1.4 txt:723-725＝PDF p23／1-7）。数的是字段行数，一行一人。
+
+    这一档同时钉着第 49 轮那处接线坑：判据号塞进 `Finding(f'{rid} …')` 的参数里，
+    `self_rule_span()` 与文档契约都读不到它，自报区间会静默退回上一号。"""
+    cir = _cir_r16()
+    AGENT_PH = cir.agent_field('【待填写：真实姓名＋资格证号码＋电话，最多两人】')
+    CONTACT_PH = cir.contact_field('【待填写：单位且未委托代理时填一人】')
+
+    def pkg(tag, agents, contacts):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 专利代理\n']
+        lines = agents if agents else [AGENT_PH]
+        body += [cir.agent_field(v) + '\n' for v in lines]
+        body += ['## 其他\n']
+        body += [cir.contact_field(v) + '\n' for v in (contacts if contacts else [CONTACT_PH])]
+        p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        pos = {}
+        for i, ln in enumerate(text.splitlines(), 1):
+            if '专利代理师：' in ln:
+                pos.setdefault('agent', []).append(i)
+            if '联系人：' in ln:
+                pos.setdefault('contact', []).append(i)
+        return p, pos
+
+    def fired(out, rid):
+        return [ln for ln in out.splitlines() if ln.startswith(f'  FAIL {rid} ')]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 开箱形状：两个字段都是占位 ⇒ 各出一条未判，既不判红也不折成合规
+        p, _ = pkg('ph', None, None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout, 'R22') and not fired(r.stdout, 'R23')
+                and 'R22 未判' in r.stdout and 'R23 未判' in r.stdout,
+                f'占位行没走未判: {show(r)}', r)
+
+        # ② 恰好上限（两人）⇒ 静默；这一极给"超过"那根轴当牙
+        p, _ = pkg('two', ['张三', '李四'], ['王五'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout, 'R22') and not fired(r.stdout, 'R23'),
+                f'两人代理师／一人联系人被上限判红: {show(r)}', r)
+
+        # ③ 越界 + 位点：第三位代理师那一行才该获罪，不是第一行
+        p, pos = pkg('three', ['张三', '李四', '王五'], ['赵六'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout, 'R22')
+        assert_(r.returncode == 1 and len(got) == 1
+                and f'请求书著录项_E2E.md:{pos["agent"][2]}:' in got[0]
+                and '3 人' in got[0],
+                f'三个代理师没按越界那一行开火（位点或人数不对）: {show(r)}', r)
+
+        # ④ 联系人两个 ⇒ R23 开火，且不与 R22 混（那条只有一行，不该响）
+        p, pos = pkg('ct', ['张三'], ['王五', '赵六'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout, 'R23')) == 1
+                and not fired(r.stdout, 'R22')
+                and f'请求书著录项_E2E.md:{pos["contact"][1]}:' in fired(r.stdout, 'R23')[0],
+                f'两个联系人没被 R23 单独点名（或 R22 跟着响）: {show(r)}', r)
+
+        # ⑤ 混合：同一份文书两个字段都越界 ⇒ 各报一条（一条红不许吃掉另一条）
+        p, _ = pkg('both', ['甲', '乙', '丙', '丁'], ['王五', '赵六'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout, 'R22')) == 1
+                and len(fired(r.stdout, 'R23')) == 1,
+                f'两个上限同时越界只报出一条: {show(r)}', r)
+
+        # ⑥ 不适用：整份文书没有这两个字段 ⇒ 不判也不出注记
+        pk = os.path.join(d, 'none')
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        q = os.path.join(pk, '02_申请文件', '说明书_E2E.md')
+        open(q, 'w', encoding='utf8').write('# ' + R16_TITLE + '\n\n正文。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', q])
+        assert_(r.returncode == 0 and 'R22' not in r.stdout.split('合计违规')[0]
+                and 'R23' not in r.stdout.split('合计违规')[0],
+                f'没有这两个字段却被说话: {show(r)}', r)
+
+        # ⑦ 自报区间：号写在参数里就会被 self_rule_span 漏掉 ⇒ 这里钉住"至少 R1–R23"
+        r = run([PY, f'{S}/check_iron_rules.py', os.path.join(d, 'two',
+                '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 23,
+                f'自报区间没把 R22／R23 算进去（多半是号被塞进 f-string 参数）: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R22／R23 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r2223_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            for v in ('甲', '乙', '丙'):
+                doc.add_paragraph(cir.agent_field(v).strip())
+            vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout, 'R22')) == 1
+                    and '请求书著录项_E2E.docx' in fired(r.stdout, 'R22')[0],
+                    f'Word 件上三个代理师没被 R22 抓到: {show(r)}', r)
+    print('PASS iron_r22/r23 人数上限（恰好上限静默 + 越界带位点 + 两字段互不混 + 混合各报一条 + 占位未判 + 无字段不适用 + 自报区间含两号 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -6455,7 +6569,7 @@ if __name__ == '__main__':
              test_search_report_docx_channel, test_figure_text_channel, test_battery_needle_census,
              test_patent_figure, test_docs_scripts_contract,
              test_battery_crash_attribution, test_check_figures_input_guard,
-             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name,
+             test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

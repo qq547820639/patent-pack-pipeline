@@ -184,6 +184,16 @@
      并列写法共同的收尾「街道门牌号码」：整行一个数字都没有、又带着法条点名的「大学」，就是它
      举例禁止的形状。命中集合仍是下界——「浙江省杭州市西湖区」这种无门牌也没单位名的今天不判。
      占位 ⇒「R21 未判」；文书里没那一行 ⇒ 不适用，不出注记。
+  R22 专利代理师不得超过两人——§4.1.6 txt:748-749（＝PDF p24／印刷页 1-8）逐字
+     「一件专利申请的专利代理师不得超过两人」。读的是 `- 专利代理师：` 的**行数**（一行一人），
+     不从自由文本里猜名字；位点报越界那一行（第 3 行）。还有占位行 ⇒ 数不清人数 ⇒「R22 未判」。
+     同段代理机构"用登记的全称、不得用简称缩写、要与公章一致"（txt:742-744）明写不做：
+     本仓没有可比对的机构名录与公章，与 R15 第三支同一盲区。
+  R23 联系人只能一人——§4.1.4 txt:723-725（＝PDF p23／印刷页 1-7）逐字「联系人只能填写一人」。
+     同样数 `- 联系人：` 的行数；占位行 ⇒「R23 未判」；没那个字段 ⇒ 不适用不出注记
+     （联系人只在"申请人是单位且未委托代理"时才要，本仓不知道本案走哪条路，就不替它假定）。
+     同句"填写联系人的还要同时填写通信地址、邮政编码和电话号码"（txt:724-725）今天不判：
+     那要跨字段做条件核对，且"地址栏是否含邮编／电话"仍是措辞判断，先把这条记在这儿不装判过。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -423,6 +433,66 @@ ADDRESS_DIGIT = re.compile(r'\d')
 def address_field(value):
     """地址那一行的写法（生成器用，别处不另抄字面）。"""
     return ADDRESS_FIELD_WRITE + value
+
+
+# ── R22／R23 两个"人数上限"（同一片 §4.1.4 与 §4.1.6）──
+# 这两句给的是硬数字，不是措辞：
+#   §4.1.6 txt:748-749（＝PDF p24／印刷页 1-8）「一件专利申请的专利代理师不得超过两人」；
+#   §4.1.4 txt:723-725（＝PDF p23／印刷页 1-7）「联系人只能填写一人」。
+# 计数读的是**字段行数**（同一字段一行一人，与 §4.1.2 的"发明人可以多位"同一个式样），
+# 所以不需要从自由文本里猜名字——那是内容判断，本仓不做。
+# 只要有任一该字段的行还是占位，整条就数不清人数 ⇒ 未判（既不折成合规也不折成违规）。
+# 同段另两句**明写不做**：代理机构"应当使用登记的全文、不得使用简称或者缩写"与
+# "要与加盖公章上的名称一致"（txt:742-744）——本仓没有机构全称与公章的可比对权威源，
+# 与 R15 第三支（人名／单位名／商标）同一盲区。
+AGENT_FIELD = re.compile(r'^\s*-\s*专利代理师[:：]\s*(\S.*?)\s*$')
+AGENT_FIELD_WRITE = '- 专利代理师：'
+AGENT_MAX = 2
+CONTACT_FIELD = re.compile(r'^\s*-\s*联系人[:：]\s*(\S.*?)\s*$')
+CONTACT_FIELD_WRITE = '- 联系人：'
+CONTACT_MAX = 1
+
+
+def agent_field(value):
+    """专利代理师那一行的写法（一行一人；上限由 R22 数行数）。"""
+    return AGENT_FIELD_WRITE + value
+
+
+def contact_field(value):
+    """联系人那一行的写法（R23 数它的行数，上限一人）。"""
+    return CONTACT_FIELD_WRITE + value
+
+
+def field_hits(rex, lines):
+    """该字段出现的所有行 → [(行号, 值)]。"""
+    return [(i, m.group(1)) for i, raw in enumerate(lines, 1) for m in [rex.match(raw)] if m]
+
+
+def field_line_limits(path, lines):
+    """R22／R23 的人数上限。两条各写一段、判据号写在 `Finding(` 的字面里——
+    把号塞进参数（`Finding(f'{rid} …')`）会让 `self_rule_span()` 与文档契约都读不到它，
+    自报区间当场退回上一号（第 49 轮实测）。"""
+    findings, notes = [], []
+    hits = field_hits(AGENT_FIELD, lines)
+    if hits:
+        if any(PLACEHOLDER_TOKEN.search(v) for _, v in hits):
+            notes.append('R22 未判（专利代理师还有占位行，人数数不清——不折成合规也不折成违规）')
+        elif len(hits) > AGENT_MAX:
+            findings.append(Finding(
+                'R22 代理师超过两人', path, hits[AGENT_MAX][0],
+                f'专利代理师写了 {len(hits)} 人（{"、".join(v for _, v in hits)}），'
+                '上限是两人——§4.1.6 逐字「一件专利申请的专利代理师不得超过两人」；'
+                '位点报越界那一行'))
+    hits = field_hits(CONTACT_FIELD, lines)
+    if hits:
+        if any(PLACEHOLDER_TOKEN.search(v) for _, v in hits):
+            notes.append('R23 未判（联系人还有占位行，人数数不清——不折成合规也不折成违规）')
+        elif len(hits) > CONTACT_MAX:
+            findings.append(Finding(
+                'R23 联系人不止一人', path, hits[CONTACT_MAX][0],
+                f'联系人写了 {len(hits)} 人（{"、".join(v for _, v in hits)}），'
+                '上限是一人——§4.1.4 逐字「联系人只能填写一人」；位点报越界那一行'))
+    return findings, notes
 
 
 # ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
@@ -989,6 +1059,11 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
                 '例如不得仅填写××省××大学；本国地址那三种并列写法都以「街道门牌号码」收尾'))
     if r21_placeholder:
         notes.append('地址那一行还是占位（骨架期无人填），R21 未判（不折成合规）')
+
+    # R22／R23 两个人数上限：字段行一行一人，数行数就够了，不必从自由文本里猜名字。
+    lim_findings, lim_notes = field_line_limits(path, lines)
+    findings += lim_findings
+    notes += lim_notes
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。

@@ -632,6 +632,23 @@ MUTS = {
          "ADDRESS_FIELD = re.compile(r'^\\s*-\\s*地址[:：]\\s*(\\S.*?)\\s*$')",
          "ADDRESS_FIELD = re.compile(r'^\\s*-\\s*(?:地址|申请人)[:：]\\s*(\\S.*?)\\s*$')",
          '写在申请人行被 R21 判红'),
+        # ── 第 50 轮 R22／R23 人数上限（§4.1.6 txt:748-749＝PDF p24／1-8；§4.1.4 txt:723-725＝p23／1-7）──
+        ('R22 的上限放宽成三人（三个代理师也不报）', IRON,
+         'AGENT_MAX = 2', 'AGENT_MAX = 3',
+         '没按越界那一行开火'),
+        ('R22 的位点退回第一行（越界那一行没人指）', IRON,
+         'hits[AGENT_MAX][0]', 'hits[0][0]',
+         '没按越界那一行开火'),
+        ('R23 的判点整支关掉（两个联系人也不报）', IRON,
+         '        elif len(hits) > CONTACT_MAX:', '        elif False:',
+         '两个联系人没被 R23 单独点名'),
+        # 占位那一支两条共用同一行字面，锚点带上前两行才只吃 R22 那一条（否则命中 2、变异不落）。
+        ('R22 把"还有占位行"折成合规（数不清人数也照判静默）', IRON,
+         '    hits = field_hits(AGENT_FIELD, lines)\n    if hits:\n'
+         '        if any(PLACEHOLDER_TOKEN.search(v) for _, v in hits):',
+         '    hits = field_hits(AGENT_FIELD, lines)\n    if hits:\n'
+         '        if False:',
+         '占位行没走未判'),
         # ── 第 46 轮 #33：§4.3 照片禁令判不动的那一面要点名成未判，不能静默消失 ──
         ('非 PNG 位图的未判点名整支关掉（jpg 又变成看不见＝被写成没有）', 'scripts/check_figures.py',
          '            elif low.endswith(RASTER_EXTS):', '            elif False:',
