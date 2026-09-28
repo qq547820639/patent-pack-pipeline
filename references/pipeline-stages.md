@@ -53,7 +53,8 @@ S0 素材评估 → S1 特征提取 → S2 现有技术排查 → S2.5 处置表
 - 申请文件与交底书两份都要各跑一遍 `scripts/check_iron_rules.py`（R3 权文内占位注释、R4 摘要含标点字数只对申请文件形态生效，务必带 --search-report 才核 R5）。
 
 ## S8 打包交付
-- 用 scripts/new_product_package.py 生成骨架（含 `检索_<产品>.md` 与 `04_EVT验证/EVT_<产品>.md` 两份底稿，开箱即过 R/V/E 三道文本门禁）；复制文书；README 含专利清单表+提交前必读（时序/口径/待确认项/FTO 红线）。
+- 用 scripts/new_product_package.py 生成骨架（**6 份底稿**：`检索_<产品>.md`（V1–V3）、`01_交底书/交底书_<产品>.md`（templates §1 的 §0–§8，§0 那行 `- 发明名称：` 是 R7／R15 的唯一适用域）、`02_申请文件/说明书_<产品>.md`（N1–N4）、`04_EVT验证/EVT_<产品>.md`（E1–E4）、`05_法规与裁决/法规_<产品>.md`（G1–G5）、`03_设计补全/补全_<产品>.md`（K1–K4）。
+  份数与载体族名一律按 `new_product_package.py` 的 `main()` 现读，别在这里手抄——从前这行写"两份底稿、开箱即过 R/V/E 三道文本门禁"，而常驻 `test_new_product_package` 的自述是"开箱即过 R/V/E/G/K/N 六门禁"，两处都对不上）；复制文书；README 含专利清单表+提交前必读（时序/口径/待确认项/FTO 红线）。
 - scripts/rebuild_package.py 重建 zip（自带内容级比对 P1 字节数／P2 SHA-256／P3 CRC／P4 UTF-8 位；名单有差集时仍比交集内容）。
 
 ## S9 设计补全（缺失机构）

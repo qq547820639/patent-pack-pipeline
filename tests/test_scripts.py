@@ -230,8 +230,69 @@ def test_new_product_package():
         # 必须说"未判"，既不判红也不冒充核过（生产侧的三态，与 R12/R13 夹具档同一口径）。
         assert_('R12/R13 未判（看不见不等于合规）' in ri.stdout,
                 '骨架包上 R12/R13 没走"未判"三态（空表被折成合规，或被折成违规）', ri)
+        # ---------- 交底书底稿（第 45 轮）：R7／R15 第一次在生产交付面上有载体 ----------
+        # 这两把尺子只判 §0 那一行 `- 发明名称：`。从前骨架根本不写它，第 44 轮普查 348 份语料
+        # 带该字段的只有模板自述行与长度夹具 ⇒ 两把尺子在生产包上走"未核"，射程为零。
+        # 这一档就是那条射程的常驻反证：缺席断言（"未核"那句不该出现）单独不成立，
+        # 所以同场配两支"把名字改坏就当场点名"的效力对照（R7 硬上限／R15 纯笼统）。
+        _sp3 = importlib.util.spec_from_file_location('npp', f'{S}/new_product_package.py')
+        npp = importlib.util.module_from_spec(_sp3)
+        _sp3.loader.exec_module(npp)
+        _sp4 = importlib.util.spec_from_file_location('cir_td', f'{S}/check_iron_rules.py')
+        cir_td = importlib.util.module_from_spec(_sp4)
+        _sp4.loader.exec_module(cir_td)
+        td = os.path.join(d, 'TESTX_专利交付包', '01_交底书', '交底书_TESTX.md')
+        assert_(os.path.isfile(td), f'缺交底书底稿（R7／R15 在生产包上没有载体）: {r.stdout}', r)
+        td_text = open(td, encoding='utf8').read()
+        # 结构契约：§0–§8 的节名与顺序照 references/templates.md §1。两边都按判据侧的
+        # rebuild_package.head_names 归一（剥编号前缀、剥尾部括注）再比集合——模板改一节
+        # 而生成器没跟上、或生成器少立一节，都在这里点名（节名不在测试里手抄第二份清单，
+        # 模板那一侧的号行由本档现场从 templates 取）。
+        _sp5 = importlib.util.spec_from_file_location('rp_td', f'{S}/rebuild_package.py')
+        rp_td = importlib.util.module_from_spec(_sp5)
+        _sp5.loader.exec_module(rp_td)
+        _tpl = open(os.path.join(ROOT, 'references/templates.md'), encoding='utf8').read()
+        _blk = (_tpl.split('## 1. 技术交底书模板', 1)[1]
+                     .split('```markdown', 1)[1].split('```', 1)[0])
+        _heads = lambda t: rp_td.head_names(
+            '\n'.join(ln for ln in t.splitlines() if re.match(r'^##\s*\d', ln)))
+        assert_(_heads(td_text) == _heads(_blk),
+                f'交底书与 templates §1 的 §0–§8 不同构：生成侧 {sorted(_heads(td_text))} '
+                f'模板侧 {sorted(_heads(_blk))}', None)
+        # 字段行必须由判据侧的写法函数拼出来（生成器另抄一份字面，改了 TITLE_FIELD 就静默失配）
+        _field_line = cir_td.title_field(npp.DISCLOSURE_TITLE)
+        assert_(_field_line in td_text,
+                f'交底书里找不到判据写法拼出的那一行（生成器把字面另抄了一份？）: {_field_line}', None)
+        _m = cir_td.TITLE_FIELD.match(_field_line)
+        assert_(_m and _m.group(1) == npp.DISCLOSURE_TITLE,
+                f'TITLE_FIELD 取不回 title_field() 写进去的值（写侧与判据失配，'
+                f'R7／R15 在生产包上会退回"未核"）: {_field_line}', None)
+        rtd = run([PY, f'{S}/check_iron_rules.py', td])
+        assert_(rtd.returncode == 0 and '违规 0' in rtd.stdout
+                and '未找到「发明名称：」字段' not in rtd.stdout
+                and '背景技术节未找到' not in rtd.stdout,
+                f'交底书底稿上 R7／R15 仍是"未核"，或 §2 没带上 R9 那句逐字查新声明: {show(rtd)}', rtd)
+        # 效力对照（在包外的副本上做，包本体留给后面的档位保持开箱态）：
+        # 占位名换成"纯笼统"或超 60 字，两把尺子必须当场在骨架真工件上点名。
+        with tempfile.TemporaryDirectory() as inj:
+            for bad_title, tag in (('一种化合物', 'FAIL R15 发明名称纯笼统词'),
+                                   ('锁' * 61, 'FAIL R7 发明名称字数')):
+                p = os.path.join(inj, f'注入{len(bad_title)}.md')
+                open(p, 'w', encoding='utf8').write(
+                    td_text.replace(_field_line, cir_td.title_field(bad_title)))
+                assert_(_field_line not in open(p, encoding='utf8').read(),
+                        f'注入没落地（{tag} 那一档其实在判原件）', None)
+                rb = run([PY, f'{S}/check_iron_rules.py', p])
+                fired = [ln for ln in rb.stdout.splitlines() if ln.startswith('  ' + tag)]
+                assert_(rb.returncode == 1 and len(fired) == 1,
+                        f'骨架交底书换上「{bad_title[:12]}…」这个名称后 {tag} 没开火：'
+                        f'rc={rb.returncode} 红={fired}', rb)
+                assert_(f'{p}:' in fired[0], f'{tag} 报的位点不在被注入的那份文件上: {fired[0]}', rb)
         # 生产侧也要过 Q 族：骨架那份说明书底稿没有真权项，正确读数是一句"未判"，
         # 既不该判红（新判据与生产底稿打架会在这里点名），也不许被折成"核过了"。
+        # 交底书 §6「权利要求建议稿」从第 45 轮起也在这族的适用域里（CLAIMS_HEAD 认这个名字），
+        # 所以"有节却无项"那句现在是两条注记（每份文书一条），而包级覆盖账不变——
+        # 节面三条 Q7／Q8／Q12 两份文书读到的都是同一集合，并集仍是 3 条。
         rq = run([PY, f'{S}/check_claims.py', d])
         # 缺席断言不能写 `'→ Q' not in stdout`：三态注记自己就写着 `→ Q…未判`
         # （骨架这份是 `→ Q1–Q6、Q9–Q11、Q13 未判（有节却无项，那几条判不起）`），
@@ -246,6 +307,12 @@ def test_new_product_package():
                 and '→ Q1–Q6、Q9–Q11、Q13 未判（有节却无项，那几条判不起）' in rq.stdout
                 and not qfired,
                 f'新生成的包在权利要求形状门禁上的读数不对: {show(rq)}', rq)
+        assert_(any('交底书' in ln and '有权利要求书节' in ln
+                    for ln in rq.stdout.splitlines()),
+                f'交底书 §6 没被 Q 族吃进适用域（骨架包上这一族的射程又退回只剩说明书）: '
+                f'{show(rq)}', rq)
+        assert_('违规 0｜实判判据 3 条' in rq.stdout,
+                f'骨架包的 Q 族覆盖账不是 3 条（节面三条都该记进分母）: {show(rq)}', rq)
         # EVT 底稿在场，且骨架就能被 E1–E4 真判一次（有判定列的表，空行合法）
         evt = os.path.join(d, 'TESTX_专利交付包', '04_EVT验证', 'EVT_TESTX.md')
         assert_(os.path.isfile(evt), f'缺 EVT 报告底稿（E1–E4 没有载体）: {r.stdout}', r)
@@ -313,9 +380,19 @@ def test_new_product_package():
         lost_n = [c for c in cfl.COLS if c not in sp_text]
         assert_(lost_n == [], f'说明书底稿表头与判据 COLS 不同源，缺列 {lost_n}', None)
         rn = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
-        assert_(rn.returncode == 0 and '实核附图标记文书 1 份' in rn.stdout
+        # 域内文书从 1 份变 2 份（第 45 轮）：`in_scope` 的正文那一根轴是 `FIG_SCOPE.search(text)`，
+        # 而交底书 §4 就是「附图说明」节 ⇒ 骨架的交底书也入域。它那份的读数是 N1 **未判**
+        # （对照表是说明书的形式要求，交底书这类内部文书不硬判），不是多出一条红——
+        # 断言数的是"域内被真判的文书有几份"，骨架多一件入域文书，数字就得跟着新现实改。
+        assert_(rn.returncode == 0 and '实核附图标记文书 2 份' in rn.stdout
                 and '只有表头没有数据行' in rn.stdout,
                 '骨架上的说明书底稿未通过 N1–N4，或空表没走未判三态', rn)
+        # 交底书那一入域档必须停在"未判"，既不被折成违规（假红会挡住开箱），
+        # 也不被折成"核过了"（那等于新增一张没人判的表）
+        assert_('有附图说明节却没有图中标记说明对照表' not in rn.stdout,
+                f'交底书的附图说明节被 N1 硬判红（对照表是说明书的形式要求）: {show(rn)}', rn)
+        assert_('交底书这类内部文书不硬判' in rn.stdout,
+                f'交底书入域后 N1 没说清它为什么未判: {show(rn)}', rn)
         # 真开一火：把「所在图号」列抹掉，N1 必须当场缺列判红（空表也看得见结构漂移）
         with open(sp_path, 'w', encoding='utf8') as f:
             f.write(sp_text.replace('| 标记 | 名称 | 所在图号 |', '| 标记 | 名称 |'))
@@ -334,10 +411,21 @@ def test_new_product_package():
         assert_(rt.returncode == 0 and 'T1–T3 未判' in rt.stdout,
                 '新生成的包在图↔文书对账上未走"未判"三态（判据把骨架误伤或误判成核过）', rt)
         os.remove(sp_path)
+        # 这一档原来数的是"删掉唯一的入域文书 ⇒ 域内零文书 ⇒ rc=2"。骨架有了交底书之后
+        # 说明书不再是唯一入域件：删掉它，域内还剩交底书那一份（读数 rc=0 + N1 未判），
+        # "域内零文书"那一极要把交底书也删掉才成立。两极都留着：一极证"还剩一份时不折成
+        # 已通过"，另一极证"真的零份时仍 rc=2 说未做任何判定"。
         rn4 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
-        assert_(rn4.returncode == 2 and '没有一份落在附图标记适用域内' in rn4.stdout,
-                '删掉说明书底稿后未走"未判定"三态', rn4)
-    print('PASS new_product_package（五段目录+README+检索/EVT/法规/补全/说明书五份底稿，开箱即过 R/V/E/G/K/N 六门禁）')
+        assert_(rn4.returncode == 0 and '实核附图标记文书 1 份' in rn4.stdout
+                and '交底书这类内部文书不硬判' in rn4.stdout,
+                f'删掉说明书底稿后域内还剩交底书，读数却不是"1 份 + N1 未判": {show(rn4)}', rn4)
+        os.remove(td)
+        rn5 = run([PY, f'{S}/check_figure_labels.py', d, '--all'])
+        assert_(rn5.returncode == 2 and '没有一份落在附图标记适用域内' in rn5.stdout,
+                '删掉说明书与交底书两份入域文书后未走"未判定"三态', rn5)
+    print('PASS new_product_package（五段目录+README+检索/交底书/EVT/法规/补全/说明书六份底稿，'
+          '开箱即过 R/V/E/G/K/N 六门禁；交底书 §0 那行使 R7／R15 在生产包上第一次真判，'
+          '§4 使 N 族域内文书为 2 份）')
 
 
 def test_rebuild_package():
