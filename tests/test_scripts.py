@@ -3634,7 +3634,11 @@ def test_docs_scripts_contract():
             f'文档虚指={sorted(doc_md - tree_md)}（消费者一律按 scripts/ 树现算）')
 
     # 任何提到本门禁并给出规则区间的文档行，区间都必须等于脚本源码现推的判据范围
-    # （README 用法行与 pipeline-stages 的"出 R1–R5 红点"都曾谎报且无人核对）
+    # （README 用法行与 pipeline-stages 的"出 R1–R5 红点"都曾谎报且无人核对）。
+    # 第 66 轮起口径收紧：跟踪面 .md **不许出现**手抄号段（`test_docs_no_handcopied_rule_span`
+    # 管着），这一层降为第二道——真有漏网的，仍必须与源码现推一致，不许谎报。
+    # 从前 `hit >= 2` 那格要求文档至少抄两份号段来给这里对账；抄两份腐化两份（第 62／63 轮
+    # 连续两轮各手改一遍），零副本比对不过的数就别留着让它腐。
     rnums = rule_span(scripts['check_iron_rules.py'])
     span = f'R{rnums[0]}–R{rnums[-1]}'
     hit = 0
@@ -3645,9 +3649,11 @@ def test_docs_scripts_contract():
             hit += 1
             assert_(claimed == span,
                     f'文档第 {ln_no} 行自报 {claimed}，脚本实际判据 {span}')
-    assert_(hit >= 2, f'只核到 {hit} 处自报区间，覆盖面过窄（曾有两处各自漂移）')
+    assert_(hit == 0,
+            f'文档里还有 {hit} 处手抄号段（第 66 轮起允许数是 0；要写号段就指向脚本 docstring——'
+            f'抄进文档的每一次都会在新增判据那一轮腐烂）')
     print(f'PASS 文档↔脚本契约（判据 {len(defined_rules)} 条、脚本 {len(scripts)} 个、'
-          f'参数 {len(all_flags)} 项，双向对齐；自报区间 {span} 核对 {hit} 处；'
+          f'参数 {len(all_flags)} 项，双向对齐；文档侧手抄号段 {hit} 处；'
           f'同文件对账 {_sf_scripts} 个脚本/{_sf_ids} 个号——打得出去的号必须在自己 docstring 里列出）')
 
 
@@ -8458,6 +8464,50 @@ def test_iron_head_num_prefix_one_source():
           '+ 无分隔符仍走未判 + 六个常量都引用 HEAD_NUM 单源）')
 
 
+def test_docs_no_handcopied_rule_span():
+    """跟踪面 .md 里不许出现手抄的判据号段自述（`R1–R34` 这类区间字面）。
+
+    号段是**现推**的事实：门禁 docstring 那句自述由契约档四处核对，运行时那行
+    `合计违规 0（规则 R1–RNN…）` 的区间也是现推的。抄进文档的每一次都要在新增判据那一轮
+    人肉改一遍——第 62／63 轮连续两轮各手改一遍（README 那处第 63 轮已改成指针），第 65 轮清点
+    跟踪面还剩 7 处。所以跟踪面 .md 的允许数是 **0**：要写号段就指向名册（脚本 docstring），
+    要引历史就换个说法。尺子先在合成字串上自证正反两档再对真语料报 0——直接报 0
+    与"什么都没读到"在同一份终端上同形。语料按目录枚举不按 `git ls-files`：
+    变异电池的临时副本没有 .git，用 VCS 取分母会让这一档整批误红（第 44 轮实测）。
+    """
+    pat = re.compile(r'R1[–-]R\d+')
+
+    def spans(text):
+        return pat.findall(text)
+
+    assert_(['R1–R34'] == spans('铁律门禁 R1–R34 起，另见 docstring')
+            and spans('名册见脚本 docstring，不抄号段') == []
+            and ['R1-R34'] == spans('半角连字符 R1-R34 也算'),
+            '号段计数器自证失败（正档没抓到或负档误报）', None)
+
+    files = []
+    for dp, dns, fns in os.walk(ROOT):
+        dns[:] = [x for x in dns if x not in ('.git', '.codebuddy') and not re.match(r'wt\d', x)]
+        for f in fns:
+            if f.endswith('.md'):
+                files.append(os.path.join(dp, f))
+    files.sort()
+    assert_(len(files) >= 10,
+            f'按目录枚举只取到 {len(files)} 份 .md——分母塌了，这一档在假绿', None)
+    hits = []
+    for p in files:
+        rel = os.path.relpath(p, ROOT)
+        with open(p, encoding='utf8') as fh:
+            for i, ln in enumerate(fh, 1):
+                if spans(ln):
+                    hits.append(f'{rel}:{i}')
+    assert_(not hits,
+            '跟踪面 .md 里出现了手抄的判据号段（要写号段就指向名册：脚本 docstring；'
+            '要引历史就换个说法，别留一个每轮都要人肉改的字面）——'
+            + '、'.join(hits), None)
+    print('PASS 文档零手抄号段（尺子正反自证 + 跟踪面 %d 份 .md 全扫）' % len(files))
+
+
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
 
@@ -8629,6 +8679,7 @@ if __name__ == '__main__':
              test_iron_r31_genetic_source_set, test_iron_r32_foreign_applicant_agency,
              test_iron_r33_single_agency_only, test_iron_r34_sequence_listing_part,
              test_iron_head_num_prefix_one_source,
+             test_docs_no_handcopied_rule_span,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
