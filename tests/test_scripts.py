@@ -6472,6 +6472,7 @@ def test_iron_r22_r23_headcount_limits():
         body = ['# ' + R16_TITLE, '', '## 专利代理\n']
         lines = agents if agents else [AGENT_PH]
         body += [cir.agent_field(v) + '\n' for v in lines]
+        body += [w + '【待填写：' + l + '】\n' for l, w in cir.agency_item_fields()]
         body += ['## 其他\n']
         body += [cir.contact_field(v) + '\n' for v in (contacts if contacts else [CONTACT_PH])]
         body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
@@ -6559,6 +6560,8 @@ def test_iron_r22_r23_headcount_limits():
             doc.add_paragraph(R16_TITLE)
             for v in ('甲', '乙', '丙'):
                 doc.add_paragraph(cir.agent_field(v).strip())
+            for _l, _w in cir.agency_item_fields():
+                doc.add_paragraph(_w + '【待填写：清单未填】')
             vp = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.docx')
             doc.save(vp)
             r = run([PY, f'{S}/check_iron_rules.py', vp])
@@ -7402,6 +7405,147 @@ def test_iron_r29_request_document_lists():
           '+ 自报区间含 R29 + docx 通道）')
 
 
+def test_iron_r30_agency_particulars_set():
+    """R30：委托了专利代理机构，底稿就得给那四件各留一栏（细则第十九条一款(四)）。
+
+    法源两支各引各的：细则第十九条一款(四)（读自行政法规库合并全文）逐字「申请人委托专利代理机构的，
+    受托机构的名称、机构代码以及该机构指定的专利代理师的姓名、专利代理师资格证号码、联系电话」；
+    指南第一部分第一章 §4.1.6 同段，本机留底 txt:742-749（＝PDF p24／印刷页 1-8，该页页眉
+    txt:735-736、页标行 txt:739「细则 19（4） 4.1.6」，抄引文要跳过）逐字「请求书中还应当填写国家
+    知识产权局给予该专利代理机构的机构代码」「专利代理师应当使用其真实姓名，同时填写专利代理师
+    资格证号码和联系电话」。触发＝底稿里出现了 `- 专利代理师：` 那一行（法句主语是"申请人委托专利
+    代理机构的"，没委托的案子不受这条义务，与 R26·R27·R28 同为触发式）。同段"名称要用登记全称并与
+    公章一致"**仍明写不做**——本仓没有可比对的机构名录与公章，判它等于猜。
+    """
+    cir = _cir_r16()
+    NAME, CODE, CERT, TEL = [w for _l, w in cir.agency_item_fields()]   # 写法与判据同源
+    ROWS = (NAME + '甲专利代理有限公司', CODE + '81101',
+            CERT + '200811111111', TEL + '0571-88888888')
+    PH = (NAME + '【待填写：专利代理机构名称】', CODE + '【待填写：专利代理机构的机构代码】',
+          CERT + '【待填写：专利代理师资格证号码】', TEL + '【待填写：专利代理师联系电话】')
+
+    def draft(tag, agents=('张三',), rows=ROWS, name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 专利代理\n']
+        body += [cir.agent_field(v) + '\n' for v in agents]
+        body += [ln + '\n' for ln in rows]
+        # 夹具对**其它判据**必须是阴性：不带上 R29 那两栏，rc=1 就由别人贡献，
+        # "四件全漏必须红"这一极就会为错误的原因通过（本仓第 9–11 轮那条老规矩）。
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        pos = [i for i, ln in enumerate(text.splitlines(), 1) if ln.startswith('- 专利代理师：')]
+        return p, pos
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R30 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R30 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ⓪ 代理师那一行还是占位 ⇒ 委不委托都没定：四栏不比、也不许判红
+        p, _ = draft('declph', agents=('【待填写：真实姓名＋资格证号码＋电话，最多两人】',), rows=())
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '代理师还是占位' in judged(r.stdout)[0],
+                f'代理师占位那档没走未判（四栏还不该比，更不能折成合规或违规）: {show(r)}', r)
+
+        # ① 有代理师行、四栏全无 ⇒ 一条红，四件在**引文之前**那段里列齐，位点是代理师那一行
+        p, pos = draft('miss4', rows=())
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        head = got[0].split('——')[0] if got else ''
+        assert_(r.returncode == 1 and len(got) == 1
+                and all(k in head for k in ('专利代理机构名称', '专利代理机构的机构代码',
+                                            '专利代理师资格证号码', '专利代理师联系电话'))
+                and f'请求书著录项_E2E.md:{pos[0]}:' in got[0] and '第十九条' in got[0],
+                f'四件全漏没列齐或位点没报代理师那一行: {show(r)}', r)
+
+        # ② 四件齐 ⇒ 这条一句话都不出
+        p, _ = draft('full')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'四件齐却被说话: {show(r)}', r)
+
+        # ③ 只缺一件 ⇒ 清单段只点那一件，已填的两件不许被顺带报进去
+        p, _ = draft('miss1', rows=ROWS[:2] + ROWS[3:])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        head = got[0].split('——')[0] if got else ''
+        assert_(r.returncode == 1 and len(got) == 1 and '专利代理师资格证号码' in head
+                and '联系电话' not in head and '专利代理机构名称' not in head,
+                f'只缺资格证号码那件，清单段却多列或少列: {show(r)}', r)
+
+        # ④ 一栏占位 ⇒ 未判只列那一件
+        p, _ = draft('ph1', rows=(ROWS[0], ROWS[1], PH[2], ROWS[3]))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '专利代理师资格证号码' in judged(r.stdout)[0]
+                and '联系电话' not in judged(r.stdout)[0],
+                f'单栏占位的未判没只列那一件: {show(r)}', r)
+
+        # ⑤ 没委托（连代理师行都没有）⇒ 不适用，不判红也不出注记
+        p, _ = draft('noagent', agents=(), rows=())
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and 'R30' not in r.stdout.split('合计违规')[0],
+                f'没委托代理机构却被要求凑齐那四栏: {show(r)}', r)
+
+        # ⑥ 两件占位、两件缺失 ⇒ 两本账各出一声
+        p, _ = draft('both', rows=(PH[0], PH[1]))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '专利代理师资格证号码' in fired(r.stdout)[0]
+                and len(judged(r.stdout)) == 1
+                and '专利代理机构名称' in judged(r.stdout)[0],
+                f'缺栏与占位并存时两本账没各出一声: {show(r)}', r)
+
+        # ⑦ 文件名字轴：同样几行写进说明书那件必须静默
+        p, _ = draft('axis', rows=(), name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了: {show(r)}', r)
+
+        # ⑧ 自报区间含到 R30
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 30, f'自报区间没把 R30 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R30 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r30_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.agent_field('张三').strip())
+            for ln in ROWS[:3]:                    # 四件只写三件，缺联系电话
+                doc.add_paragraph(ln.strip())
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '专利代理师联系电话' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上漏写联系电话却没被抓到: {show(r)}', r)
+    print('PASS iron_r30 委托代理机构那四件（代理师占位未判 + 四件全漏列齐带位点 + 四件齐静默 + '
+          '只缺一件点名 + 单栏占位只列那一件 + 没委托不适用 + 缺栏与占位两本账并存 + '
+          '文件名字轴不误伤 + 自报区间含 R30 + docx 通道）')
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -7466,7 +7610,7 @@ if __name__ == '__main__':
              test_battery_crash_attribution, test_check_figures_input_guard,
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
-             test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists,
+             test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
