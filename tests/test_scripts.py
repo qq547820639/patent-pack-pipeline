@@ -7686,6 +7686,31 @@ def test_iron_r31_genetic_source_set():
         assert_(m and int(m.group(1)) >= 31,
                 f'门禁自报的区间没扩到 R31（读到的区间：{m.group(1) if m else "无"}）', None)
 
+        # ⑫ docx 通道：Word 面上漏写"原始来源"那一栏同样要被抓到（本仓交付物有 .docx 那一份，
+        #    md 与 Word 是两根读者面，只钉一根就等于另一根没人核）。
+        try:
+            import docx
+        except ImportError:
+            print('  note R31 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r31_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(cir.genetic_field('本案依赖遗传资源完成').strip())
+            doc.add_paragraph(cir.genetic_item_fields()[0][1] + '某省农科院种质资源库')
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            g = [ln for ln in r.stdout.splitlines() if ln.startswith('  FAIL R31 ')]
+            assert_(r.returncode == 1 and len(g) == 1 and '原始来源' in g[0].split('——')[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in g[0],
+                    f'Word 件上漏写原始来源却没被抓到: {show(r)}', r)
+    print('PASS iron_r31 遗传资源来源两栏（声明占位未判 + 两栏齐静默 + 漏一栏点名带位点 + '
+          '两栏全无只出一条 + 单栏占位只列那一件 + 整节划去不适用 + "无法说明"缺理由栏开火 + '
+          '带理由静默 + 理由栏占位未判 + 文件名字轴不误伤 + 自报区间含 R31 + docx 通道）')
+
 
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
@@ -7749,8 +7774,11 @@ def test_commit_rule_check_tool():
 
     # ⑥ diff 新增了判据、标题却一个号都没写 ⇒ 判红（读 log 的人无法从标题知道这次落了哪条）
     _ , r6 = probe('nosub', 'feat: 把委托代理那四件接进门禁', ['R30'])
-    assert_(r6.returncode == 1 and 'R30' in r6.stdout,
-            f'新增判据而标题不含任何号没被抓: {show(r6)}', r6)
+    # 成因也要点名：**没写号**与**写错号**是两种修法（前者补号、后者改号），
+    # 只断 rc=1 时把"没写号"那一支关掉仍会由"不相交"那一支报红——读数同形、臂就杀不掉
+    # （第 59 轮 cc 组实测：那一支 SURVIVED，正是这条极太宽）。
+    assert_(r6.returncode == 1 and '没写任何一个号' in r6.stdout,
+            f'新增判据而标题不含任何号没被抓或成因说错: {show(r6)}', r6)
 
     # ⑦ 文档散文里抄了一句 Finding 的字面（f5535f2 的 README 就这么干过）：文档不是判据的
     #    引入位，把它的引文读成"本次新增"就会把写对了的标题抓成不相交。
