@@ -761,15 +761,18 @@ def test_rebuild_package():
                 open(os.path.join(app, '主视图.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
             return p
 
-        def mkspec(tag, cells, names, png=1, split=False):
+        def mkspec(tag, cells, names, png=1, split=False, cn=False):
             """P12 的夹具：先把 P10 那三件立齐（否则测的是 P10 不是 P12），
-            再把 names 里的五节按 split 写进一份或几份文书。"""
+            再把 names 里的五节按 split 写进一份或几份文书。
+            cn=True 时标题写成「一、技术领域」那种中文编号式——细则第二十条二款只要求"写明该部分的
+            标题"，编号是人写的排版；这一档钉的是"认法不许只剥阿拉伯数字"。"""
             p = mkonly(tag, cells, ['说明书摘要', '权利要求书', '说明书'], img=bool(png))
             app = os.path.join(p, '02_申请文件')
-            for nm in names:
+            for i, nm in enumerate(names):
                 fn = ('说明书_%s.md' % nm) if split else '说明书.md'
+                head = ('%s、%s' % ('一二三四五六七八九'[i], nm)) if cn else nm
                 with open(os.path.join(app, fn), 'a', encoding='utf8') as f:
-                    f.write('## %s\n%s：正文若干。\n' % (nm, nm))
+                    f.write('## %s\n%s：正文若干。\n' % (head, nm))
             if png:
                 open(os.path.join(app, '图1.png'), 'wb').write(b'\x89PNG' + b'0' * 30)
             return p
@@ -851,6 +854,24 @@ def test_rebuild_package():
         b, n = rp.shape_state(mkspec('P12_五节齐', ['发明'], list(SPEC5)))
         assert_(b == [] and not any(x.startswith('P12') for x in n),
                 f'五节齐的发明说明书被 P12 误伤: {b} / {n}', None)
+        # 中文编号前缀那一档（第 64 轮）：「一、技术领域」与「技术领域」必须是同一条认法。
+        # 改前 `_HD_NUM` 只剥阿拉伯数字，按中文编号撰写的说明书在这里被判成"五节全缺"（假红）。
+        b, n = rp.shape_state(mkspec('P12_中文编号前缀', ['发明'], list(SPEC5), cn=True))
+        assert_(b == [] and not any(x.startswith('P12') for x in n),
+                f'五节各带中文编号前缀的说明书被 P12 判红（认法只剥阿拉伯数字）: {b} / {n}', None)
+        # 反向（剥过头）：中文数字后面**没有分隔符**时不许剥——「十进制」「二级」本身就是节名的用字，
+        # 顺手剥掉就把「## 十进制转换器说明」读成另一节。这一档给"只剥带顿号/点/空白的编号"那句当牙。
+        _hn = rp.head_names
+        assert_('十进制转换器说明' in _hn('## 十进制转换器说明\n正文。\n')
+                and '二级放大电路' in _hn('## 二级放大电路\n正文。\n'),
+                '无前导分隔符的中文数字被当成编号剥掉了: %s'
+                % sorted(_hn('## 十进制转换器说明\n## 二级放大电路\n')), None)
+        # 另一头：带中文编号／带尾括注／带阿拉伯多级编号的标题都要归一得出法条那个节名
+        assert_(_hn('## 十、具体实施方式') == {'具体实施方式'}
+                and _hn('## 3. 附图说明（示意）') == {'附图说明'}
+                and _hn('## 十二、背景技术') == {'背景技术'},
+                '编号或尾括注没被归一（中文／阿拉伯／多级三式各一）: %s'
+                % sorted(_hn('## 十、具体实施方式\n## 3. 附图说明（示意）\n## 十二、背景技术\n')), None)
         b, _ = rp.shape_state(mkspec('P12_缺两节', ['发明'], ['技术领域', '附图说明', '具体实施方式']))
         assert_(sum(x.startswith('P12') for x in b) == 2 and
                 all('背景技术' in x or '发明内容' in x for x in b if x.startswith('P12')),
@@ -943,7 +964,8 @@ def test_rebuild_package():
           'P5–P7 各成对且从 main() 走得到 / P8–P9 九档含占位与内嵌图 / '
           'P10 三件齐含遮蔽与未核＋只列外观设计不套发明口径（三向各一档） / '
           'P11 外观设计两件含建议稿遮蔽与两型同列不重复报 / '
-          'P12 说明书五节齐含拼盘不认、附图说明条件项与模板§2 正反两档 / rc=2 三档）')
+          'P12 说明书五节齐含拼盘不认、附图说明条件项与模板§2 正反两档、中文编号一式与剥过头边界各一档 / '
+          'rc=2 三档）')
 
 
 def _make_pandoc_shim(bin_dir, corrupt=False):
@@ -2509,6 +2531,23 @@ SPECREG_NOREGION = '\n'.join([
 ]) + '\n'
 
 
+def _specreg_cn(text):
+    """把扁平夹具里那五节的标题各写成「一、技术领域」式，正文一字不改。
+
+    为什么单开一档：细则第二十条二款要的是"每一部分前面写明该部分的标题"——编号是人写的排版，
+    不在法条义务里。归一只剥阿拉伯数字时（`_HD_NUM` 改前的形状），带中文编号的标题读不出节名，
+    说明书区域塌成空块 ⇒ R11／R10 对同一句**静默**（假绿；比假红更难被发现，所以这一档必须是开火档）。
+    """
+    cn = {'技术领域': '一', '背景技术': '二', '发明内容': '三',
+          '附图说明': '四', '具体实施方式': '五'}
+    out = []
+    for ln in text.splitlines():
+        m = re.match(r'^##\s*(\S+)\s*$', ln)
+        out.append('## %s、%s' % (cn[m.group(1)], m.group(1))
+                   if (m and m.group(1) in cn) else ln)
+    return '\n'.join(out) + '\n'
+
+
 def _specreg_true_pos(text):
     """测试自己数出来的 1-based 真行号——位点断言的原点，绝不抄门禁读数。"""
     return [i for i, ln in enumerate(text.splitlines(), 1) if ln == SPECREG_SENT]
@@ -2638,6 +2677,32 @@ def test_iron_spec_region_shapes():
                 f'判据侧的「SPEC_SECTIONS = (」字面量有 {len(_lits)} 处，'
                 f'区域与 P12 判的就不是同一份清单了', None)
 
+        # 同一格体例用在"节名归一"上（第 64 轮）：剥尾括注＋剥编号前缀这条认法此前在两个文件里
+        # 各抄一份字面，中文编号那一档正是被这份重复拖住的——只改判据侧，包形侧的 P12 照旧读不出。
+        # 所以：字面只许一份定义，且 rebuild 侧必须**引用**它而不是复刻它。
+        _rlsrc = open(f'{S}/rebuild_package.py', encoding='utf8').read()
+        assert_('_HD_NUM' not in _rlsrc,
+                'rebuild_package 里还留着第二份编号前缀正则（两份各自可改的字面迟早分叉；'
+                '它该引用判据侧的 head_title，而不是自己再剥一遍）', None)
+        _num_lits = [ln for ln in _isrc.splitlines() if ln.startswith('_HD_NUM = ')]
+        assert_(len(_num_lits) == 1,
+                f'编号前缀正则 `_HD_NUM = ` 的定义有 {len(_num_lits)} 处，应当只有一处', None)
+        assert_('head_title' in _rlsrc,
+                'rebuild_package 没走判据侧那份归一（head_title），P12 与区域用的就不是同一条认法', None)
+
+        # ---------- 中文编号前缀那一档（第 64 轮）：认法只剥阿拉伯数字时区域会静默塌掉 ----------
+        cn = _specreg_cn(SPECREG_FLAT)
+        assert_(cn != SPECREG_FLAT and '## 一、技术领域' in cn and '## 五、具体实施方式' in cn,
+                '中文编号那一档没改动到任何标题，这一档空转', None)
+        want_cn = _specreg_true_pos(cn)
+        assert_(len(want_cn) == 1, f'中文编号夹具里违规句不止一处（{want_cn}），档位空转', None)
+        r = one(d, '中文编号.md', cn)
+        assert_(r.returncode == 1
+                and _specreg_fired(r.stdout, 'R11 说明书引用语') == want_cn
+                and _specreg_fired(r.stdout, 'R10 说明书宣传用语') == want_cn,
+                f'五节标题各带中文编号（「一、技术领域」）时说明书区域读不出节名，'
+                f'R11／R10 对同一句静默，期望位点 {want_cn}: {show(r)}', r)
+
     # ---------- 生产侧真工件：手写夹具全绿不等于生产形态被走过 ----------
     # 生产真工件这一档的临时目录走系统 TMPDIR（不是仓库根）：`finally` 里会 rmtree，
     # 但中途被杀就会在仓库根留下未跟踪目录，把下一次『树干净』的断言弄成假红；
@@ -2667,7 +2732,7 @@ def test_iron_spec_region_shapes():
         shutil.rmtree(work, ignore_errors=True)
 
     print('PASS 说明书区域落点形状（生产扁平／旧嵌套／越界节名静默／第二处同名节／三态不折叠 '
-          '+ 共享常量同对象 + 生产真工件开火）')
+          '／中文编号一式开火 + 共享常量与归一单源 + 生产真工件开火）')
 
 
 # ---------- Word 通道的区域形状档（第 41 轮）：md 那批落点形状在 .docx 上各配一份常驻件 ----------
@@ -8209,13 +8274,30 @@ def test_iron_r34_sequence_listing_part():
                 f'取不到同包底稿时 R34 没走未判: {show(r)}', r)
 
         # ⑤ 节名归一：阿拉伯编号与尾括注都不影响认节（不归一就是拿排版形状冒充法条义务）。
-        #    ⚠ 中文数字前缀（「三、序列表」）**今天不归一**——`_HD_NUM` 只剥阿拉伯数字与 ０-９，
-        #    这一格是 P10／P12／N 族共用的认法，改它要连 rebuild_package 那份字面一起收（已开任务）。
         p = build('norm', decl=DECL)
         open(p, 'a', encoding='utf8').write('### 3. 序列表（与 SEQ ID NO 对应）\n正文若干。\n')
         r = run([PY, f'{S}/check_iron_rules.py', p])
         assert_(not fired(r.stdout) and not judged(r.stdout),
                 f'「序列表」写成带编号带括注的三级标题就被当成没有这一部分: {show(r)}', r)
+
+        # ⑤c 中文编号那一式（第 64 轮）：「三、序列表」与「3. 序列表」是同一条认法。
+        #     改前 `_HD_NUM` 只认阿拉伯数字与 ０-９，这一档在 2026-09-29 是**红的**（记录在
+        #     references/hard-rules.md 的归一格）；认法收判据侧单源后两个文件一起跟上。
+        p = build('cnhead', decl=DECL)
+        open(p, 'a', encoding='utf8').write('## 三、序列表\n正文若干。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'「序列表」写成中文编号标题（「三、序列表」）就被当成没有这一部分: {show(r)}', r)
+
+        # ⑤d 反向（剥过头）：中文数字后面没有分隔符时不许剥——本案若有一节就叫「十进制…」。
+        #     这一档不通过门禁出声（没有判点盯着那个名字），直接量归一函数本身。
+        assert_(cir.head_title('三、序列表') == '序列表'
+                and cir.head_title('十、具体实施方式') == '具体实施方式'
+                and cir.head_title('3. 附图说明') == '附图说明',
+                f'带编号的标题没归一到法条那个节名: {cir.head_title("三、序列表")!r}', None)
+        assert_(cir.head_title('十进制转换器说明') == '十进制转换器说明'
+                and cir.head_title('二级放大电路') == '二级放大电路',
+                f'无前导分隔符的中文数字被当成编号剥掉: {cir.head_title("十进制转换器说明")!r}', None)
 
         # ⑥ 交底书里同样写一栏声明 ⇒ 不触发（触发面钉在 02_申请文件 那件著录项底稿）
         dk = os.path.join(d, 'disc', '01_交底书')
@@ -8282,7 +8364,7 @@ def test_iron_r34_sequence_listing_part():
                             f'Word 面上那一部分在，R34 却出声了（假红）: {show(r)}', r)
     print('PASS iron_r34 序列表须单列一部分（没声明不适用 + 声明占位未判 + 有该节静默 + 缺该节点名带位点 + '
           '正文提到不算有节 + 取不到同包底稿未判 + 交底书不触发 + 红只落说明书那一份（底稿不被判）+ '
-          '编号与尾括注归一 + 自报区间含 R34 + docx 两极，共十一极）')
+          '编号与尾括注归一（阿拉伯／中文一式）+ 剥过头边界 + 自报区间含 R34 + docx 两极，共十三极）')
 
 
 def test_commit_rule_check_tool():

@@ -132,8 +132,10 @@ DESIGN_BRIEF_ITEMS = (
 SPEC_SECTIONS = _cir.SPEC_SECTIONS
 SPEC_UNCONDITIONAL = ('技术领域', '背景技术', '发明内容', '具体实施方式')
 SPEC_FIG_SECTION = '附图说明'
-_PAREN = re.compile(r'[（(].*?[）)]')
-_HD_NUM = re.compile(r'^[0-9０-９.、\s]+')
+# 节名归一（剥尾部括注＋剥编号前缀）与铁律侧共用**同一份定义**：以前这里另抄了一遍正则，
+# 于是"改一处、另一处照旧读不出"——中文编号那一式（「一、技术领域」）就是这么被拖住的。
+# 现在 P12 判的五节与 R10／R11／R34 认的那些节，是同一条认法读出来的同一批节名。
+head_title = _cir.head_title
 
 
 def files_of(root):
@@ -348,15 +350,14 @@ def shape_state(pkg):
 
 
 def head_names(text):
-    """把 markdown 标题行归一成节名集合：去井号、去尾部括注、去编号前缀。
+    """把 markdown 标题行归一成节名集合：去井号后交给判据侧那份 `head_title`（去尾部括注、去编号前缀）。
     docx 通道由 check_iron_rules.docx_text 按 w:pStyle 还原成同样的 # 行，两通道一套认法。"""
     out = set()
     for ln in text.splitlines():
         if not ln.strip().startswith('#'):
             continue
         h = ln.strip().lstrip('#').strip()
-        h = _PAREN.sub('', h).strip()
-        h = _HD_NUM.sub('', h).strip()
+        h = head_title(h)
         if h:
             out.add(h)
     return out
