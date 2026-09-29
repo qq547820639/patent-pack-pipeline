@@ -7546,6 +7546,106 @@ def test_iron_r30_agency_particulars_set():
           '文件名字轴不误伤 + 自报区间含 R30 + docx 通道）')
 
 
+def test_commit_rule_check_tool():
+    """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
+
+    起因是同一处手误连踩两轮（`f5535f2` 与 `1e56514` 的标题都写成上一条判据号，正文里补一句
+    更正并不能被 log 读到）——"下次记得写对"不是防线，得有一把尺子从 diff 里现取
+    `Finding('RNN …')` 的新增号去核对标题。
+    这一档不碰真实 git 历史：常驻套件要在**没有 .git 的临时副本**里照跑（变异电池就是这么跑的），
+    所以夹具全部走 `--diff-file`＋合成 diff，历史那一次误写由工具自己的 `--rev` 模式供人现查。
+    """
+    tool = f'{S}/commit_rule_check.py'
+    r = run([PY, tool, '--self-test'])
+    assert_(r.returncode == 0 and 'SELFTEST-OK' in r.stdout,
+            f'提交标题对账工具自检没过（四档里有一档不开火或错开火）: {show(r)}', r)
+
+    def probe(tag, subject, added_ids, extra='', path='scripts/x.py', removed_ids=()):
+        with tempfile.TemporaryDirectory() as dd:
+            diff = os.path.join(dd, 'a.diff')
+            lines = [f'diff --git a/{path} b/{path}', f'--- a/{path}', f'+++ b/{path}',
+                     '@@ -1 +1 @@']
+            for i in removed_ids:
+                lines.append(f"-            '{i} 旧措辞', path, 1, '措辞')")
+            for i in added_ids:
+                # 两行形状＝本仓生产侧的字面（`Finding(` 收尾，号在下一行的引号里）。
+                # 夹具原先把 `Finding('R30 …')` 写在一行——于是取号尺"只看单行"的盲区
+                # 被夹具正好遮掉，真 diff（f5535f2）一上来就把 R23 当成新增号。
+                lines.append('+        findings.append(Finding(')
+                lines.append(f"+            '{i} 例子', path, 1, '措辞')")
+            if extra:
+                lines.append(extra)
+            open(diff, 'w', encoding='utf8').write('\n'.join(lines) + '\n')
+            r = run([PY, tool, '--subject', subject, '--diff-file', diff])
+            return tag, r
+
+    # ① 标题写对了 ⇒ 放行，并把现取的号打出来（读数要能自证它凭什么放行）
+    _ , r1 = probe('ok', 'feat: R30 委托代理机构那四件', ['R30'])
+    assert_(r1.returncode == 0 and 'R30' in r1.stdout, f'标题与 diff 相符却被判红: {show(r1)}', r1)
+
+    # ② 标题写成了上一条判据号（我连踩两轮的那个错）⇒ 必须点名"标题 R28 / diff 新增 R30"
+    _ , r2 = probe('mislabel', 'feat: R28 声明了生物材料保藏那五件', ['R30'])
+    assert_(r2.returncode == 1 and 'R28' in r2.stdout and 'R30' in r2.stdout,
+            f'标题张冠李戴没被抓（这把尺没牙）: {show(r2)}', r2)
+
+    # ③ 一次提交新增两条判据 ⇒ 标题含其一即可（不许逼人造句式）
+    _ , r3 = probe('two', 'feat: R30 与 R31 两族落地', ['R30', 'R31'])
+    assert_(r3.returncode == 0, f'新增两判据时标题含其一却被判红: {show(r3)}', r3)
+
+    # ④ 不含新判据的记账提交（test:/docs:）⇒ 放行且要点名"未涉及新增判据"，不能沉默通过
+    _ , r4 = probe('noid', 'test: 收紧三处列齐极', [])
+    assert_(r4.returncode == 0 and '未涉及新增判据' in r4.stdout,
+            f'无新增判据的提交被误判或沉默通过: {show(r4)}', r4)
+
+    # ⑤ 标题提到一条本次没引入的既有判据（或写一个区间）⇒ 必须放行。
+    #    这一档不是宽容，是真历史量的：105 个提交里有新增判据号的 25 个中，6 个这样写
+    #    （`19f33d5` 提 Q7、`a48ddf4` 提 Q12、`bad9ee5` 写 F1–F5、`c0b64a0` 写 K1-K5、
+    #    `d001b00` 写 R1–R8、`1eb36b5` 提 P11）；第一版按"标题 ⊆ 新增号"判，一上来就报出
+    #    这 6 条假阳性，而它要抓的那次误写靠"不相交"就够了。
+    _ , r5 = probe('mention-old', 'feat: R30 委托代理那四件——与 R23 同轴', ['R30'])
+    assert_(r5.returncode == 0 and '不是本次引入的号' in r5.stdout,
+            f'标题提到既有判据号被判红（子集判据的假阳性复发）: {show(r5)}', r5)
+
+    # ⑥ diff 新增了判据、标题却一个号都没写 ⇒ 判红（读 log 的人无法从标题知道这次落了哪条）
+    _ , r6 = probe('nosub', 'feat: 把委托代理那四件接进门禁', ['R30'])
+    assert_(r6.returncode == 1 and 'R30' in r6.stdout,
+            f'新增判据而标题不含任何号没被抓: {show(r6)}', r6)
+
+    # ⑦ 文档散文里抄了一句 Finding 的字面（f5535f2 的 README 就这么干过）：文档不是判据的
+    #    引入位，把它的引文读成"本次新增"就会把写对了的标题抓成不相交。
+    #    标题没写号 ⇒ 必须放行；反向对照是①，两档合起来才证明"只认脚本侧 hunk"。
+    _ , r7 = probe('doc-prose', 'docs: 把代理人数那条的引文抄进清单', [],
+                   extra="+README：字面写作 `Finding('R22 发明人数超限')`／"
+                        "`Finding('R23 申请人人数超限')` 两条",
+                   path='README.md')
+    assert_(r7.returncode == 0 and '未涉及新增判据' in r7.stdout,
+            f'文档里的判据字面被当成 diff 新增号（取号越过了引入位）: {show(r7)}', r7)
+
+    # ⑧ 改写既有判据的措辞：同一号在 `-` 与 `+` 两侧都出现 ⇒ 不是新增，标题没写号也要放行
+    #    （这一档是给"续行也能取到号"那个修复配的必不开火控制，少了它修复会把每处措辞
+    #     改动都读成新增判据，记账提交一律被逼着写号——假阳性。）
+    _ , r8 = probe('rewrite', 'fix: 把保藏那条的位点改到声明那一行', ['R28'],
+                   removed_ids=['R28'])
+    assert_(r8.returncode == 0 and '未涉及新增判据' in r8.stdout,
+            f'只改措辞的提交被读成新增判据: {show(r8)}', r8)
+
+    # ⑨ 已知盲区，按"放行"钉住语义而不是当作通过：`f5535f2` 那次是**号写对了、文案抄了上一条
+    #    判据的内容**，这把尺只核对号，结构上看不见那一面。要钉文案就得逼每个标题复述判据内容，
+    #    今天不付这个代价——将来若要付，改的就是这一档。
+    _ , r9 = probe('prose-blind', 'feat: R30 声明了生物材料保藏那五件', ['R30'])
+    assert_(r9.returncode == 0,
+            f'⑨ 盲区档本该放行（号对、文案错），却判了红——判定面被改动过: {show(r9)}', r9)
+
+    # ⑩ 量具不读自己的身子：`scripts/commit_rule_check.py` 的控制档里**本来就写着**
+    #    `Finding('X22 …')` 这种字面（那是给⑦"文档侧不算引入位"准备的夹具），
+    #    第一次自举（拿这把尺对它能不成立）就因为它读自己而报"diff 新增了判据 X22"。
+    #    它不是判据脚本、永远不往外打 Finding，所以正文里的字面不构成"引入了一条判据"。
+    _ , r10 = probe('self-body', 'feat: 给对账尺补一档控制', ['X23'],
+                    path='scripts/commit_rule_check.py')
+    assert_(r10.returncode == 0 and '未涉及新增判据' in r10.stdout,
+            f'量具把自身正文里的 Finding 字面读成新增判据: {show(r10)}', r10)
+
+
 def test_check_figures_raster_three_state():
     """§4.3「一般不得使用照片作为附图」这条判不动的部分要**点名成未判**，而不是静默消失。
 
@@ -7611,6 +7711,7 @@ if __name__ == '__main__':
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
+             test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()

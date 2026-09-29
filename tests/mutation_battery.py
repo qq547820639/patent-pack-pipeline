@@ -6,7 +6,7 @@
 
 用法:
     python3 tests/mutation_battery.py                 # 全部 arm 一跑（清单见 --arm choices）
-    python3 tests/mutation_battery.py --arm lab        # 只跑一支（cen|chan|claims|dc|doc|evt|fig|iron|lab|pack|reg|text|vsr）
+    python3 tests/mutation_battery.py --arm lab        # 只跑一支（cc|cen|chan|claims|dc|doc|evt|fig|iron|lab|pack|reg|text|vsr）
     python3 tests/mutation_battery.py --keep-work     # 保留工作副本便于手工复查
 
 约定（与判据类脚本一致）:
@@ -61,6 +61,7 @@ CQ = 'scripts/check_claims.py'
 MT = 'scripts/mdtable.py'
 RG = 'scripts/regen_docx.py'
 RP = 'scripts/rebuild_package.py'
+CC = 'scripts/commit_rule_check.py'
 TB = 'tests/mutation_battery.py'        # cen 档有一条臂咬电池自己的 arm 清单，目标就是本文件
 TS = 'tests/test_scripts.py'            # 量具自身也算一个目标：常驻里的提取器自测要有注入臂咬得住
 
@@ -172,6 +173,34 @@ MUTS = {
          ('合规权要被判红，或十三条没各判到',
           '① 正确重述（指南那句"根据权利要求1所述的金属纤维拉拔装置"）被 Q13 误伤',
           '② 多项择一引用（与所引各项同名）被 Q13 误伤')),
+    ],
+    'cc': [
+        # ── 第 59 轮 scripts/commit_rule_check.py（记账面：提交标题 ↔ diff 新增判据号）──
+        ('标题必须与新增号相交这条整个关掉（张冠李戴就此看不见）', CC,
+         '    if not any(s in new for s in sub):', '    if False:',
+         '标题张冠李戴没被抓（这把尺没牙）'),
+        ('只认一行式 Finding 字面（本仓实际写的续行式整个读不到）', CC,
+         '    m = FINDING.search(line) or CONT.match(line)', '    m = FINDING.search(line)',
+         '标题张冠李戴没被抓（这把尺没牙）'),
+        ('新增判据而标题一个号都没写这条关掉', CC,
+         '    if not sub:', '    if False:',
+         '新增判据而标题不含任何号没被抓'),
+        ('删除侧不减（每处只改措辞的提交都读成新增判据）', CC,
+         '        if i and i not in out and i not in gone:', '        if i and i not in out:',
+         '只改措辞的提交被读成新增判据'),
+        ('引入位不筛文件（文档里抄的 Finding 字面也算新增号）', CC,
+         "        if saw_header and not _in_scope(cur or ''):", '        if False:',
+         '文档里的判据字面被当成 diff 新增号（取号越过了引入位）'),
+        ('量具把自己也算进引入位（正文里的夹具字面被读成新增判据）', CC,
+         "    return path.startswith('scripts/') and path != SELF",
+         "    return path.startswith('scripts/')",
+         '量具把自身正文里的 Finding 字面读成新增判据'),
+        # 反向档：把"标题 ⊆ 新增号"那版严判据加回来——真历史 25 个有新增号的提交里 6 个因此被误报
+        ('把子集判据加回来（真历史六条假阳性的形状复发）', CC,
+         "    return True, ('相符：标题含 ' + '、'.join([s for s in sub if s in new])",
+         "    return not [s for s in sub if s not in new], ('相符：标题含 '"
+         " + '、'.join([s for s in sub if s in new])",
+         '标题提到既有判据号被判红（子集判据的假阳性复发）'),
     ],
     'iron': [
         ('R1 禁用词判据关闭', IRON, "        for w in BANNED_ALWAYS:", '        for w in []:',
@@ -1487,7 +1516,7 @@ MUTS = {
          "        return {n for n, s in srcs.items() if True",
          '消费者现算漏了某种拼写或把量具自己算了进去'),
         ('电池自己的 arm 清单漏抄一支（那支等于不存在）', TB,
-         '只跑一支（' + 'cen|chan|claims|', '只跑一支（' + 'chan|claims|',
+         '只跑一支（' + 'cc|cen|chan|claims|', '只跑一支（' + 'cen|chan|claims|',
          '电池 docstring 的 arm 清单与 MUTS 键不对齐'),
         ('README 少列一个消费者（文档侧差集必须咬得动）', 'README.md',
          '`check_figure_labels.py`、`check_figure_text.py`', '`check_figure_labels.py`',
