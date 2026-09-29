@@ -6178,7 +6178,8 @@ def test_iron_r19_title_across_docs():
             '# ' + R16_TITLE + '\n\n## 说明书摘要\n本案发明名称为「' + R16_TITLE + '」。\n')
         req = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
         text = ('# ' + R16_TITLE + '\n\n' + cir.title_field(req_val) + '\n\n'
-                '## 摘要附图\n【待填写：有附图的案在此写明图号】\n')
+                '## 摘要附图\n【待填写：有附图的案在此写明图号】\n'
+                + ''.join(w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()))
         open(req, 'w', encoding='utf8').write(text)
         lineno = [i for i, ln in enumerate(text.splitlines(), 1) if '发明名称：' in ln]
         assert_(len(lineno) == 1, '夹具里数不出著录项那一行，这一档空转', None)
@@ -6273,7 +6274,10 @@ def test_iron_r20_inventor_is_person():
             body.append(cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n')
             body.append(cir.postal_field('310012') + '\n')
             body.append(cir.credit_code_field('91330100MA2AB1CD3E') + '\n')
+            for _l, _w in cir.list_item_fields():
+                body.append(_w + '【待填写：清单未填】\n')
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
         open(p, 'w', encoding='utf8').write('\n'.join(body) + '\n')
         return p
 
@@ -6368,9 +6372,12 @@ def test_iron_r21_address_not_unit_name():
                 body.append(cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n')
             body.append(cir.postal_field('310012') + '\n')
             body.append(cir.credit_code_field('91330100MA2AB1CD3E') + '\n')
+            for _l, _w in cir.list_item_fields():
+                body.append(_w + '【待填写：清单未填】\n')
         if addr is not None:
             body.append(cir.address_field(addr) + '\n')
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
         open(p, 'w', encoding='utf8').write('\n'.join(body) + '\n')
         return p
 
@@ -6467,6 +6474,7 @@ def test_iron_r22_r23_headcount_limits():
         body += [cir.agent_field(v) + '\n' for v in lines]
         body += ['## 其他\n']
         body += [cir.contact_field(v) + '\n' for v in (contacts if contacts else [CONTACT_PH])]
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
         text = '\n'.join(body) + '\n'
         open(p, 'w', encoding='utf8').write(text)
@@ -6585,7 +6593,8 @@ def test_iron_r24_representative_membership():
         # 这一档的读数才只属于 R24。加在代表人行**之后**，不动上面各行的行号。
         body += [cir.address_field('浙江省杭州市西湖区文三路 100 号') + '\n',
                  cir.postal_field('310012') + '\n',
-                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n']
+                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                 *[w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]]
         p = os.path.join(pk, '02_申请文件', '请求书著录项_E2E.md')
         text = '\n'.join(body) + '\n'
         open(p, 'w', encoding='utf8').write(text)
@@ -6726,6 +6735,7 @@ def test_iron_r25_applicant_bibliographic_set():
             if key in cells:
                 body.append(cells[key] + '\n')
         body += [ln + '\n' for ln in extra]
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
         fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
         p = os.path.join(pk, '02_申请文件', fname)
         text = '\n'.join(body) + '\n'
@@ -6831,6 +6841,8 @@ def test_iron_r25_applicant_bibliographic_set():
             doc.add_paragraph(R16_TITLE)
             for key in ('name', 'addr'):
                 doc.add_paragraph(REAL[key].strip())
+            for _l, _w in cir.list_item_fields():
+                doc.add_paragraph(_w + '【待填写：清单未填】')
             vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
             doc.save(vp)
             r = run([PY, f'{S}/check_iron_rules.py', vp])
@@ -6869,6 +6881,7 @@ def test_iron_r26_priority_statement_set():
                 cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
                 cir.postal_field('310012') + '\n',
                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                *[w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()],
                 '## 优先权\n']
         if decl is not None:
             body.append(decl + '\n')
@@ -6962,6 +6975,8 @@ def test_iron_r26_priority_statement_set():
             doc.add_paragraph(DECL.strip())
             doc.add_paragraph(REAL[0].strip())       # 只写两件，第三件漏写
             doc.add_paragraph(REAL[1].strip())
+            for _l, _w in cir.list_item_fields():
+                doc.add_paragraph(_w + '【待填写：清单未填】')
             vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
             doc.save(vp)
             r = run([PY, f'{S}/check_iron_rules.py', vp])
@@ -7003,6 +7018,7 @@ def test_iron_r27_divisional_parent_set():
                 cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
                 cir.postal_field('310012') + '\n',
                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                *[w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()],
                 '## 分案申请\n']
         if decl is not None:
             body.append(decl + '\n')
@@ -7094,6 +7110,8 @@ def test_iron_r27_divisional_parent_set():
             doc.add_paragraph(R16_TITLE)
             doc.add_paragraph(DECL.strip())
             doc.add_paragraph(REAL[0].strip())       # 只写申请号，申请日那一栏没有
+            for _l, _w in cir.list_item_fields():
+                doc.add_paragraph(_w + '【待填写：清单未填】')
             vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
             doc.save(vp)
             r = run([PY, f'{S}/check_iron_rules.py', vp])
@@ -7138,6 +7156,7 @@ def test_iron_r28_deposit_particulars_set():
                 cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
                 cir.postal_field('310012') + '\n',
                 cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                *[w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()],
                 '## 生物材料保藏\n']
         if decl is not None:
             body.append(decl + '\n')
@@ -7248,6 +7267,8 @@ def test_iron_r28_deposit_particulars_set():
             doc.add_paragraph(DECL.strip())
             for ln in REAL[:4]:                # 五件只写四件，缺保藏编号
                 doc.add_paragraph(ln.strip())
+            for _l, _w in cir.list_item_fields():
+                doc.add_paragraph(_w + '【待填写：清单未填】')
             vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
             doc.save(vp)
             r = run([PY, f'{S}/check_iron_rules.py', vp])
@@ -7258,6 +7279,127 @@ def test_iron_r28_deposit_particulars_set():
     print('PASS iron_r28 生物材料保藏那五件（声明占位未判 + 五件齐静默 + 漏一栏点名带位点 + '
           '单栏占位只列那一件 + 没声明不适用 + 五栏全漏只报一条 + 分类命名无拉丁另开一条 + '
           '带上拉丁静默 + 文件名字轴不误伤 + 自报区间含 R28 + docx 通道）')
+
+
+def test_iron_r29_request_document_lists():
+    """R29：著录项底稿得写明申请文件清单与附加文件清单（细则第十九条一款(七)(八)）。
+
+    法源两支各引各的：细则第十九条一款（读自行政法规库合并全文）逐字「发明、实用新型或者外观
+    设计的专利申请的请求书应当写明下列事项：……(七)申请文件清单；(八)附加文件清单；(九)其他需要
+    写明的有关事项」；后果面在指南第五部分第三章 2.3.1(2) txt:17891-17892（＝PDF p501／印刷页 5-15）
+    ——受理部门要"清点全部文件数量，核对请求书上注明的申请文件和其他文件名称与数量"。
+    与 R25·R26·R27·R28 的关键差别：**这一族无条件**，不看有没有声明行，只看底稿给没给这两件留栏。
+    三态：整栏没有 ⇒ 违规、栏在值占位 ⇒「R29 未判」、有真值 ⇒ 这一件判过；两栏都不在时这份文书里
+    没有任何位点可指 ⇒ 位点落首行并在消息里说明，只缺一栏 ⇒ 位点就是**在的那一栏**。
+    """
+    cir = _cir_r16()
+    FL, XL = [w for _l, w in cir.list_item_fields()]      # 写法与判据同源，别在测试里抄第二份字面
+    FL_PH, XL_PH = FL + '【待填写：申请文件清单】', XL + '【待填写：附加文件清单】'
+    FL_V, XL_V = FL + '请求书 1、说明书 1、权利要求书 1、说明书附图 2、摘要 1', XL + '无'
+
+    def draft(tag, rows=(FL_PH, XL_PH), name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n',
+                cir.applicant_field('甲有限公司') + '\n',
+                cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
+                cir.postal_field('310012') + '\n',
+                cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                '## 其他著录项\n'] + [ln + '\n' for ln in rows]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        pos = {pre: [i for i, ln in enumerate(text.splitlines(), 1) if ln.startswith(pre)]
+               for pre in (FL, XL)}
+        return p, pos
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R29 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R29 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 两栏都在、值都是占位 ⇒ 一条未判，两件都点名
+        p, _ = draft('ph')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '申请文件清单' in judged(r.stdout)[0]
+                and '附加文件清单' in judged(r.stdout)[0],
+                f'两栏占位没走未判（未判还得两件都点名）: {show(r)}', r)
+
+        # ② 两栏真值 ⇒ 这条一句话都不出
+        p, _ = draft('full', rows=(FL_V, XL_V))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'两栏齐却被说话: {show(r)}', r)
+
+        # ③ 只缺一栏 ⇒ 红一条、点名那一件、位点报在的那一栏（不是首行，也不可能是缺的那栏）
+        p, pos = draft('miss1', rows=(FL_V,))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '附加文件清单' in got[0]
+                and f'请求书著录项_E2E.md:{pos[FL][0]}:' in got[0] and '第十九条' in got[0],
+                f'漏写附加文件清单没把位点报在的那一栏: {show(r)}', r)
+
+        # ④ 两栏全无 ⇒ 一条红、位点落首行并说明原因；"列齐"只对着引文之前那段清单判
+        p, _ = draft('none', rows=())
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        head = got[0].split('——')[0] if got else ''
+        assert_(r.returncode == 1 and len(got) == 1 and '两栏都不在' in got[0]
+                and '请求书著录项_E2E.md:1:' in got[0]
+                and '申请文件清单' in head and '附加文件清单' in head,
+                f'两栏全漏没落成"位点首行＋清单段列齐两件"这一形状: {show(r)}', r)
+
+        # ⑤ 一栏占位＋另一栏没有 ⇒ 两本账各出一声（缺栏判红、占位判未判，可以并存）
+        p, _ = draft('both', rows=(FL_PH,))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '附加文件清单' in fired(r.stdout)[0]
+                and len(judged(r.stdout)) == 1 and '申请文件清单' in judged(r.stdout)[0],
+                f'缺栏与占位并存时两本账没各出一声: {show(r)}', r)
+
+        # ⑥ 文件名字轴：同样缺两栏写进说明书那件必须静默
+        p, _ = draft('axis', rows=(), name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到别的文书也判了: {show(r)}', r)
+
+        # ⑦ 自报区间含到 R29
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 29, f'自报区间没把 R29 算进去: {show(r)}', r)
+
+        try:
+            import docx
+        except ImportError:
+            print('  note R29 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r29_docx')
+        else:
+            pk = os.path.join(d, 'word')
+            os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+            os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+            open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+                '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+            doc = docx.Document()
+            doc.add_paragraph(R16_TITLE)
+            doc.add_paragraph(FL_V.strip())          # 只写申请文件清单，附加文件清单那一栏没有
+            vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+            doc.save(vp)
+            r = run([PY, f'{S}/check_iron_rules.py', vp])
+            assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                    and '附加文件清单' in fired(r.stdout)[0]
+                    and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in fired(r.stdout)[0],
+                    f'Word 件上漏写附加文件清单却没被抓到: {show(r)}', r)
+    print('PASS iron_r29 申请文件与附加文件两栏（两栏占位未判 + 两栏齐静默 + 只缺一栏位点报在的那一栏 '
+          '+ 两栏全落位点首行且清单段列齐两件 + 缺栏与占位两本账并存 + 文件名字轴不误伤 '
+          '+ 自报区间含 R29 + docx 通道）')
 
 
 def test_check_figures_raster_three_state():
@@ -7324,7 +7466,7 @@ if __name__ == '__main__':
              test_battery_crash_attribution, test_check_figures_input_guard,
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
-             test_iron_r28_deposit_particulars_set,
+             test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
     defined = {n for n, v in globals().items()
