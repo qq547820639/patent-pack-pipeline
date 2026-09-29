@@ -6783,15 +6783,28 @@ def test_iron_r25_applicant_bibliographic_set():
         assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
                 f'四件齐却被说话: {show(r)}', r)
 
-        # ③ 缺邮政编码栏 ⇒ 违规、点名那一件、位点是申请人那一行
+        # ③ 缺邮政编码栏 ⇒ 违规、点名那一件、位点是申请人那一行；
+        #    但**不许**套《细则》第四十四条(四)那档"不予受理"——那一条只列"缺少申请人姓名或者名称、
+        #    或者缺少地址"两件，缺邮政编码写不予受理＝把法条没说的后果写成说的（第 62 轮升级时配的一极）。
         cells = dict(REAL)
         del cells['zip']
         p, app = draft('nozip', cells)
         r = run([PY, f'{S}/check_iron_rules.py', p])
         got = fired(r.stdout)
         assert_(r.returncode == 1 and len(got) == 1 and '邮政编码' in got[0]
-                and f'请求书著录项_E2E.md:{app[0]}:' in got[0] and '§4.1.3.1' in got[0],
-                f'缺邮政编码栏没按申请人那一行点名: {show(r)}', r)
+                and f'请求书著录项_E2E.md:{app[0]}:' in got[0] and '§4.1.3.1' in got[0]
+                and '不予受理' not in got[0],
+                f'缺邮政编码栏没按申请人那一行点名，或把后果写重了: {show(r)}', r)
+
+        # ③b 缺地址那一栏 ⇒ 同一位点上把后果升到《细则》第四十四条(四)的**不予受理**级
+        cells = dict(REAL)
+        del cells['addr']
+        p, app = draft('noaddr', cells)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        got = fired(r.stdout)
+        assert_(r.returncode == 1 and len(got) == 1 and '地址' in got[0]
+                and '不予受理' in got[0] and '第四十四条' in got[0],
+                f'缺地址却只报补正级（法条那一条是不予受理）: {show(r)}', r)
 
         # ④ 只邮政编码退回占位（其余真值）⇒ 未判里只列那一件
         cells = dict(REAL, zip=PH['zip'])
@@ -7840,6 +7853,7 @@ def test_iron_r32_foreign_applicant_agency():
         r = run([PY, f'{S}/check_iron_rules.py', p])
         assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
                 and '委托' in fired(r.stdout)[0].split('——')[0]
+                and '不予受理' in fired(r.stdout)[0]      # 《细则》第四十四条(五)那一档
                 and f'请求书著录项_E2E.md:{ol[0]}:' in fired(r.stdout)[0],
                 f'外国申请人没写委托代理没被抓或位点没报国籍那一行: {show(r)}', r)
 
@@ -7947,6 +7961,156 @@ def test_iron_r32_foreign_applicant_agency():
           '单独申请没委托点名带位点 + 代理师占位未判 + R25 让位（缺三件不判红只出注记）+ '
           '让位不抹两支共同要求的名称 + 文件名字轴不误伤 + 两位申请人未判 + 申请人占位未判 + '
           '自报区间含 R32 + docx 两极）')
+
+
+def test_iron_r33_single_agency_only():
+    """R33：被委托的专利代理机构仅限一家——底稿里写了两家机构名就要红（指南 §6.1.1）。
+
+    法源自己重开过（`.codebuddy/attest/zhinan2023_ahippc.txt`）：§6.1.1 txt:1168-1170 起
+    「委托的双方当事人是申请人和被委托的专利代理机构。申请人有两个以上的，委托的双方当事人是
+    全体申请人和被委托的专利代理机构。**被委托的专利代理机构仅限一家**，本指南另」＋跨页后半句
+    txt:1174「有规定的除外。」——那句**跨页**：前半在 PDF p35／印刷页 1-19（页边界 txt:1135、
+    页眉 txt:1136、页标行 txt:1137「（1-19） 31」），后半在 PDF p36／印刷页 1-20（页边界 txt:1171、
+    页眉 txt:1172、页标行 txt:1173「32 （1-20）」），两段各自标页、不许合成一档页码，
+    也不许只引前半——漏掉"本指南另有规定的除外"那半句就造出法条没有的绝对义务。
+    后果同节 txt:1156-1159「委托不符合规定的，审查员应当发出补正通知书…期满未答复或者补正后仍不
+    符合规定的，应当向申请人和被委托的专利代理机构发出**视为未委托专利代理机构**通知书」；
+    涉外那一支（txt:1196-1202）更重：期满未答复发视为撤回通知书、补正后仍不符**驳回**。
+
+    判的是**家数**不是行数：同一行字面写两遍还是一家（第③极静默），两个不同的机构名才是两家。
+    与 R22／R23 同族（数一个字段栏的形状），但那一族数行数、这一条数不同值——
+    差别正是第③极存在的理由：按数行数实现会把"复制粘贴同一行"判红，而法条禁的是两家。
+    适用域仍走文件名字轴 `请求书著录项*`；占位行 ⇒ 未判（几家数不清，不折成违规也不折成合规）；
+    整栏不存在 ⇒ 不适用（那一案没写受托机构，R30 另有它自己的原告）。
+    """
+    cir = _cir_r16()
+    NAME, CODE, CERT, TEL = [w for _l, w in cir.agency_item_fields()]
+    ROWS = (CODE + '8101', CERT + '110031234567', TEL + '0571-88886666')
+    A1, A2 = '甲专利代理有限公司', '乙专利事务所（普通合伙）'
+
+    def draft(tag, names=(A1,), name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 专利代理\n',
+                cir.agent_field('张三 资格证号码 110031234567 电话 0571-88886666') + '\n']
+        body += [NAME + n + '\n' for n in names]
+        body += [ln + '\n' for ln in ROWS]
+        # 夹具对其它判据保持阴性：带上 R29 那两栏的占位行（它自己那档走未判），
+        # 否则"两家必须红"这一极会为错误的原因通过。
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        pos = [i for i, ln in enumerate(text.splitlines(), 1) if ln.startswith(NAME)]
+        return p, pos
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R33 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R33 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 恰好一家 ⇒ 静默（rc=0：这件夹具对整条门禁都是阴性）
+        p, _ = draft('one')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'只委托一家却被 R33 出声: {show(r)}', r)
+
+        # ② 两家 ⇒ 违规一条、位点报第二家那一行、消息点名两家
+        p, ln2 = draft('two', names=(A1, A2))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        f2 = fired(r.stdout)
+        assert_(r.returncode == 1 and len(f2) == 1 and f'请求书著录项_E2E.md:{ln2[-1]}:' in f2[0]
+                and A1 in f2[0].split('——')[0] and A2 in f2[0].split('——')[0],
+                f'写了两家代理机构没被抓、或位点没报第二家那一行、或两家没在清单里列齐: {show(r)}', r)
+
+        # ③ 同一行字面写两遍 ⇒ 还是一家，静默（法条禁的是"两家"，不是"两行"）
+        p, _ = draft('dup', names=(A1, A1))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'同一家写两遍被按"两家"判了（R33 数的是家数不是行数）: {show(r)}', r)
+
+        # ④ 占位行 ⇒ 几家数不清 ⇒ 未判（不折成违规也不折成合规）
+        p, _ = draft('ph', names=('【待填写：专利代理机构名称】',))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        j4 = judged(r.stdout)
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(j4) == 1 and '占位' in j4[0],
+                f'机构名还是占位时 R33 没走未判: {show(r)}', r)
+
+        # ⑤ 一家真值 + 一行占位 ⇒ 同样数不清 ⇒ 未判
+        p, _ = draft('mix', names=(A1, '【待填写：专利代理机构名称】'))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1,
+                f'混着占位行时 R33 把"几家"折成了可判: {show(r)}', r)
+
+        # ⑥ 整栏不存在 ⇒ R33 不适用（没写受托机构）；此时红的是 R30 缺伴栏，不是这条
+        pk = os.path.join(d, 'noname', '02_申请文件')
+        os.makedirs(pk, exist_ok=True)
+        os.makedirs(os.path.join(d, 'noname', '01_交底书'), exist_ok=True)
+        open(os.path.join(d, 'noname', '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        p = os.path.join(pk, f'{cir.REQUEST_DRAFT_NAME}_E2E.md')
+        open(p, 'w', encoding='utf8').write(
+            '\n'.join(['# ' + R16_TITLE, '', '## 专利代理\n',
+                       cir.agent_field('张三 资格证号码 110031234567 电话 0571-88886666') + '\n']
+                      + [ln + '\n' for ln in ROWS]) + '\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout)
+                and any(ln.startswith('  FAIL R30 ') for ln in r.stdout.splitlines()),
+                f'没写机构名时 R33 出了声（或这条的原告本该是 R30 却没红）: {show(r)}', r)
+
+        # ⑦ 文件名字轴：同样的两行写进说明书那件必须静默（法句落点是请求书那一栏）
+        p, _ = draft('axis', names=(A1, A2), name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'R33 轴放宽到说明书也判了: {show(r)}', r)
+
+        # ⑧ 门禁自报的覆盖区间要含到 R33
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'one', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 33,
+                f'门禁自报的区间没扩到 R33（读到的区间：{m.group(1) if m else "无"}）', None)
+
+        # ⑨ docx 通道两极：Word 面上写两家必须被抓，写同一家必须静默
+        try:
+            import docx
+        except ImportError:
+            print('  note R33 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r33_docx')
+        else:
+            for tag, names, want in (('docx_red', (A1, A2), True), ('docx_ok', (A1, A1), False)):
+                pk = os.path.join(d, tag)
+                os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+                doc = docx.Document()
+                doc.add_paragraph(R16_TITLE)
+                doc.add_paragraph(cir.agent_field(
+                    '张三 资格证号码 110031234567 电话 0571-88886666').strip())
+                for n in names:
+                    doc.add_paragraph((NAME + n).strip())
+                for ln in ROWS:
+                    doc.add_paragraph(ln.strip())
+                for _l, w in cir.list_item_fields():
+                    doc.add_paragraph((w + '【待填写：清单未填】').strip())
+                vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+                doc.save(vp)
+                r = run([PY, f'{S}/check_iron_rules.py', vp])
+                g = fired(r.stdout)
+                if want:
+                    assert_(r.returncode == 1 and len(g) == 1
+                            and A2 in g[0].split('——')[0]
+                            and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in g[0],
+                            f'Word 件上写了两家却没被抓: {show(r)}', r)
+                else:
+                    assert_(not g and not judged(r.stdout),
+                            f'Word 件上同一家写两遍被 R33 判了（假红）: {show(r)}', r)
+    print('PASS iron_r33 代理机构仅限一家（一家静默 + 两家点名带位点 + 同名两行静默 + 占位未判 + '
+          '真值混占位未判 + 整栏不存在不适用（原告是 R30）+ 文件名字轴不误伤 + 自报区间含 R33 + docx 两极）')
 
 
 def test_commit_rule_check_tool():
@@ -8118,6 +8282,7 @@ if __name__ == '__main__':
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
              test_iron_r31_genetic_source_set, test_iron_r32_foreign_applicant_agency,
+             test_iron_r33_single_agency_only,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
