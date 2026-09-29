@@ -7546,6 +7546,147 @@ def test_iron_r30_agency_particulars_set():
           '文件名字轴不误伤 + 自报区间含 R30 + docx 通道）')
 
 
+def test_iron_r31_genetic_source_set():
+    """R31：声明依赖遗传资源就得写明直接来源与原始来源（专利法第二十六条五款＋细则第二十九条二款）。
+
+    法源三处，逐字都自己重开过：《专利法》第二十六条五款（两份留底 `patent_law_5b9f99.htm`／
+    `patent_law_80488d.htm` 读数一致）「依赖遗传资源完成的发明创造，申请人应当在专利申请文件中说明该
+    遗传资源的直接来源和原始来源；申请人无法说明原始来源的，应当陈述理由」；《细则》第二十九条**二款**
+    「就依赖遗传资源完成的发明创造申请专利的，申请人应当在请求书中予以说明，并填写国务院专利行政部门
+    制定的表格」（读自行政法规库合并全文，指南左侧栏自己也标着「法 26.5／细则 29.2」）；《指南》§5.3
+    （本机留底 txt:1131-1133）把义务落到"写明该遗传资源的直接来源和原始来源"，并给出后果——
+    补正→期满未补正视为撤回→补正仍不符驳回；那句**跨页**：义务句止于 `<<<PAGE 35>>>`（txt:1134）之前，
+    后果句在 PDF p35／印刷页 1-19（txt:1136-1137），两段各自标页、不合成一档页码。
+
+    触发式与 R26·R27·R28 同一形：底稿没有 `- 遗传资源来源：` 那一行 ⇒ 不适用（绝大多数案不依赖遗传资源，
+    硬凑这两栏等于替法条造义务）；那一行占位 ⇒ 未判；填实 ⇒ 两栏缺一栏红**一条**、一条里把缺的列齐。
+    法条后半句那一支（"无法说明原始来源的，应当陈述理由"）判的是**形状**：原始来源那栏写着"无法说明"
+    就必须有 `- 无法说明原始来源的理由：` 那一栏；理由成立与否归人工，那张官方登记表本仓没有表格、明写不做。
+    """
+    cir = _cir_r16()
+    ITEMS = cir.genetic_item_fields()
+    DECL_PH = cir.genetic_field('【待填写：本案依赖遗传资源时才填，不依赖就划去本节】')
+    DECL = cir.genetic_field('本案依赖遗传资源完成')
+    VALS = ('某省农科院种质资源库', '云南省西双版纳州采集')
+    REAL = [write + v for (_l, write), v in zip(ITEMS, VALS)]
+    PH = [write + '【待填写：' + label + '】' for label, write in ITEMS]
+    REASON_WRITE = cir.genetic_reason_field()[1]
+
+    def draft(tag, decl=DECL, items=None, reason=None, name=None):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n',
+                cir.applicant_field('甲有限公司') + '\n',
+                cir.address_field('浙江省杭州市西湖区文一西路 100 号') + '\n',
+                cir.postal_field('310012') + '\n',
+                cir.credit_code_field('91330100MA2AB1CD3E') + '\n',
+                *[w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()],
+                '## 遗传资源\n']
+        if decl is not None:
+            body.append(decl + '\n')
+        body += [ln + '\n' for ln in (items if items is not None else PH)]
+        if reason is not None:
+            body.append(reason + '\n')
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        decl_ln = [i for i, ln in enumerate(text.splitlines(), 1)
+                   if ln.startswith('- 遗传资源来源：')]
+        return p, decl_ln
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R31 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R31 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ① 声明还是占位 ⇒ 未判，两栏不比（注记点名的是**声明**这一路，不许与单栏占位同形）
+        p, _ = draft('ph', decl=DECL_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '遗传资源声明还是占位' in judged(r.stdout)[0],
+                f'R31 声明占位那档没走未判: {show(r)}', r)
+
+        # ② 声明＋两栏真值 ⇒ 这条一句话都不出
+        p, _ = draft('full', decl=DECL, items=REAL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'R31 两栏齐却被说话: {show(r)}', r)
+
+        # ③ 漏「原始来源」那一栏 ⇒ 违规、点名那一栏、位点是声明那一行
+        #    比的是消息里"——"之前那段清单：法条引文嵌在原话里就写着"直接来源"，整条比会把这一极读成误报
+        #    （同一形状在 R26/R27/R28 的截断臂上实测过一次，电池的截断档也盯着这一面）。
+        p, dl = draft('miss1', decl=DECL, items=REAL[:1])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        head3 = fired(r.stdout)[0].split('——')[0] if fired(r.stdout) else ''
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '原始来源' in head3 and '直接来源' not in head3
+                and f'请求书著录项_E2E.md:{dl[0]}:' in fired(r.stdout)[0],
+                f'漏写原始来源没按声明那一行点名: {show(r)}', r)
+
+        # ④ 两栏全无 ⇒ **一条**红里列两件（不许拆成两条虚胖计数）
+        p, _ = draft('miss2', decl=DECL, items=[])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and all(x in fired(r.stdout)[0] for x in ('直接来源', '原始来源')),
+                f'两栏都缺时没列齐或拆成了两条: {show(r)}', r)
+
+        # ⑤ 一栏退回占位 ⇒ 未判只列那一栏（另一栏已填，不能整条折成未判）
+        p, _ = draft('one_ph', decl=DECL, items=[REAL[0], PH[1]])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        n5 = judged(r.stdout)
+        assert_(r.returncode == 0 and len(n5) == 1 and '原始来源' in n5[0]
+                and '直接来源' not in n5[0],
+                f'单栏占位没只点名那一栏: {show(r)}', r)
+
+        # ⑥ 整节划去（连声明行都没有）⇒ 不适用，连注记都不出
+        p, _ = draft('nores', decl=None, items=[])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'不依赖遗传资源的案被硬判了: {show(r)}', r)
+
+        # ⑦ 原始来源写「无法说明」却没有理由栏 ⇒ 判红那一支（法条后半句第一次有人对）
+        p, _ = draft('noreason', decl=DECL,
+                     items=[REAL[0], ITEMS[1][1] + '无法说明'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '陈述理由' in fired(r.stdout)[0],
+                f'说"无法说明"却没给理由栏没被抓: {show(r)}', r)
+
+        # ⑧ 同一句"无法说明"＋理由栏真值 ⇒ 这一支不出声（陈述了就算，成立与否归人工）
+        p, _ = draft('reason', decl=DECL, items=[REAL[0], ITEMS[1][1] + '无法说明'],
+                     reason=REASON_WRITE + '采集记录随样品移交时遗失，已申请补录')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'陈述了理由还被判红: {show(r)}', r)
+
+        # ⑨ 理由栏在场却占位 ⇒ 未判，不折成违规也不折成合规
+        p, _ = draft('reason_ph', decl=DECL, items=[REAL[0], ITEMS[1][1] + '无法说明'],
+                     reason=REASON_WRITE + '【待填写：无法说明原始来源的理由】')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '理由' in judged(r.stdout)[0],
+                f'理由栏占位没走未判: {show(r)}', r)
+
+        # ⑩ 文件名字轴：同样几行写进说明书那件必须静默（法句的落点是请求书）
+        p, _ = draft('axis', decl=DECL, items=PH, name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'轴放宽到说明书也判了: {show(r)}', r)
+
+        # ⑪ 门禁自报的覆盖区间要含到 R31（自报是现推的，说了就要真覆盖）
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 31,
+                f'门禁自报的区间没扩到 R31（读到的区间：{m.group(1) if m else "无"}）', None)
+
+
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
 
@@ -7558,7 +7699,7 @@ def test_commit_rule_check_tool():
     tool = f'{S}/commit_rule_check.py'
     r = run([PY, tool, '--self-test'])
     assert_(r.returncode == 0 and 'SELFTEST-OK' in r.stdout,
-            f'提交标题对账工具自检没过（四档里有一档不开火或错开火）: {show(r)}', r)
+            f'提交标题对账工具自检没过（有控制档不开火或错开火）: {show(r)}', r)
 
     def probe(tag, subject, added_ids, extra='', path='scripts/x.py', removed_ids=()):
         with tempfile.TemporaryDirectory() as dd:
@@ -7711,6 +7852,7 @@ if __name__ == '__main__':
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
+ test_iron_r31_genetic_source_set,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报

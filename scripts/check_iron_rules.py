@@ -127,7 +127,7 @@
      生产真包上 R7/R15 走的是"未核"那一支。现在骨架写 `01_交底书/交底书_<产品>.md`，
      §0 那一行由判据侧 `title_field()` 拼（写法常量 `TITLE_FIELD_WRITE` 与 `TITLE_FIELD`
      同源，生成器不另抄字面——抄的那份一漂移，两把尺子在生产包上静默退回未核）。
-     现造包真读数（第 58 轮 2026-09-29 复算）：8 份 md、`合计违规 0（规则 R1–R30，判据见脚本 docstring）`、
+     现造包真读数（第 60 轮 2026-09-29 复算）：8 份 md、`合计违规 0（规则 R1–R31，判据见脚本 docstring）`、
      8 份里 6 份报 `R7 未核`，没报的那两份是交底书与著录项底稿（其余 6 份本就没有该字段，
      仍走未核——三态说的是这份文书有没有可读字段，不是判据覆盖了多少同族措辞）。
      连带两面也现量过：交底书 §4「附图说明」使 N 族域内从 1 份变 2 份，那一份走"未判"（那条对照表判据只管说明书，内部文书不硬判）；§6「权利要求建议稿」进 Q 族
@@ -261,6 +261,16 @@
      没有 ⇒ 不适用（法句主语是"委托专利代理机构的"）；那一行占位 ⇒「R30 未判」；填实 ⇒ 四栏
      （专利代理机构名称／专利代理机构的机构代码／专利代理师资格证号码／专利代理师联系电话）
      缺一件红一条、位点报代理师那一行。同段"名称须用登记全称并与公章一致"仍明写不做（无名录无公章）。
+  R31 声明依赖遗传资源就得写明直接来源与原始来源——专利法第二十六条五款（两份留底逐字一致）
+     「依赖遗传资源完成的发明创造，申请人应当在专利申请文件中说明该遗传资源的直接来源和原始来源；
+     申请人无法说明原始来源的，应当陈述理由」；细则第二十九条**二款**把落点定在请求书并另要一张官方
+     表格（上一轮把它记成"三款"是错的，那两个定义同属一款，指南左侧栏自己也标着「法 26.5／细则 29.2」）；
+     指南 §5.3 txt:1131-1133（那句**跨页**：义务句止于 `<<<PAGE 35>>>` 之前一行，补正→期满未补正视为撤回
+     →补正仍不符驳回在 PDF p35／印刷页 1-19）同句。触发＝底稿里有 `- 遗传资源来源：` 那一行：
+     没有 ⇒ 不适用（多数案不依赖遗传资源，硬凑这两栏等于替法条造义务）；那一行占位 ⇒「R31 未判」；
+     填实 ⇒ 两栏（遗传资源的直接来源／遗传资源的原始来源）缺一栏红一条、一条里把缺的列齐，位点报声明那一行。
+     后半句那一支只判形状：原始来源写着"无法说明"就必须有 `- 无法说明原始来源的理由：` 那一栏。
+     两注明写不做：理由成不成立要读技术事实（归人工）；那张「遗传资源来源披露登记表」本仓没有官方表格。
 退出码: 0 合规 / 1 存在违规 / 2 输入问题（路径不存在或无可检文件，未做任何判定）
 """
 import argparse, os, re, sys
@@ -975,6 +985,88 @@ def agency_particulars_set(path, lines):
     return findings, notes
 
 
+# ── R31 声明依赖遗传资源就得写明直接来源与原始来源（专利法第二十六条五款＋细则第二十九条二款＋指南 §5.3）──
+# 专利法第二十六条五款（两份留底逐字一致，`.codebuddy/attest/patent_law_5b9f99.htm`／
+# `patent_law_80488d.htm`）「依赖遗传资源完成的发明创造，申请人应当在专利申请文件中说明该遗传资源的
+# 直接来源和原始来源；申请人无法说明原始来源的，应当陈述理由」；细则第二十九条**二款**把落点定在请求书
+# 并另要一张官方表格（读自行政法规库合并全文，指南左侧栏自己也标着「法 26.5／细则 29.2」——
+# 上一轮把它记成"三款"是错的，第一、二句那两个定义同属一款）；指南 §5.3（txt:1131-1133，那句**跨页**：
+# 义务句止于 `<<<PAGE 35>>>` 之前一行，补正→期满未补正视为撤回→补正仍不符驳回那三句在 PDF p35／印刷页 1-19）
+# 把义务写成"写明该遗传资源的直接来源和原始来源"。
+# 触发式与 R26·R27·R28·R30 同一形：底稿没有 `- 遗传资源来源：` 那一行 ⇒ 不适用，连注记都不出——
+# 绝大多数案不依赖遗传资源，硬凑这两栏等于替法条造义务。
+# 法条后半句那一支（"无法说明原始来源的，应当陈述理由"）判的是**形状**：原始来源那一栏写着"无法说明"
+# 就必须有 `- 无法说明原始来源的理由：` 那一栏；只判栏位在不在。
+# 两注明写不做：理由成不成立要读技术事实（归人工）；细则另要的那张「遗传资源来源披露登记表」是官方
+# 表格，本仓交付包没有表格可核对。
+GENETIC_FIELD = re.compile(r'^\s*-\s*遗传资源来源[:：]\s*(\S.*?)\s*$')
+GENETIC_FIELD_WRITE = '- 遗传资源来源：'
+DIRECT_SOURCE_FIELD = re.compile(r'^\s*-\s*遗传资源的直接来源[:：]\s*(\S.*?)\s*$')
+ORIGIN_SOURCE_FIELD = re.compile(r'^\s*-\s*遗传资源的原始来源[:：]\s*(\S.*?)\s*$')
+GENETIC_REASON_FIELD = re.compile(r'^\s*-\s*无法说明原始来源的理由[:：]\s*(\S.*?)\s*$')
+GENETIC_REASON_LABEL = '无法说明原始来源的理由'
+GENETIC_REASON_WRITE = '- 无法说明原始来源的理由：'
+GENETIC_ITEMS = (
+    ('遗传资源的直接来源', DIRECT_SOURCE_FIELD, '- 遗传资源的直接来源：'),
+    ('遗传资源的原始来源', ORIGIN_SOURCE_FIELD, '- 遗传资源的原始来源：'),
+)
+# 后半句的原话就是这四个字，形状判据只认它，不去猜"无法确定／不知来源"那些同义说法——
+# 中文无词边界，猜同义词会把"来源无法说明清楚"之类写法也算进去，那是语义判断不是形状。
+CANNOT_EXPLAIN = re.compile(r'无法说明')
+
+
+def genetic_field(value):
+    """遗传资源声明那一栏的写法（R31 的触发条件）。"""
+    return GENETIC_FIELD_WRITE + value
+
+
+def genetic_item_fields():
+    """直接／原始两栏的写法常量（生成器与判据共用一份，别各抄字面）。"""
+    return [(label, write) for label, _rex, write in GENETIC_ITEMS]
+
+
+def genetic_reason_field():
+    """理由栏的（标签, 写法）——同一份常量给生成器与判据用。"""
+    return (GENETIC_REASON_LABEL, GENETIC_REASON_WRITE)
+
+
+def genetic_source_set(path, lines):
+    """R31 依赖遗传资源得写明直接来源与原始来源。判据号写在 `Finding(` 字面里。"""
+    if not is_request_draft(path):
+        return [], []
+    decl = field_hits(GENETIC_FIELD, lines)
+    if not decl:                       # 没声明依赖遗传资源 ⇒ 不适用，连注记都不出（多数案不依赖）
+        return [], []
+    if field_group_tally([('遗传资源来源', decl)])[1]:
+        return [], ['R31 未判（遗传资源声明还是占位——本案依不依赖遗传资源都没定，两栏不比）']
+    items = [(label, field_hits(rex, lines)) for label, rex, _w in GENETIC_ITEMS]
+    miss, ph = field_group_tally(items)
+    findings, notes = [], []
+    if miss:
+        findings.append(Finding(
+            'R31 遗传资源来源缺直接／原始两栏', path, decl[0][0],
+            '底稿声明本案依赖遗传资源，却没有 ' + '、'.join(miss)
+            + ('那一栏' if len(miss) == 1 else '那两栏') + '——专利法第二十六条五款逐字'
+            '「申请人应当在专利申请文件中说明该遗传资源的直接来源和原始来源」（细则第二十九条二款'
+            '把落点定在请求书；指南 §5.3 同句并给后果：通知补正→期满未补正视为撤回→补正仍不符驳回）；'
+            '位点报遗传资源声明那一行'))
+    origin = dict(items).get('遗传资源的原始来源', [])
+    says_cannot = [(ln, v) for ln, v in origin if CANNOT_EXPLAIN.search(v)]
+    reason = field_hits(GENETIC_REASON_FIELD, lines)
+    if says_cannot and not reason:
+        findings.append(Finding(
+            'R31 说无法说明原始来源却没陈述理由', path, says_cannot[0][0],
+            GENETIC_REASON_LABEL + '那一栏不在底稿里——专利法第二十六条五款后半句逐字'
+            '「申请人无法说明原始来源的，应当陈述理由」；只判这一栏在不在，'
+            '理由成不成立要读技术事实，归人工'))
+    if ph:
+        notes.append('R31 未判（' + '、'.join(ph) + ' 还是占位——填没填判不了，不折成合规）')
+    if says_cannot and field_group_tally([(GENETIC_REASON_LABEL, reason)])[1]:
+        notes.append('R31 未判（' + GENETIC_REASON_LABEL + ' 还是占位——陈述没陈述判不了，'
+                     '理由成不成立本来也不判）')
+    return findings, notes
+
+
 # ── R16 说明书第一页第一行（《专利审查指南》2023 第一部分第一章 §4.2）──
 # 适用域走**路径轴**而不是正文轴：`02_申请文件` 是包里说明书的法定落位，文件名以「说明书」
 # 开头算第二认法。正文轴不可用——交底书 §4 的名字就叫「附图说明」，正文轴会把交底书也吃进来，
@@ -1579,6 +1671,11 @@ def check_text(path, text, allowed_pub_nos=None, brand_terms=None, marks=None, d
     ag_findings, ag_notes = agency_particulars_set(path, lines)
     findings += ag_findings
     notes += ag_notes
+
+    # R31 声明了遗传资源才判那两栏（专利法第二十六条五款；落点在请求书＝细则第二十九条二款）。
+    gn_findings, gn_notes = genetic_source_set(path, lines)
+    findings += gn_findings
+    notes += gn_notes
 
     # R16 说明书第一页第一行（§4.2 那两句禁令，txt:763-767＝PDF p24／印刷页 1-8）。
     # 判的是**第一条有内容的行**：md 文件开头那个空行是排版壳，不是"第一行没写东西"。

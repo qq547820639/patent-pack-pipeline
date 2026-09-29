@@ -100,7 +100,7 @@ def new_rule_ids(diff_text):
 
 
 def subject_rule_ids(subject):
-    """标题里出现的判据号形状串（含 R1–R30 这种区间里的两端，都算"标题涉及的号"）。"""
+    """标题里出现的判据号形状串（含 R1–R31 这种区间里的两端，都算"标题涉及的号"）。"""
     return [m.group(1) for m in RULE_ID.finditer(subject or '')]
 
 
