@@ -8113,6 +8113,178 @@ def test_iron_r33_single_agency_only():
           '真值混占位未判 + 整栏不存在不适用（原告是 R30）+ 文件名字轴不误伤 + 自报区间含 R33 + docx 两极）')
 
 
+def test_iron_r34_sequence_listing_part():
+    """R34：声明包含核苷酸／氨基酸序列的发明申请，说明书得单列「序列表」那一部分。
+
+    法源两支各引各的（都自己重开过）：
+    - 《细则》**第二十条四款**（读自行政法规库合并全文 `xzfg1697.htm`，全文里"序列表"只此一处）
+      逐字「发明专利申请包含一个或者多个核苷酸或者氨基酸序列的，说明书应当包括
+      符合国务院专利行政部门规定的序列表」——主语是**发明**，实用新型不走这一款。
+    - 《指南》第一部分第一章 §4.2（本机留底 `zhinan2023_ahippc.txt:780-782`＝PDF p25／印刷页 1-9，
+      该页页边界 txt:770、页眉 txt:771、页标行 txt:772「（1-9） 21」抄引文要跳过）逐字
+      「涉及核苷酸或者氨基酸序列的申请，应当将该序列表作为**说明书的一个单独部分**。
+      对于电子申请，应当提交一份符合规定的计算机可读形式序列表作为说明书的一个单独部分。」
+    后果**不混档**：txt:787-790 那串"补正通知书→期满未补交发视为撤回通知书"钉的是
+    **计算机可读形式的副本**没交或明显不一致那一支；本条判的是"说明书里有没有这一个部分"，
+    法条没给它独立的后果档位，所以报文里只写"应当包括／单列一部分"，不冒充驳回级。
+
+    三态与触发式同族：底稿里没有 `- 涉及核苷酸或者氨基酸序列：` 那一栏 ⇒ 不适用（连注记都不出）；
+    那一栏占位 ⇒「R34 未判」；填实 ⇒ 同包说明书得有一节归一名为「序列表」的标题，缺 ⇒ 违规。
+    同包取不到那件著录项底稿 ⇒ 未判（触发与否读不到，与 R16／R19"取不到参照物就未判"同一条纪律）。
+    节名走 `head_names` 归一（去 # 去编号去尾括注），「### 序列表（与 SEQ ID NO 对应）」算有节——
+    不归一就是拿排版形状冒充法条义务。
+    """
+    cir = _cir_r16()
+    DECL_PH = cir.sequence_field('【待填写：本案包含核苷酸或氨基酸序列时才填】')
+    DECL = cir.sequence_field('是（SEQ ID NO: 1—12）')
+
+    def build(tag, decl=None, spec_sections=('技术领域', '背景技术', '发明内容',
+                                             '附图说明', '具体实施方式'), with_draft=True):
+        pk = os.path.join(d, tag, '02_申请文件')
+        os.makedirs(pk, exist_ok=True)
+        sp = os.path.join(pk, '说明书_E2E.md')
+        # 夹具对其它判据保持阴性：背景技术那一节带上 R9 要的逐字查新声明，
+        # 否则本档 rc=1 是 R9 给的，那些"必须静默"的极就白写了。
+        body = ['# ' + R16_TITLE]
+        for s in spec_sections:
+            body.append('## %s\n%s：%s\n正文若干。' % (
+                s, s, cir.NOVELTY_CLAUSE if s == '背景技术' else '正文'))
+        open(sp, 'w', encoding='utf8').write('\n'.join(body) + '\n')
+        if with_draft:
+            body = ['# ' + R16_TITLE, '', '## 申请人／发明人', cir.applicant_field('甲有限公司')]
+            if decl is not None:
+                body.append(decl)
+            open(os.path.join(pk, '请求书著录项_E2E.md'), 'w', encoding='utf8').write(
+                '\n'.join(body) + '\n')
+        return sp
+
+    def fired(out):
+        return [ln for ln in out.splitlines() if ln.startswith('  FAIL R34 ')]
+
+    def judged(out):
+        return [ln for ln in out.splitlines() if 'R34 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ⓪ 底稿没那一栏 ⇒ 说明书不适用（一声不出，连注记都不出）
+        p = build('none')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'没声明序列却被 R34 判了: {show(r)}', r)
+
+        # ① 那一栏占位 ⇒ 未判
+        p = build('ph', decl=DECL_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '占位' in judged(r.stdout)[0],
+                f'声明栏占位那档没走未判: {show(r)}', r)
+
+        # ② 声明填实 + 说明书单列了那一部分 ⇒ 静默
+        p = build('ok', decl=DECL,
+                  spec_sections=('技术领域', '背景技术', '发明内容', '附图说明',
+                                 '序列表', '具体实施方式'))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'说明书单列了「序列表」那一部分，R34 却还是出声了: {show(r)}', r)
+
+        # ③ 声明填实 + 说明书没有那一部分 ⇒ 违规，位点报说明书那一件
+        p = build('miss', decl=DECL)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        f3 = fired(r.stdout)
+        assert_(r.returncode == 1 and len(f3) == 1 and '序列表' in f3[0]
+                and '说明书_E2E.md:1:' in f3[0] and '第二十条' in f3[0],
+                f'声明了序列而说明书缺「序列表」那一部分没被抓（或位点不是说明书首行）: {show(r)}', r)
+
+        # ⑤b 正文里"提到"序列表三个字不算有那一节——只有标题才算（不归一 vs 只认字面是两头）
+        p = build('mention', decl=DECL)
+        open(p, 'a', encoding='utf8').write('本案的序列表见另行提交的计算机可读形式副本。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(len(fired(r.stdout)) == 1 and not judged(r.stdout),
+                f'正文里出现"序列表"三个字就被当成有那一节了: {show(r)}', r)
+
+        # ④ 同包取不到著录项底稿 ⇒ 未判（触发读不到，不许折成合规也不折成违规）
+        p = build('nodraft', with_draft=False)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        j4 = judged(r.stdout)
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(j4) == 1 and '取不到' in j4[0],
+                f'取不到同包底稿时 R34 没走未判: {show(r)}', r)
+
+        # ⑤ 节名归一：阿拉伯编号与尾括注都不影响认节（不归一就是拿排版形状冒充法条义务）。
+        #    ⚠ 中文数字前缀（「三、序列表」）**今天不归一**——`_HD_NUM` 只剥阿拉伯数字与 ０-９，
+        #    这一格是 P10／P12／N 族共用的认法，改它要连 rebuild_package 那份字面一起收（已开任务）。
+        p = build('norm', decl=DECL)
+        open(p, 'a', encoding='utf8').write('### 3. 序列表（与 SEQ ID NO 对应）\n正文若干。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'「序列表」写成带编号带括注的三级标题就被当成没有这一部分: {show(r)}', r)
+
+        # ⑥ 交底书里同样写一栏声明 ⇒ 不触发（触发面钉在 02_申请文件 那件著录项底稿）
+        dk = os.path.join(d, 'disc', '01_交底书')
+        os.makedirs(dk, exist_ok=True)
+        os.makedirs(os.path.join(d, 'disc', '02_申请文件'), exist_ok=True)
+        open(os.path.join(dk, '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n' + DECL + '\n')
+        sp = os.path.join(d, 'disc', '02_申请文件', '说明书_E2E.md')
+        open(sp, 'w', encoding='utf8').write('# ' + R16_TITLE + '\n## 技术领域\n正文。\n')
+        r = run([PY, f'{S}/check_iron_rules.py', sp])
+        assert_(not fired(r.stdout),
+                f'交底书里的一栏声明把说明书判红了（触发面没钉在著录项底稿）: {show(r)}', r)
+
+        # ⑥b 判面钉在"说明书"那一份上：同一包里底稿自己声明填实时，红只能来自说明书那件，
+        #     单跑底稿那份必须一声不出（目录轴会把底稿也吃进来 ⇒ 把义务报在错的文书上）。
+        p_draft = os.path.join(d, 'none', '02_申请文件', '请求书著录项_E2E.md')
+        open(p_draft, 'a', encoding='utf8').write(DECL + '\n')
+        r = run([PY, f'{S}/check_iron_rules.py', p_draft])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'著录项底稿自己也被 R34 判了（判面没钉在说明书那一份）: {show(r)}', r)
+        spec = os.path.join(d, 'none', '02_申请文件', '说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', spec])
+        assert_(len(fired(r.stdout)) == 1 and '说明书_E2E.md' in fired(r.stdout)[0],
+                f'同包声明填实时红没有恰好落在说明书那一份上: {show(r)}', r)
+
+        # ⑦ 自报区间含到 R34
+        m = __import__('re').search(r'规则 R1–R(\d+)',
+                                    run([PY, f'{S}/check_iron_rules.py', sp]).stdout)
+        assert_(m and int(m.group(1)) >= 34,
+                f'门禁自报的区间没扩到 R34（读到：{m.group(1) if m else "无"}）', None)
+
+        # ⑧ docx 通道两极：声明写在 Word 面上、说明书那份是 Word，缺那一部分要被抓
+        try:
+            import docx
+        except ImportError:
+            print('  note R34 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r34_docx')
+        else:
+            for tag, with_seq, want in (('docx_red', False, True), ('docx_ok', True, False)):
+                pk = os.path.join(d, tag, '02_申请文件')
+                os.makedirs(pk, exist_ok=True)
+                dd = docx.Document()
+                dd.add_paragraph(R16_TITLE)
+                dd.add_paragraph(cir.sequence_field('是（SEQ ID NO: 1—12）').strip())
+                dpath = os.path.join(pk, f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+                dd.save(dpath)
+                ds = docx.Document()
+                ds.add_paragraph(R16_TITLE)
+                ds.add_heading('技术领域', level=2)
+                if with_seq:
+                    # 节必须是**标题**：docx_text 按 w:pStyle 还原成 # 行，普通段落不算一节
+                    # （这一格在 md 面上是 `##`，夹具用 add_paragraph 就是把判点摆在被测算读不到的地方）
+                    ds.add_heading('序列表', level=2)
+                sp2 = os.path.join(pk, '说明书_E2E.docx')
+                ds.save(sp2)
+                r = run([PY, f'{S}/check_iron_rules.py', sp2])
+                g = fired(r.stdout)
+                if want:
+                    assert_(r.returncode == 1 and len(g) == 1 and '序列表' in g[0]
+                            and '说明书_E2E.docx' in g[0],
+                            f'Word 面上说明书缺「序列表」那一部分却没被抓: {show(r)}', r)
+                else:
+                    assert_(not g and not judged(r.stdout),
+                            f'Word 面上那一部分在，R34 却出声了（假红）: {show(r)}', r)
+    print('PASS iron_r34 序列表须单列一部分（没声明不适用 + 声明占位未判 + 有该节静默 + 缺该节点名带位点 + '
+          '正文提到不算有节 + 取不到同包底稿未判 + 交底书不触发 + 红只落说明书那一份（底稿不被判）+ '
+          '编号与尾括注归一 + 自报区间含 R34 + docx 两极，共十一极）')
+
+
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
 
@@ -8282,7 +8454,7 @@ if __name__ == '__main__':
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
              test_iron_r31_genetic_source_set, test_iron_r32_foreign_applicant_agency,
-             test_iron_r33_single_agency_only,
+             test_iron_r33_single_agency_only, test_iron_r34_sequence_listing_part,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
