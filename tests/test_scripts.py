@@ -230,6 +230,22 @@ def test_new_product_package():
         # 必须说"未判"，既不判红也不冒充核过（生产侧的三态，与 R12/R13 夹具档同一口径）。
         assert_('R12/R13 未判（看不见不等于合规）' in ri.stdout,
                 '骨架包上 R12/R13 没走"未判"三态（空表被折成合规，或被折成违规）', ri)
+        # ---------- 著录项底稿的未判注记名册 ↔ 门禁 docstring 那句自述（第 61 轮补的机械力） ----------
+        # 那句"现算全集"是手抄的，手抄的清单一定会漂：本轮复算时就撞上它少写了 R31（第 60 轮那条
+        # 新判据落了注记却没进自述句）。所以让常驻档逐号对账——注记号集与自述不符、或那句自述
+        # 整句没了（没了＝这条对账不再消费它，一并判红，不把"看不见"折成通过）。
+        _iron_src = open(os.path.join(S, 'check_iron_rules.py'), encoding='utf8').read()
+        _claim = re.search(r'著录项底稿那件挂的未判注记\*\*现算全集\*\*是([^；]+)；', _iron_src)
+        assert_(_claim, '门禁 docstring 里那句"著录项底稿未判注记现算全集"没了——这句一没，'
+                        '下面这条逐号对账就静默不跑（假绿）', None)
+        _appl = os.path.join(d, 'TESTX_专利交付包', '02_申请文件')
+        _bib = sorted(f for f in os.listdir(_appl) if f.startswith('请求书著录项'))
+        assert_(len(_bib) == 1, f'骨架那件著录项底稿没取到唯一一件: {_bib}', None)
+        rbib = run([PY, f'{S}/check_iron_rules.py', os.path.join(_appl, _bib[0])])
+        _got = sorted({int(x) for x in re.findall(r'R(\d+) 未判', rbib.stdout)})
+        _said = sorted({int(x) for x in re.findall(r'R(\d+)', _claim.group(1))})
+        assert_(_got == _said and len(_got) >= 10,
+                f'骨架著录项底稿的未判注记号集与门禁自述不符：实算 {_got} vs 自述 {_said}', rbib)
         # ---------- 交底书底稿（第 45 轮）：R7／R15 第一次在生产交付面上有载体 ----------
         # 这两把尺子只判 §0 那一行 `- 发明名称：`。从前骨架根本不写它，第 44 轮普查 348 份语料
         # 带该字段的只有模板自述行与长度夹具 ⇒ 两把尺子在生产包上走"未核"，射程为零。
@@ -7712,6 +7728,227 @@ def test_iron_r31_genetic_source_set():
           '带理由静默 + 理由栏占位未判 + 文件名字轴不误伤 + 自报区间含 R31 + docx 通道）')
 
 
+def test_iron_r32_foreign_applicant_agency():
+    """R32：声明了外国申请人就必须写明委托的专利代理师（专利法第十八条一款）＋ R25 的让位。
+
+    法源逐字都自己重开过：《专利法》第十八条一款（两份留底 `patent_law_5b9f99.htm`／
+    `patent_law_80488d.htm` 读数一致）「在中国没有经常居所或者营业所的外国人、外国企业或者外国其他组织
+    在中国申请专利和办理其他专利事务的，应当委托依法设立的专利代理机构办理」；《指南》§4.1.3.2
+    （义务句 txt:675-676＝PDF p22／印刷页 1-6，该页页边界 txt:658、页眉 txt:659、页标行 txt:660
+    「18 （1-6）」抄引文要跳过）要求外国申请人写明
+    「其姓名或者名称、国籍或者注册的国家或者地区」，《细则》第十九条一款(二)同一支话分两半句写
+    （行政法规库合并全文 `xzfg1697.htm` 逐字：中国那一支要「名称或者姓名、地址、邮政编码、统一
+    社会信用代码或者身份证件号码」，外国那一支只要「姓名或者名称、国籍或者注册的国家或者地区」）；
+    《指南》§6.1.1（义务句 txt:1144-1148＝PDF p35／印刷页 1-19，该页页边界 txt:1135、页眉 txt:1136、
+    页标行 txt:1137「（1-19） 31」抄引文要跳过）把法句那一句落到两支申请人身上——
+    「在中国内地没有经常居所或者营业所的外国人、外国企业或者外国其他组织在中国**单独申请**专利和
+    办理其他专利事务，或者**作为代表人**与其他申请人共同申请专利和办理其他专利事务的，应当委托
+    专利代理机构办理」，同段 txt:1149-1153 给的后果是
+    「未委托的，审查员应当发出审查意见通知书…期满未答复的，其申请被视为撤回…仍不符合专利法
+    第十八条第一款规定的，该专利申请应当被驳回」。
+    **这两支就是 R32 判红的前提**：底稿那一栏不写是哪一位申请人是外国的，所以只有"恰好一个真值
+    申请人"（＝必然就是单独申请那一支）判得了红；两位以上、或申请人那一栏还是占位，一律走未判。
+    这一档是本轮自己读 txt:1144-1148 读出来的第二笔假红：判据初稿只要看见国籍栏填实、代理栏缺席
+    就判红，可"共同申请且代表人是中方主体"那一案法条根本不管——与 R25 让位同一根轴、同一个理由。
+
+    同时钉住 **R25 的让位**（第 61 轮修的那条假红）：R25 从前只看 `- 申请人：` 那一行就比四件，
+    可它自己引的指南 §4.1.3.1 逐字是「申请人是**中国**单位或者个人的，应当填写其名称或者姓名、地址、
+    邮政编码、统一社会信用代码或者身份证件号码」——外国那一支（§4.1.3.2）根本不要求后三件。
+    所以底稿一旦声明了外国申请人（`- 申请人国籍或者注册的国家或者地区：` 那一栏在场），
+    地址／邮政编码／代码 三件既不判红也不判合规，只出一条未判注记；两支都要求的「名称或者姓名」照判。
+
+    明写不做三注：本案是不是"在中国没有经常居所或者营业所"要读事实；§4.1.3.2 那三个条约条件
+    （txt:683-688：所属国与我国有条约／是巴黎公约或 WTO 成员／依互惠）要名录；同节 txt:677-680
+    里"国籍有疑时可要求提交国籍证明或注册地证明文件"（细则第三十八条(一)(二) 那条路）是外部证据。
+    """
+    cir = _cir_r16()
+    ORIGIN_PH = cir.foreign_applicant_field('【待填写：申请人里有外国主体时才填这一栏】')
+    ORIGIN = cir.foreign_applicant_field('美国（注册地：特拉华州）')
+    AGENT_PH = cir.agent_field('【待填写：真实姓名＋资格证号码＋电话】')
+    AGENT = cir.agent_field('李四 资格证号码 110031234567 电话 0571-88886666')
+
+    def draft(tag, origin=None, agent=AGENT, drop_items=(), name=None,
+            applicant='Acme Inc.'):
+        pk = os.path.join(d, tag)
+        os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+        os.makedirs(os.path.join(pk, '01_交底书'), exist_ok=True)
+        open(os.path.join(pk, '01_交底书', '交底书_E2E.md'), 'w', encoding='utf8').write(
+            '# E2E\n' + cir.title_field(R16_TITLE) + '\n')
+        apps = applicant if isinstance(applicant, (list, tuple)) else [applicant]
+        rows = ([cir.applicant_field(a) for a in apps]
+                + [cir.address_field('浙江省杭州市西湖区文一西路 100 号'),
+                   cir.postal_field('310012'), cir.credit_code_field('91330100MA2AB1CD3E')])
+        keep = [ln for ln in rows
+                if not any(ln.startswith(w) for w in drop_items)]
+        body = ['# ' + R16_TITLE, '', '## 申请人／发明人\n'] + [ln + '\n' for ln in keep]
+        if origin is not None:
+            body.append(origin + '\n')
+        body.append('## 专利代理\n')
+        if agent is not None:
+            body.append(agent + '\n')
+            # 代理师写了就得把 R30 那四件也填上——否则本档的 rc=1 是 R30 给的，
+            # 不是 R32 给的，那些"必须静默"的极就白写了（夹具替被测项找了替罪羊）。
+            body += [w + v + '\n' for (label, w), v in zip(
+                cir.agency_item_fields(),
+                ('杭州之江专利代理事务所', '33101234', '110031234567', '0571-88886666'))]
+        body += [w + '【待填写：清单未填】\n' for _l, w in cir.list_item_fields()]
+        fname = f'{cir.REQUEST_DRAFT_NAME}_E2E.md' if name is None else name
+        p = os.path.join(pk, '02_申请文件', fname)
+        text = '\n'.join(body) + '\n'
+        open(p, 'w', encoding='utf8').write(text)
+        origin_ln = [i for i, ln in enumerate(text.splitlines(), 1)
+                     if ln.startswith('- 申请人国籍或者注册的国家或者地区：')]
+        return p, origin_ln
+
+    def fired(out, tag='R32'):
+        return [ln for ln in out.splitlines() if ln.startswith(f'  FAIL {tag} ')]
+
+    def judged(out, tag='R32'):
+        return [ln for ln in out.splitlines() if f'{tag} 未判' in ln]
+
+    def r25(out):
+        return [ln for ln in out.splitlines()
+                if ln.startswith('  FAIL R25 ') or 'R25 未判' in ln]
+
+    with tempfile.TemporaryDirectory() as d:
+        # ⓪ 没有那一栏 ⇒ R32 不适用（连注记都不出），R25 仍按中国那一支的四件判
+        p, _ = draft('none', origin=None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'没声明外国申请人却被 R32 判了: {show(r)}', r)
+        p2, _ = draft('none_miss', origin=None, drop_items=(cir.postal_field(''),))
+        r2 = run([PY, f'{S}/check_iron_rules.py', p2])
+        assert_(r2.returncode == 1 and len(fired(r2.stdout, 'R25')) == 1
+                and '邮政编码' in fired(r2.stdout, 'R25')[0],
+                f'没有外国声明时 R25 该照判四件却软了: {show(r2)}', r2)
+
+        # ① 那一栏还是占位 ⇒ R32 未判（有没有外国主体都没定），不比代理那一栏
+        p, _ = draft('ph', origin=ORIGIN_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '国籍或者注册地还是占位' in judged(r.stdout)[0],
+                f'国籍栏占位那档没走未判: {show(r)}', r)
+
+        # ② 填实 + 代理师填实 ⇒ R32 一句话都不出
+        p, _ = draft('full', origin=ORIGIN)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and not judged(r.stdout),
+                f'外国申请人也委托了代理，R32 却还是出声了: {show(r)}', r)
+
+        # ③ 填实却没有 `- 专利代理师：` 那一行 ⇒ 违规，位点报国籍那一行
+        p, ol = draft('noagent', origin=ORIGIN, agent=None)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 1 and len(fired(r.stdout)) == 1
+                and '委托' in fired(r.stdout)[0].split('——')[0]
+                and f'请求书著录项_E2E.md:{ol[0]}:' in fired(r.stdout)[0],
+                f'外国申请人没写委托代理没被抓或位点没报国籍那一行: {show(r)}', r)
+
+        # ④ 代理师那一行在场但还是占位 ⇒ 未判（委没委托判不了，不折成违规也不折成合规）
+        p, _ = draft('agent_ph', origin=ORIGIN, agent=AGENT_PH)
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(judged(r.stdout)) == 1
+                and '代理师还是占位' in judged(r.stdout)[0],
+                f'R32 代理师占位那档没走未判: {show(r)}', r)
+
+        # ⑤ R25 让位（本轮修的假红方向）：有外国声明时缺 地址／邮政编码／代码 三件不判红，
+        #    只出一条未判注记；两支都要求的「名称或者姓名」缺了仍判红。
+        p, _ = draft('yield3', origin=ORIGIN,
+                     drop_items=(cir.address_field(''), cir.postal_field(''),
+                                 cir.credit_code_field('')))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        a5 = r25(r.stdout)
+        assert_(r.returncode == 0 and len(a5) == 1 and 'R25 未判' in a5[0]
+                and '外国' in a5[0] and not fired(r.stdout, 'R25'),
+                f'有外国声明时 R25 没有让位: {show(r)}', r)
+        # ⑤b 让位不能把两支都要求的那一件一起抹掉：有外国声明且「申请人」那栏还是占位时，
+        #     注记里必须点名 名称或者姓名，不能只留一条"让位"话术。
+        #     （`- 申请人：` 整行不在时 R25 本来就不适用——那是它自己的触发条，不是让位让的。）
+        p, _ = draft('name_ph', origin=ORIGIN, agent=AGENT,   # 代理那一栏照常填满——本档只管 R25 让位得对不对,
+                     applicant='【待填写：单位正式全称或个人姓名、信用代码】',
+                     drop_items=(cir.address_field(''), cir.postal_field(''),
+                                 cir.credit_code_field('')))
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        a5b = r25(r.stdout)
+        assert_(r.returncode == 0 and '名称或者姓名' in ' '.join(a5b)
+                and not fired(r.stdout, 'R25'),
+                f'让位把两支共同要求的名称那一件一起抹掉了: {show(r)}', r)
+
+        # ⑥ 文件名字轴：同样的行写进说明书那件必须静默
+        p, _ = draft('axis', origin=ORIGIN, agent=None, name='说明书_E2E.md')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        assert_(not fired(r.stdout) and not judged(r.stdout),
+                f'R32 轴放宽到说明书也判了: {show(r)}', r)
+
+        # ⑦ 门禁自报的覆盖区间要含到 R32
+        p, _ = draft('range', origin=ORIGIN)
+        r = run([PY, f'{S}/check_iron_rules.py',
+                 os.path.join(d, 'full', '02_申请文件', '请求书著录项_E2E.md')])
+        m = __import__('re').search(r'规则 R1–R(\d+)', r.stdout)
+        assert_(m and int(m.group(1)) >= 32,
+                f'门禁自报的区间没扩到 R32（读到的区间：{m.group(1) if m else "无"}）', None)
+
+        # ⑧ 两位申请人 ⇒ 不判红、出未判：指南 §6.1.1（txt:1144-1148）逐字只管两支
+        #    「单独申请专利和办理其他专利事务，或者作为代表人与其他申请人共同申请专利和办理
+        #     其他专利事务的，应当委托专利代理机构办理」，而底稿那一栏没写**哪一位**申请人是外国的，
+        #    外国主体是不是代表人分不出来 ⇒ 这一档判红是假红（与 R25 让位同一根轴、同一个理由）。
+        p, _ = draft('twoapps', origin=ORIGIN, agent=None,
+                     applicant=['Acme Inc.', '杭州某某科技有限公司'])
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        j8 = judged(r.stdout)
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(j8) == 1
+                and '两位' in j8[0] and '代表人' in j8[0],
+                f'两位申请人、外国主体是不是代表人分不出时，R32 没有走未判: {show(r)}', r)
+
+        # ⑨ 申请人那一栏还是占位 ⇒ 连有几个申请人都数不清 ⇒ 同样未判（不折成红也不折成绿）
+        p, _ = draft('app_ph', origin=ORIGIN, agent=None,
+                     applicant='【待填写：单位正式全称或个人姓名、信用代码】')
+        r = run([PY, f'{S}/check_iron_rules.py', p])
+        j9 = judged(r.stdout)
+        assert_(r.returncode == 0 and not fired(r.stdout) and len(j9) == 1
+                and '数不清' in j9[0],
+                f'申请人占位时 R32 没走未判: {show(r)}', r)
+
+        # ⑩ docx 通道：Word 面上声明了外国申请人却没写代理师那一行同样要被抓到
+        #    （本仓交付物有 .docx 那一份，md 与 Word 是两根读者面，只钉一根＝另一根没人核）。
+        try:
+            import docx
+        except ImportError:
+            print('  note R32 的 docx 通道档未跑（本机无 python-docx）')
+            SKIPPED.append('iron_r32_docx')
+        else:
+            for tag, with_agent, want_fire in (('docx_ok', True, False),
+                                               ('docx_red', False, True)):
+                pk = os.path.join(d, tag)
+                os.makedirs(os.path.join(pk, '02_申请文件'), exist_ok=True)
+                doc = docx.Document()
+                doc.add_paragraph(R16_TITLE)
+                doc.add_paragraph(cir.applicant_field('Acme Inc.').strip())
+                doc.add_paragraph(cir.foreign_applicant_field('美国（注册地：特拉华州）').strip())
+                if with_agent:
+                    doc.add_paragraph(cir.agent_field(
+                        '李四 资格证号码 110031234567 电话 0571-88886666').strip())
+                    for (label, w), v in zip(cir.agency_item_fields(),
+                                             ('杭州之江专利代理事务所', '33101234',
+                                              '110031234567', '0571-88886666')):
+                        doc.add_paragraph(w + v)
+                vp = os.path.join(pk, '02_申请文件', f'{cir.REQUEST_DRAFT_NAME}_E2E.docx')
+                doc.save(vp)
+                r = run([PY, f'{S}/check_iron_rules.py', vp])
+                g = fired(r.stdout)
+                if want_fire:
+                    assert_(r.returncode == 1 and len(g) == 1
+                            and '委托' in g[0].split('——')[0]
+                            and f'{cir.REQUEST_DRAFT_NAME}_E2E.docx' in g[0],
+                            f'Word 件上声明了外国申请人却没写代理师却未被抓到: {show(r)}', r)
+                else:
+                    assert_(not g and not judged(r.stdout),
+                            f'Word 件上委托写全了 R32 却还出声（假红）: {show(r)}', r)
+    print('PASS iron_r32 外国申请人须写委托代理（没声明不适用 + 国籍占位未判 + 委托齐静默 + '
+          '单独申请没委托点名带位点 + 代理师占位未判 + R25 让位（缺三件不判红只出注记）+ '
+          '让位不抹两支共同要求的名称 + 文件名字轴不误伤 + 两位申请人未判 + 申请人占位未判 + '
+          '自报区间含 R32 + docx 两极）')
+
+
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
 
@@ -7880,7 +8117,7 @@ if __name__ == '__main__':
              test_doc_line_pointers, test_iron_r16_spec_first_line, test_iron_r17_abstract_heading, test_iron_r18_abstract_names_title, test_iron_r19_title_across_docs, test_iron_r20_inventor_is_person, test_iron_r21_address_not_unit_name, test_iron_r22_r23_headcount_limits, test_iron_r24_representative_membership, test_iron_r25_applicant_bibliographic_set,
  test_iron_r26_priority_statement_set, test_iron_r27_divisional_parent_set,
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
- test_iron_r31_genetic_source_set,
+             test_iron_r31_genetic_source_set, test_iron_r32_foreign_applicant_agency,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
