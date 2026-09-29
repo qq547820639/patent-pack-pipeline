@@ -8367,6 +8367,97 @@ def test_iron_r34_sequence_listing_part():
           '编号与尾括注归一（阿拉伯／中文一式）+ 剥过头边界 + 自报区间含 R34 + docx 两极，共十三极）')
 
 
+def test_iron_head_num_prefix_one_source():
+    """按节判那一族的"标题前编号"许可收成一条 `HEAD_NUM`：中文编号一式在五个消费点各自必须开火。
+
+    第 64 轮只收了 `_head_split`／`head_names` 两处；`section_body()` 与 `doc_region()` 吃的是
+    **各写的节标题正则**（ABSTRACT／BRIEF_DESC／CLAIMS／BACKGROUND／SPEC_DOC／SPEC_IMPL_HEAD），
+    编号许可各写各的阿拉伯式。实测（生产骨架五节＋「说明书摘要」全改「一、」式）：同一份文件读出
+    `未找到摘要节，R17 未判、R18 未判`＋`背景技术节未找到，R9 未判`、`违规 0`——方向是**静默**
+    （各判点看不见），不是假红，所以这一档必须是开火档：同一批字节只换标题写法，判决一条不许少。
+    法源还是细则第二十条二款「并在说明书每一部分前面写明标题」——要的是标题，不是"不许有编号"。
+    """
+    base = (
+        '# 申请文件（说明书骨架）\n'
+        '## 说明书摘要\n本装置包括躯干框架。\n### 技术效果\n佩戴更稳。\n'
+        '## 权利要求书\n2. 根据权利要求 1 所述装置，其特征是设减振件（待确认：型号）。\n'
+        '## 背景技术\n现有技术 CN110404188A 公开了一种髋关节助力结构，与本案的区别在于载荷传递路径。\n'
+        '## 具体实施方式\n支架（3）通过弹性件与锁扣本体2连接。\n'
+        '## 图中标记说明\n| 标记 | 名称 | 所在图号 |\n|---|---|---|\n| 3 | 支架 | 1 |\n'
+        '## 简要说明\n本装置性价比极高，属于行业第一。\n')
+    WANT = ('R3', 'R9', 'R10', 'R12', 'R17')
+
+    def fired_codes(out):
+        return {m.group(1) for ln in out.splitlines()
+                for m in [re.match(r'\s*FAIL (R\d+) ', ln)] if m}
+
+    with tempfile.TemporaryDirectory() as d:
+        def w(name, text):
+            p = os.path.join(d, name)
+            open(p, 'w', encoding='utf8').write(text)
+            return run([PY, f'{S}/check_iron_rules.py', p])
+
+        # ⓪ 夹具自证：不带编号时五个消费点各开一条——这一档空转的话，后面全是假绿
+        r = w('无编号.md', base)
+        got = fired_codes(r.stdout)
+        assert_(set(WANT) <= got,
+                f'合订夹具本身没让五个消费点各开火（实开 {sorted(got)}），后面几档全是空转: {show(r)}', r)
+
+        # ① 中文编号一式：同一批字节只换标题写法，判决一条都不许退成"看不见"
+        cn = base
+        for a, b in (('## 说明书摘要', '## 一、说明书摘要'),
+                     ('## 权利要求书', '## 二、权利要求书'),
+                     ('## 背景技术', '## 三、背景技术'),
+                     ('## 具体实施方式', '## 五、具体实施方式'),
+                     ('## 简要说明', '## 一、简要说明')):
+            assert_(a in cn, f'合订夹具里没有标题行「{a}」，这一档空转', None)
+            cn = cn.replace(a, b, 1)
+        r = w('中文编号.md', cn)
+        got_cn = fired_codes(r.stdout)
+        miss = [c for c in WANT if c not in got_cn]
+        assert_(not miss,
+                f'五节标题写成「一、」式之后这些判点从开火退成看不见：{miss}'
+                f'（同一批字节只换了标题写法）: {show(r)}', r)
+
+        # ② 逐个点名常量：只换**那一个**标题、别的不动 ⇒ 红退了才归得到这一族的这一个
+        for head, code in (('## 说明书摘要', 'R17'), ('## 权利要求书', 'R3'),
+                           ('## 背景技术', 'R9'), ('## 具体实施方式', 'R12'),
+                           ('## 简要说明', 'R10')):
+            one = base.replace(head, '## 一、' + head[3:], 1)
+            assert_(one != base, f'只换「{head}」那一档没改动任何东西', None)
+            r = w('单换_%s.md' % code, one)
+            assert_(code in fired_codes(r.stdout),
+                    f'只把「{head}」写成「一、」式，{code} 就从开火退成看不见: {show(r)}', r)
+
+        # ③ 旧式不许丢：阿拉伯多级编号「2.1.1」照旧认（改写只加不减）
+        one = base.replace('## 背景技术', '### 2.1.1 背景技术', 1)
+        r = w('阿拉伯多级.md', one)
+        assert_('R9' in fired_codes(r.stdout),
+                f'「2.1.1 背景技术」这一式被改写弄丢了: {show(r)}', r)
+
+        # ④ 边界：中文数字**没有分隔符**时不许剥——「一背景技术」不是一个节名；
+        #    三态里它必须落在未判，不许折成静默合规，也不许把那个「一」吃掉判出假红。
+        one = base.replace('## 背景技术', '## 一背景技术', 1)
+        r = w('无分隔符.md', one)
+        assert_('R9' not in fired_codes(r.stdout) and '背景技术节未找到' in r.stdout,
+                f'「一背景技术」被当成背景技术节，或反过来把未判写成静默合规: {show(r)}', r)
+
+        # ⑤ 单源机械格：编号许可只许一处定义，六个按节判的节标题正则必须都引用它
+        _isrc = open(f'{S}/check_iron_rules.py', encoding='utf8').read()
+        _lits = [ln for ln in _isrc.splitlines() if ln.startswith('HEAD_NUM = ')]
+        assert_(len(_lits) == 1,
+                f'编号许可 `HEAD_NUM = ` 的定义有 {len(_lits)} 处，应当只有一处', None)
+        for c in ('ABSTRACT_HEAD', 'BRIEF_DESC_HEAD', 'CLAIMS_HEAD', 'BACKGROUND_HEAD',
+                  'SPEC_DOC_HEAD', 'SPEC_IMPL_HEAD'):
+            ln = [l for l in _isrc.splitlines() if l.startswith(c + ' = ')]
+            assert_(ln and 'HEAD_NUM' in ln[0],
+                    f'「{c}」没引用 HEAD_NUM（{ln[:1]}）——编号许可又回到各写各的，'
+                    f'一处改一处不改就是本轮那个病', None)
+
+    print('PASS 按节判那一族的标题编号许可（合订自证 + 五式各点一个常量 + 阿拉伯多级旧式不丢 '
+          '+ 无分隔符仍走未判 + 六个常量都引用 HEAD_NUM 单源）')
+
+
 def test_commit_rule_check_tool():
     """记账面：`scripts/commit_rule_check.py` 判"提交标题里的判据号是不是这次 diff 真新增的那一个"。
 
@@ -8537,6 +8628,7 @@ if __name__ == '__main__':
              test_iron_r28_deposit_particulars_set, test_iron_r29_request_document_lists, test_iron_r30_agency_particulars_set,
              test_iron_r31_genetic_source_set, test_iron_r32_foreign_applicant_agency,
              test_iron_r33_single_agency_only, test_iron_r34_sequence_listing_part,
+             test_iron_head_num_prefix_one_source,
              test_commit_rule_check_tool,
              test_check_figures_raster_three_state]
     # 分母自证：清单里漏掉一个已定义的 test_* 函数，就等于那档从没跑过却按通过上报
